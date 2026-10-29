@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# env files (keep the examples)
+.env
+.env.*
+.env.local
+!.env.example
+
+# local Claude Code settings
+.claude/
+
+# local platform folders
+.vercel/
+
+# build output
+.next/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# logs and OS files
+*.log
+Thumbs.db
+.DS_Store
+
+# Stage 4 parquet shards (never commit)
+scripts/import-positions/data/
+*.parquet

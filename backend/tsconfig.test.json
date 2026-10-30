@@ -1,0 +1,10 @@
+{
+  // Type-checks everything, tests and scripts included. Never emits; the build uses tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src", "scripts"],
+  "exclude": []
+}

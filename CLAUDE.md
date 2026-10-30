@@ -92,8 +92,9 @@ There is a **separate companion document**, `blunderprint-chat-companion.md`, fo
 | Chess logic | `chess.js` | PGN parsing, legal moves, FEN, on both the frontend and the backend. |
 | Engine | npm `stockfish` v19, **lite single-threaded** build (~1.7 MB) | Runs in a Web Worker with no COOP/COEP headers needed. The multi-threaded builds need cross-origin isolation, so don't use them. GPL-3.0: see gotchas. |
 | Backend | Node.js 22 LTS, Express, TypeScript (`tsx` for dev), `zod` for validation | Node 22.13+ is also needed by the MongoDB MCP server. |
+| TypeScript | **Pinned to 6.0.3** (exact version) in both `backend/` and `web/` | Not TS 7 for now: TS 7 is the new native (Go) compiler, and tools that use the TypeScript JS API, like Next's build-time type check, may not support it yet. |
 | Database | MongoDB Atlas M0 (free, 512 MB), **Mongoose** | Mongoose because MERN job ads expect it. Use `Model.aggregate()` for pipelines and `bulkWrite` for imports. |
-| AI | Google Gemini via `@google/genai` | Model from env `GEMINI_MODEL`. As of Oct 2026, `gemini-3.8-flash` is stable with function calling and structured output; `gemini-3.1-flash-lite` is the cheaper option. **Verify both before coding the agent.** |
+| AI | Google Gemini via `@google/genai` | Model from env `GEMINI_MODEL`. **Dev and the free demo use `gemini-3.5-flash-lite`:** on the free tier it gets 500 requests/day (15 RPM, 250K TPM), while `gemini-3.8-flash` gets only 20/day. Switch to `gemini-3.8-flash` at Stage 8 with the paid credit. Both were listed as stable on 30 Oct 2026. **Before Stage 5, verify that `gemini-3.5-flash-lite` supports function calling and structured output.** |
 | Tests | `node:test` (same style as Footnote), `mongodb-memory-server` for queue/DB tests | Check that mongodb-memory-server runs on my Windows machine in Stage 1. If not, use a separate test database. |
 | Hosting | Vercel (web), Render free web service (API) | The API sleeps after 15 minutes idle, so the UI must handle the wake-up (section 10). |
 | Dev tooling | Official MongoDB MCP server in **read-only** mode | Lets you inspect collections and explain plans safely. Setup is in the companion doc. |
@@ -303,6 +304,7 @@ All tools take the player from the server context, never from the model, so the 
 ### Loop (`agent/loop.ts`)
 1. A system prompt (versioned as `PROMPT_VERSION`) sets the job: find 3–5 **recurring** patterns. Every claim needs evidence (game IDs and plies) and a statistic taken from the tool results. Say "not enough data" instead of guessing.
 2. Gemini function calling: run tool calls, append the results, and repeat. Hard limits: **max 10 steps**, a total token budget, and a per-call timeout.
+   - **Rate limit:** the free tier allows 15 requests per minute for `gemini-3.5-flash-lite`. Pace model calls (at least 4 s apart, shared across all runs in the process) and back off on `429`, using Google's suggested retry delay when one is sent, while staying inside the step and token budget.
 3. The final answer uses **structured output** with this schema:
    ```
    patterns: [ { title, explanation, stat: { value, basis }, evidence: [ { gameId, ply } ], drill } ]
@@ -319,7 +321,7 @@ Follow-up questions use the same tools, capped at 6 steps, with the same evidenc
 
 ### Guards
 - Per-IP limits (hashed IP): e.g. 5 imports/hour, 3 reports/day, 20 questions/day.
-- Global daily AI call budget (`AI_DAILY_CALL_BUDGET`) and a kill switch (`AI_ENABLED=false`) that shows a friendly message.
+- Global daily AI call budget (`AI_DAILY_CALL_BUDGET`, default 400, under the 500/day free limit) and a kill switch (`AI_ENABLED=false`) that shows a friendly message.
 - Free-tier note: on the free tier Google may use prompts to improve its models. That's fine here, because all the data is public games.
 - When the budget runs out, show cached reports and an honest message. Never show a raw error.
 
@@ -402,9 +404,9 @@ Render's free API sleeps after 15 minutes. The first request can take up to abou
 ```
 MONGODB_URI=            # Atlas connection string (app user, readWrite on the app DB only)
 GEMINI_API_KEY=
-GEMINI_MODEL=           # verify current; e.g. gemini-3.8-flash
+GEMINI_MODEL=           # gemini-3.5-flash-lite (dev + free demo); gemini-3.8-flash from Stage 8
 AI_ENABLED=true
-AI_DAILY_CALL_BUDGET=   # e.g. 300
+AI_DAILY_CALL_BUDGET=400
 CORS_ORIGINS=           # optional extra origins
 TRUST_PROXY_HOPS=       # 3 on Render, unset locally
 CONTACT_EMAIL=          # used in the User-Agent for Chess.com/Lichess
@@ -453,7 +455,8 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 
 ## 17. Known gotchas
 
-- **Gemini model names** get deprecated faster than published dates suggest. `gemini-3.5-flash` was retired on 8 Oct 2026. Keep the model in env and verify it before Stage 5.
+- **Gemini model names** get deprecated faster than published dates suggest. `gemini-3.5-flash` was retired on 8 Oct 2026. Keep the model in env and verify it before Stage 5. Don't confuse the retired `gemini-3.5-flash` with `gemini-3.5-flash-lite` (current; no shutdown date announced as of 30 Oct 2026). `gemini-3.1-flash-lite` shuts down on 7 May 2027.
+- Next 16: check node_modules/next/dist/docs/ for version-matched API docs before using Next APIs.
 - **Stockfish:** use the *lite single-threaded* build. The multi-threaded builds need `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers, which would also break other things on the page. Serve `.wasm` with the `application/wasm` MIME type, from `web/public/engine/`.
 - **Chess.com:** serial requests only; 12–24 h data delay; skip variants; don't copy their visual assets.
 - **Lichess:** one request at a time globally; wait 60 s on 429; verify parameter names in the official docs.

@@ -49,7 +49,9 @@ const envSchema = z.object({
   GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
   AI_ENABLED: z.stringbool().default(true),
   AI_DAILY_CALL_BUDGET: z.coerce.number().int().nonnegative().default(400),
-  CONTACT_EMAIL: z.string().optional(),
+  // Goes in the User-Agent of every Chess.com / Lichess request, so they can reach us
+  // instead of blocking us. Required: the importers must not run without it.
+  CONTACT_EMAIL: z.email(),
   MAX_GAMES_PER_PLAYER: z.coerce.number().int().positive().default(200),
   DEMO_PLAYERS: z.string().default(""),
   PORT: z.coerce.number().int().positive().default(5000),

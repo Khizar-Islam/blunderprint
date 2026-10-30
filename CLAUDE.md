@@ -172,7 +172,11 @@ Field names in camelCase. Every collection gets `createdAt`/`updatedAt` unless n
   importState: "idle"|"importing"|"ready"|"failed", lastImportedAt,
   gamesCount, analysedCount,
   summary: { ...precomputed aggregates for the dashboard... }, summaryVersion,
-  lastViewedAt }          // used by the storage guard (LRU eviction)
+  lastViewedAt,           // used by the storage guard (LRU eviction)
+  importMeta: {           // what a re-import needs to fetch only what's new
+    monthEtags: { "YYYY/MM": etag },  // Chess.com month ETags; a 304 means that month is unchanged
+    newestGameAt } }      // newest stored game in platform time (Chess.com end_time, Lichess createdAt,
+                          // because Lichess's `since` filters on createdAt); set only when an import finishes
 ```
 Indexes: unique `{ platform, usernameLower }`; `{ lastViewedAt: 1 }`.
 
@@ -193,7 +197,10 @@ Indexes: unique `{ platform, usernameLower }`; `{ lastViewedAt: 1 }`.
     accuracy? }
   features: { mistakes: [ { ply, kind, phase, winDrop, clockLeft?, square?, pieceLost?, fen } ] } }
 ```
-Indexes: unique `{ platform, sourceId }` (idempotent import); `{ playerId, playedAt: -1 }` (cursor pagination); `{ playerId, "analysis.status": 1 }` (work claiming); `{ playerId, "opening.eco": 1 }`.
+Indexes:
+- unique `{ playerId, sourceId }` (idempotent import). Keyed by player, not `{ platform, sourceId }`: if two players we track played each other, the game is stored once per player, because `color` and `result` are per player. With `{ platform, sourceId }` the second import would overwrite the first player's copy.
+- `{ playerId, playedAt: -1, _id: -1 }` (cursor pagination). `_id` breaks ties between games with the same `playedAt`, so the index alone gives the full sort order (no in-memory sort).
+- `{ playerId, "analysis.status": 1 }` (work claiming); `{ playerId, "opening.eco": 1 }`.
 Keep only the **most recent N games per player** (env `MAX_GAMES_PER_PLAYER`, default 200).
 
 ### jobs (the queue)
@@ -201,7 +208,9 @@ Keep only the **most recent N games per player** (env `MAX_GAMES_PER_PLAYER`, de
 { _id, type: "import"|"extract"|"aggregate"|"report", key (idempotency key, e.g. "import:chesscom:hikaru"),
   payload, status: "queued"|"running"|"done"|"failed",
   attempts, maxAttempts, runAfter, leaseUntil, workerId,
-  progress: { done, total, message }, error? }
+  progress: { done, total, message },
+  checkpoint?,           // handler's resume point, e.g. Chess.com months done / oldest Lichess createdAt
+  error? }               // { code, message }, safe to show the user
 ```
 Indexes: `{ status: 1, runAfter: 1 }`; unique partial index on `key` where status is queued or running, so the same job can't be queued twice.
 
@@ -243,9 +252,11 @@ A **storage guard** job runs after imports. It reads `dbStats`, and over the thr
 ### 8.1 Import (job `import`)
 1. Validate the username (platform's allowed characters and length) and confirm the player exists.
 2. Fetch games newest-first, serially, until `MAX_GAMES_PER_PLAYER` is reached. Report progress after each month or chunk.
-3. Upsert each game by `{ platform, sourceId }`: this is idempotent, so re-imports never duplicate.
+   - **Chess.com:** re-imports send `If-None-Match` with the stored **month** ETag (a 304 skips the month) and stop at the newest stored game's month. The archive *list* gets no ETag: a 304 there wouldn't mean "no new games", because the current month can still change. In a busy month (1,000+ games), cheap checks run first and chess.js replays only the newest games still needed, yielding to the event loop every 10 games, so `/api/health`, SSE and lease renewal keep running.
+   - **Lichess:** plies are counted from the export's `moves` field (SAN moves separated by spaces) instead of replaying the PGN with chess.js (~25 ms a game). Batches are stored in the background while the stream keeps flowing, so a slow DB write never trips the stream's idle timeout.
+3. Upsert each game by `{ playerId, sourceId }`: this is idempotent, so re-imports never duplicate. `analysis` is written only on insert, so a re-import never wipes evals.
 4. Set `analysis.status` to `imported` when Lichess evals came with the game, otherwise `pending`.
-5. Enqueue `extract` for games that already have evals, and update `players.importState`.
+5. Update `players.importState`. Enqueuing `extract` for games that already have evals waits until Stage 3, when the `extract` handler exists (until then those jobs would fail as an unknown type).
 6. Errors: on 404 the user doesn't exist (fail cleanly); on 429 back off (Lichess: 60 s); network errors retry with exponential backoff up to `maxAttempts`.
 
 ### 8.2 Browser engine analysis

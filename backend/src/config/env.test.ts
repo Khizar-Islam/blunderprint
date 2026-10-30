@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { loadEnv, parseCorsOrigins, parseTrustProxyHops } from "./env.js";
 
 const VALID_URI = "mongodb+srv://user:pass@example.mongodb.net/blunderprint";
+const BASE = { MONGODB_URI: VALID_URI, CONTACT_EMAIL: "dev@example.com" };
 
 test("parseTrustProxyHops accepts whole numbers 0 to 5", () => {
   for (const raw of ["0", "3", "5", " 3 "]) {
@@ -41,16 +42,21 @@ test("loadEnv fails without MONGODB_URI and names the variable", () => {
   assert.throws(() => loadEnv({}), /MONGODB_URI/);
 });
 
+test("loadEnv requires a valid CONTACT_EMAIL", () => {
+  assert.throws(() => loadEnv({ MONGODB_URI: VALID_URI }), /CONTACT_EMAIL/);
+  assert.throws(() => loadEnv({ ...BASE, CONTACT_EMAIL: "not-an-email" }), /CONTACT_EMAIL/);
+});
+
 test("loadEnv does not echo values in its error", () => {
   const secret = "not-a-uri-secret-value";
   assert.throws(
-    () => loadEnv({ MONGODB_URI: secret }),
+    () => loadEnv({ ...BASE, MONGODB_URI: secret }),
     (err: Error) => err.message.includes("MONGODB_URI") && !err.message.includes(secret),
   );
 });
 
 test("loadEnv applies defaults and treats blank values as unset", () => {
-  const env = loadEnv({ MONGODB_URI: VALID_URI, PORT: "", TRUST_PROXY_HOPS: "" });
+  const env = loadEnv({ ...BASE, PORT: "", TRUST_PROXY_HOPS: "" });
   assert.equal(env.PORT, 5000);
   assert.equal(env.GEMINI_MODEL, "gemini-3.5-flash-lite");
   assert.equal(env.AI_ENABLED, true);
@@ -63,7 +69,7 @@ test("loadEnv applies defaults and treats blank values as unset", () => {
 
 test("loadEnv parses booleans, numbers and extra CORS origins", () => {
   const env = loadEnv({
-    MONGODB_URI: VALID_URI,
+    ...BASE,
     AI_ENABLED: "false",
     PORT: "8080",
     TRUST_PROXY_HOPS: "3",

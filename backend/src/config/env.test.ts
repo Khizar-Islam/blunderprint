@@ -57,7 +57,7 @@ test("loadEnv applies defaults and treats blank values as unset", () => {
   assert.equal(env.AI_DAILY_CALL_BUDGET, 400);
   assert.equal(env.MAX_GAMES_PER_PLAYER, 200);
   assert.equal(env.TRUST_PROXY_HOPS, 0);
-  assert.deepEqual(env.corsOrigins, ["http://localhost:3000"]);
+  assert.deepEqual(env.corsOrigins, ["http://localhost:3000", "https://blunderprint.vercel.app"]);
   assert.equal(env.isRender, false);
 });
 
@@ -73,6 +73,10 @@ test("loadEnv parses booleans, numbers and extra CORS origins", () => {
   assert.equal(env.AI_ENABLED, false);
   assert.equal(env.PORT, 8080);
   assert.equal(env.TRUST_PROXY_HOPS, 3);
-  assert.deepEqual(env.corsOrigins, ["http://localhost:3000", "https://blunderprint.example.com"]);
+  assert.deepEqual(env.corsOrigins, [
+    "http://localhost:3000",
+    "https://blunderprint.vercel.app",
+    "https://blunderprint.example.com",
+  ]);
   assert.equal(env.isRender, true);
 });

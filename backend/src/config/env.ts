@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { logger } from "../lib/logger.js";
 
-// Origins that are always allowed. The live Vercel URL is added after the first deploy.
-export const FIXED_CORS_ORIGINS = ["http://localhost:3000"];
+// Origins that are always allowed: local dev and the live Vercel production domain.
+// Vercel preview URLs are not included; add one temporarily via CORS_ORIGINS if needed.
+export const FIXED_CORS_ORIGINS = ["http://localhost:3000", "https://blunderprint.vercel.app"];
 
 const MAX_TRUST_PROXY_HOPS = 5;
 

@@ -132,6 +132,22 @@ test("streamLines reassembles lines (and UTF-8 characters) split across chunks",
   assert.deepEqual(lines, [{ a: 1 }, { a: 2 }, { name: "Café" }, { a: 3 }]);
 });
 
+test("streamLines can POST a text body (Lichess export by IDs); GET is the default", async () => {
+  const { fetch, calls } = recordingFetch(() => chunkedResponse(['{"id":"a"}\n']));
+  const client = createPoliteClient({ name: "Test", userAgent: UA, rateLimitWaitsMs: [1], fetch });
+  await client.streamLines("https://x.test/ids", () => {}, {
+    method: "POST",
+    body: "a,b,c",
+    headers: { "Content-Type": "text/plain" },
+  });
+  await client.streamLines("https://x.test/s", () => {});
+  assert.equal(calls[0]!.method, "POST");
+  assert.equal(calls[0]!.body, "a,b,c");
+  assert.equal(calls[0]!.headers["Content-Type"], "text/plain");
+  assert.equal(calls[1]!.method, "GET");
+  assert.equal(calls[1]!.body, undefined);
+});
+
 test("streamLines keeps the site locked until the stream is fully read", async () => {
   const order: string[] = [];
   const { fetch } = recordingFetch((url) => (url.endsWith("/s") ? chunkedResponse(["1\n", "2\n"]) : jsonResponse({})));

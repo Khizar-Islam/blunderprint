@@ -1,7 +1,7 @@
 // Small games shaped like real API responses (checked against live Chess.com and Lichess
 // data on 30 Oct 2026), trimmed to what the importers read.
 import type { ChessComGame } from "../src/importers/chesscom.js";
-import type { LichessGame } from "../src/importers/lichess.js";
+import type { LichessGame, LichessMoveAnalysis } from "../src/importers/lichess.js";
 
 // Scholar's mate: 7 plies.
 const MOVES_CLK =
@@ -72,5 +72,14 @@ export function lichessGame(overrides: Partial<LichessGame> = {}): LichessGame {
   };
 }
 
-// One eval per ply (7), White's point of view, ending in mate.
-export const LICHESS_ANALYSIS = [{ eval: 30 }, { eval: 30 }, { eval: 10 }, { eval: 20 }, { eval: 10 }, { mate: 1 }, { mate: 0 }];
+// One eval per ply (7), White's point of view, ending in mate. Black's 3...Nf6?? allows mate
+// in one, which Lichess judges as a blunder and names the move that should have been played.
+export const LICHESS_ANALYSIS: LichessMoveAnalysis[] = [
+  { eval: 30 },
+  { eval: 30 },
+  { eval: 10 },
+  { eval: 20 },
+  { eval: 10 },
+  { mate: 1, best: "g7g6", judgment: { name: "Blunder", comment: "Checkmate is now unavoidable. g6 was best." } },
+  { mate: 0 },
+];

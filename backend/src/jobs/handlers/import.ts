@@ -1,4 +1,5 @@
 import type { Types } from "mongoose";
+import { averageAccuracy, classifyGame } from "../../chess/classify.js";
 import { Game } from "../../db/models/game.js";
 import type { JobDoc } from "../../db/models/job.js";
 import { Player, type Platform } from "../../db/models/player.js";
@@ -21,13 +22,13 @@ export const importJobKey = (platform: Platform, username: string) => `import:${
 export async function upsertGames(playerId: Types.ObjectId, platform: Platform, games: NormalizedGame[]): Promise<void> {
   if (games.length === 0) return;
   await Game.bulkWrite(
-    games.map(({ evals, ...game }) => ({
+    games.map(({ evals, judgments, best, ...game }) => ({
       updateOne: {
         filter: { playerId, sourceId: game.sourceId },
         update: {
           $set: { ...game, playerId, platform },
           $setOnInsert: {
-            analysis: evals ? { status: "imported", evals } : { status: "pending" },
+            analysis: evals ? importedAnalysis({ evals, judgments, best, color: game.color }) : { status: "pending" },
           },
         },
         upsert: true,
@@ -35,6 +36,24 @@ export async function upsertGames(playerId: Types.ObjectId, platform: Platform, 
     })),
     { ordered: false },
   );
+}
+
+// The analysis of a game that came with the platform's own evals (Lichess). Classifying here is
+// pure maths (microseconds a game), so it's fine inside the import even on Render's CPU.
+export function importedAnalysis({
+  evals,
+  judgments,
+  best,
+  color,
+}: Required<Pick<NormalizedGame, "evals">> & Pick<NormalizedGame, "judgments" | "best" | "color">) {
+  return {
+    status: "imported" as const,
+    evals,
+    // Lichess's own labels when it sent them (see ClassifyInput.judgments for why), otherwise our formula.
+    classifications: classifyGame({ evals, judgments }),
+    ...(best?.some((b) => b !== null) ? { best } : {}),
+    accuracy: averageAccuracy(evals, color),
+  };
 }
 
 // Keep only the newest maxGames for this player (MAX_GAMES_PER_PLAYER), so storage stays bounded.

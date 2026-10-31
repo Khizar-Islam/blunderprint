@@ -198,11 +198,14 @@ Indexes: unique `{ platform, usernameLower }`; `{ lastViewedAt: 1 }`.
   clocks?: [number],         // seconds remaining per ply, when available
   opening: { eco, name, ply }  // deepest matching named position
   analysis: {
-    status: "pending"|"claimed"|"done"|"imported",  // imported = came with Lichess evals
+    status: "pending"|"claimed"|"done"|"imported"|"unanalysable",  // imported = came with Lichess evals;
+                                                    // unanalysable = the browser couldn't replay the PGN
     claimedBy?, claimExpiresAt?, engine: "sf19-lite", depthOrNodes,
-    evals: [ { cp?: number, mate?: number } ],      // per ply, from White's view
+    evals: [ { cp?: number, mate?: number } ],      // per ply, from White's view; { mate: 0 } = side to move is mated
+    best?: [ uci|null ],                            // engine's best move before each ply (Lichess: judged plies only)
     classifications: [ "best"|"good"|"inaccuracy"|"mistake"|"blunder" ],
-    accuracy? }
+    accuracy?,                                      // average move accuracy of the imported player
+    durationMs?, analysedAt?, error?: { code: "illegal_pgn"|"ply_mismatch", atPly? } }
   features: { mistakes: [ { ply, kind, phase, winDrop, clockLeft?, square?, pieceLost?, fen } ] } }
 ```
 Indexes:
@@ -271,11 +274,11 @@ A **storage guard** job runs after imports. It reads `dbStats`, and over the thr
 6. Errors: on 404 the user doesn't exist (fail cleanly); on 429 back off (Lichess: 60 s); network errors retry with exponential backoff up to `maxAttempts`.
 
 ### 8.2 Browser engine analysis
-1. The web app asks `GET /api/analysis/claim?player=...` and receives up to K pending games (K≈3). The server marks them `claimed` with a 10-minute `claimExpiresAt`.
+1. The web app asks `POST /api/analysis/claim { platform, username, prefer? }` (POST, not GET: it changes data, and a GET can be prefetched or retried by the browser) and receives up to K pending games (K=3), newest first, with `prefer` first. The server marks them `claimed` by a random claim token with a 10-minute `claimExpiresAt`.
 2. The engine runs in 1–2 Web Workers (based on `navigator.hardwareConcurrency`). It evaluates the position after every ply with a fixed **node or time budget**, not unbounded depth, so the time per game is predictable. **Measure in Stage 2** and pick settings that keep a typical game under about 15 seconds.
-3. It posts `POST /api/analysis/results` with per-ply evals. The server validates the eval count against the plies, bounded values, and that the claim is still valid. It then classifies the moves, stores the result, and enqueues `extract`.
-4. Expired claims go back to `pending`, so a closed tab never loses work. Anyone viewing the player later continues the analysis.
-5. **Classification:** convert centipawns to win% the way Lichess does, then classify by the size of the win% drop (inaccuracy, mistake, blunder). **Read the exact formula and thresholds from Lichess's open-source code before implementing,** and cite it in a comment. Handle mate scores explicitly.
+3. It posts `POST /api/analysis/results` with per-ply evals, best moves and played moves (UCI). The server validates the counts against the stored plies, the bounds, and that the game is still claimed by this token (a reclaim changes the token, so a late result from an old tab gets 409; a repeat from the same claim gets 200). It then classifies the moves and stores the result. Enqueuing `extract` waits for Stage 3. If chess.js can't replay the PGN (or replays a different number of plies), the browser reports `illegal_pgn`/`ply_mismatch` and the game becomes `unanalysable`.
+4. Expired claims are claimable again, so a closed tab never loses work. Anyone viewing the player later continues the analysis. On `pagehide` the browser also sends `POST /api/analysis/release` with `navigator.sendBeacon` (a text/plain body, parsed by the route's own `express.text`) so its unfinished games go back at once.
+5. **Classification** (`chess/classify.ts`, ported from lila's `Advice.scala` and scalachess's `WinPercent`, with sources cited there): win chances `2/(1+e^(−0.00368208·cp))−1`; a drop of ≥ 0.1 / 0.2 / 0.3 is an inaccuracy / mistake / blunder; mate transitions follow lila's `MateAdvice`; ply 1 is judged against +15 cp; the engine's own best move is `best` and never judged. Imported Lichess games keep **Lichess's own judgements** (it skips moves that were the engine's best, which its export doesn't fully name). On 276 real games our formula matched all 3,212 of Lichess's judgements and added 65 extras.
 
 ### 8.3 Feature extraction (job `extract`) and aggregation (job `aggregate`)
 - **Per game:**
@@ -357,8 +360,9 @@ POST /api/players/:platform/:username/import       → 202 { jobId } or 200 { up
 GET  /api/players/:platform/:username              → { player, activeJob } (player: profile + importState + counts + summary)
 GET  /api/players/:platform/:username/games        → cursor pagination (?cursor=&limit=&speed=&color=&result=)
 GET  /api/games/:id                                → game + analysis + features
-GET  /api/analysis/claim?platform=&username=       → up to K games to analyse (leases)
-POST /api/analysis/results                         → evals for claimed games (validated, idempotent)
+POST /api/analysis/claim                           → { claimId, expiresAt, games } up to K games to analyse (leases)
+POST /api/analysis/results                         → evals for one claimed game (validated, idempotent)
+POST /api/analysis/release                         → hand unfinished claimed games back (sendBeacon, text/plain)
 GET  /api/positions/stats?fen=&band=               → positionStats lookup
 POST /api/players/:platform/:username/report       → { runId } or { cached report }
 POST /api/players/:platform/:username/ask          → { runId }

@@ -1,4 +1,5 @@
 import { Chess } from "chess.js";
+import type { Judgement } from "../chess/classify.js";
 import type { Color, Result, Speed } from "../db/models/game.js";
 
 // A game as both importers hand it to the import job, already from the player's point of view.
@@ -19,6 +20,10 @@ export interface NormalizedGame {
   opening?: { eco?: string; name?: string; ply?: number };
   // Only set when the platform already analysed the game (Lichess): stored as "imported".
   evals?: { cp?: number; mate?: number }[];
+  // With evals: the platform's own judgement per ply (null = none) and best move per ply
+  // (null = not given). Lichess names the best move only on judged plies.
+  judgments?: (Judgement | null)[];
+  best?: (string | null)[];
 }
 
 export interface PlayerProfile {

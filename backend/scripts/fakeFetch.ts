@@ -4,6 +4,8 @@ export interface RecordedCall {
   url: string;
   headers: Record<string, string>;
   signal?: AbortSignal;
+  method?: string;
+  body?: string;
 }
 
 // A fetch stand-in for tests: records every call and answers with whatever respond returns.
@@ -12,7 +14,13 @@ export function recordingFetch(
 ) {
   const calls: RecordedCall[] = [];
   const fetch: FetchFn = async (url, init) => {
-    calls.push({ url, headers: (init.headers ?? {}) as Record<string, string>, signal: init.signal ?? undefined });
+    calls.push({
+      url,
+      headers: (init.headers ?? {}) as Record<string, string>,
+      signal: init.signal ?? undefined,
+      method: init.method,
+      body: typeof init.body === "string" ? init.body : undefined,
+    });
     return respond(url, calls.length - 1, init.signal ?? undefined);
   };
   return { fetch, calls };

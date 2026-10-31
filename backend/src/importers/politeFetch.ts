@@ -28,6 +28,9 @@ export interface JsonResult<T> {
 interface RequestOptions {
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  // GET unless set. Lichess's "export games by IDs" is a POST with the ids as a text body.
+  method?: "GET" | "POST";
+  body?: string;
 }
 
 // A client for one external site that sends one request at a time, process-wide.
@@ -65,7 +68,9 @@ export function createPoliteClient({
       let res: Response;
       try {
         res = await fetch(url, {
+          method: options.method ?? "GET",
           headers: { "User-Agent": userAgent, ...options.headers },
+          body: options.body,
           signal: attemptSignal(),
         });
       } catch (err) {

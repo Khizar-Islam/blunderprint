@@ -115,6 +115,12 @@ test("Lichess games that come with evals are stored as imported", async () => {
   assert.equal(stored!.platform, "lichess");
   assert.equal(stored!.analysis?.status, "imported");
   assert.equal(stored!.analysis?.evals?.length, 7);
+  // Classified at import with Lichess's own judgements: only Black's 3...Nf6?? is judged.
+  assert.deepEqual(stored!.analysis?.classifications, ["good", "good", "good", "good", "good", "blunder", "good"]);
+  assert.deepEqual(stored!.analysis?.best, [null, null, null, null, null, "g7g6", null]);
+  // White (alice): 1.e4 and 4.Qxf7# lose nothing (100 each); 2.Qh5 (30 → 10 cp) and 3.Bc4
+  // (20 → 10 cp) give up a little each, so the average is just under 100.
+  assert.equal(stored!.analysis?.accuracy, 97.5);
   assert.equal((await Player.findOne().lean())!.analysedCount, 1);
 });
 

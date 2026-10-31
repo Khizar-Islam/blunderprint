@@ -1,3 +1,4 @@
+import type { Judgement } from "../chess/classify.js";
 import type { Speed } from "../db/models/game.js";
 import { countPlies, type ImportBatch, type Importer, type NormalizedGame } from "./normalize.js";
 import type { PoliteClient } from "./politeFetch.js";
@@ -46,8 +47,35 @@ export interface LichessGame {
   // plies; entry i is the clock after ply i + 1, so we keep the first `plies` entries.
   clocks?: number[];
   opening?: { eco: string; name: string; ply: number };
-  // One entry per ply when Lichess analysed the game, from White's point of view.
-  analysis?: { eval?: number; mate?: number }[];
+  // One entry per ply when Lichess analysed the game, from White's point of view. Entry i is
+  // the eval after ply i + 1; when Lichess judged that move, `judgment` says how bad it was and
+  // `best` is the move it should have been (UCI). Schema: GameMoveAnalysis in lichess-org/api.
+  analysis?: LichessMoveAnalysis[];
+}
+
+export interface LichessMoveAnalysis {
+  eval?: number;
+  mate?: number;
+  best?: string;
+  judgment?: { name: "Inaccuracy" | "Mistake" | "Blunder"; comment?: string };
+}
+
+const JUDGEMENTS: Record<string, Judgement> = { Inaccuracy: "inaccuracy", Mistake: "mistake", Blunder: "blunder" };
+
+// Lichess's analysis array → our evals, judgements and best moves. undefined unless there's a
+// usable eval for every ply: otherwise the game goes to our own engine like any other.
+export function parseLichessAnalysis(
+  analysis: LichessMoveAnalysis[] | undefined,
+  plies: number,
+): Pick<NormalizedGame, "evals" | "judgments" | "best"> | undefined {
+  if (!analysis || analysis.length !== plies || !analysis.every((a) => a.eval !== undefined || a.mate !== undefined)) {
+    return undefined;
+  }
+  return {
+    evals: analysis.map((a) => (a.mate !== undefined ? { mate: a.mate } : { cp: a.eval })),
+    judgments: analysis.map((a) => (a.judgment ? (JUDGEMENTS[a.judgment.name] ?? null) : null)),
+    best: analysis.map((a) => a.best ?? null),
+  };
 }
 
 export interface LichessCheckpoint {
@@ -70,14 +98,6 @@ export function normalizeLichessGame(game: LichessGame, usernameLower: string): 
   const plies = game.moves !== undefined ? game.moves.split(" ").filter(Boolean).length : countPlies(game.pgn);
   if (plies === null || plies < 2) return null;
 
-  // Only trust Lichess's evals when there's a usable one for every ply. Otherwise the game
-  // goes to our own engine like any other.
-  const analysis = game.analysis;
-  const evals =
-    analysis && analysis.length === plies && analysis.every((a) => a.eval !== undefined || a.mate !== undefined)
-      ? analysis.map((a) => (a.mate !== undefined ? { mate: a.mate } : { cp: a.eval }))
-      : undefined;
-
   return {
     sourceId: game.id,
     playedAt: new Date(game.lastMoveAt),
@@ -97,7 +117,7 @@ export function normalizeLichessGame(game: LichessGame, usernameLower: string): 
     plies,
     clocks: game.clocks && game.clocks.length >= plies ? game.clocks.slice(0, plies).map((cs) => cs / 100) : undefined,
     opening: game.opening ? { eco: game.opening.eco, name: game.opening.name, ply: game.opening.ply } : undefined,
-    evals,
+    ...parseLichessAnalysis(game.analysis, plies),
   };
 }
 

@@ -16,6 +16,9 @@ test("normalizes a game, converting clocks from centiseconds and keeping Lichess
   assert.equal(game.plies, 7);
   assert.deepEqual(game.clocks, [180.03, 180.03, 178, 177, 175, 170, 174]);
   assert.deepEqual(game.evals, [{ cp: 30 }, { cp: 30 }, { cp: 10 }, { cp: 20 }, { cp: 10 }, { mate: 1 }, { mate: 0 }]);
+  // Lichess's own judgement and best move ride along, one entry per ply.
+  assert.deepEqual(game.judgments, [null, null, null, null, null, "blunder", null]);
+  assert.deepEqual(game.best, [null, null, null, null, null, "g7g6", null]);
   assert.deepEqual(game.opening, { eco: "C20", name: "King's Pawn Game: Wayward Queen Attack", ply: 3 });
   assert.equal(game.playedAt.toISOString(), "2026-10-15T12:05:00.000Z");
 
@@ -44,7 +47,9 @@ test("no winner is a draw; correspondence is daily; AI opponents get a name", ()
 });
 
 test("only trusts evals when there's one for every ply", () => {
-  assert.equal(normalizeLichessGame(lichessGame({ analysis: LICHESS_ANALYSIS.slice(1) }), "alice")!.evals, undefined);
+  const short = normalizeLichessGame(lichessGame({ analysis: LICHESS_ANALYSIS.slice(1) }), "alice")!;
+  assert.equal(short.evals, undefined);
+  assert.equal(short.judgments, undefined);
   const gap = [...LICHESS_ANALYSIS.slice(0, 6), {}];
   assert.equal(normalizeLichessGame(lichessGame({ analysis: gap }), "alice")!.evals, undefined);
 });

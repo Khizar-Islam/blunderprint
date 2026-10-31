@@ -3,6 +3,8 @@ import express, { type Express } from "express";
 import type { Queue } from "./jobs/queue.js";
 import { apiNotFound, errorHandler } from "./middleware/errorHandler.js";
 import { requestId } from "./middleware/requestId.js";
+import { analysisRouter, type AnalysisRouterOptions } from "./routes/analysis.js";
+import { gamesRouter } from "./routes/games.js";
 import { healthRouter } from "./routes/health.js";
 import { jobsRouter } from "./routes/jobs.js";
 import { playersRouter } from "./routes/players.js";
@@ -16,6 +18,7 @@ export interface AppOptions {
   // Tests shorten these.
   healthCacheMs?: number;
   sseHeartbeatMs?: number;
+  analysis?: AnalysisRouterOptions;
 }
 
 // Builds the Express app without starting it, so tests can run it on a random port.
@@ -28,6 +31,7 @@ export function createApp({
   version,
   healthCacheMs,
   sseHeartbeatMs,
+  analysis,
 }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -53,6 +57,8 @@ export function createApp({
   app.use("/api", healthRouter({ getDbStatus, getQueueDepth: () => queue.depth(), version, cacheMs: healthCacheMs }));
   app.use("/api", playersRouter({ queue }));
   app.use("/api", jobsRouter({ heartbeatMs: sseHeartbeatMs }));
+  app.use("/api", gamesRouter());
+  app.use("/api", analysisRouter(analysis));
 
   // 6. Unknown /api routes → 404 JSON, then the error handler last.
   app.use("/api", apiNotFound);

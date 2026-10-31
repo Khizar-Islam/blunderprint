@@ -252,8 +252,11 @@ A **storage guard** job runs after imports. It reads `dbStats`, and over the thr
 ### 8.1 Import (job `import`)
 1. Validate the username (platform's allowed characters and length) and confirm the player exists.
 2. Fetch games newest-first, serially, until `MAX_GAMES_PER_PLAYER` is reached. Report progress after each month or chunk.
-   - **Chess.com:** re-imports send `If-None-Match` with the stored **month** ETag (a 304 skips the month) and stop at the newest stored game's month. The archive *list* gets no ETag: a 304 there wouldn't mean "no new games", because the current month can still change. In a busy month (1,000+ games), cheap checks run first and chess.js replays only the newest games still needed, yielding to the event loop every 10 games, so `/api/health`, SSE and lease renewal keep running.
-   - **Lichess:** plies are counted from the export's `moves` field (SAN moves separated by spaces) instead of replaying the PGN with chess.js (~25 ms a game). Batches are stored in the background while the stream keeps flowing, so a slow DB write never trips the stream's idle timeout.
+   - **Chess.com:** re-imports send `If-None-Match` with the stored **month** ETag (a 304 skips the month) and stop at the newest stored game's month. The archive *list* gets no ETag: a 304 there wouldn't mean "no new games", because the current month can still change. In a busy month (1,000+ games), cheap checks run first and only the newest games still needed are normalized.
+     - **Plies are counted from the PGN text, not by replaying it with chess.js** (`countPliesFromText`: strip headers, comments, variations, move numbers, NAGs and the result, then count the SAN tokens; anything that isn't SAN-shaped rejects the game). On a real 212-game month it agreed with chess.js on every game. Legality isn't checked here: Stage 2's browser engine replays every game, and the server checks the eval count against `plies`.
+     - **Why:** chess.js cost ~8 ms a game on my laptop but **~110–160 ms a game on Render's free CPU**, so a busy month blocked the event loop for seconds (`/api/health` up to **1.3 s** server-side, 9.4 s end to end). With the text count it's **~2 ms a game on Render** (374-game month: 0.4 s instead of ~13 s) and `/api/health` stayed under **27 ms** during processing.
+     - **Safety net:** the loop yields to the event loop once **~50 ms** have passed (time-based, not every N games, because the cost per game differs so much between machines), so `/api/health`, SSE and lease renewal keep running.
+   - **Lichess:** plies are counted from the export's `moves` field (SAN moves separated by spaces) instead of replaying the PGN with chess.js (measured: ~8 ms a game on my laptop, ~110–160 ms on Render). Batches are stored in the background while the stream keeps flowing, so a slow DB write never trips the stream's idle timeout.
 3. Upsert each game by `{ playerId, sourceId }`: this is idempotent, so re-imports never duplicate. `analysis` is written only on insert, so a re-import never wipes evals.
 4. Set `analysis.status` to `imported` when Lichess evals came with the game, otherwise `pending`.
 5. Update `players.importState`. Enqueuing `extract` for games that already have evals waits until Stage 3, when the `extract` handler exists (until then those jobs would fail as an unknown type).
@@ -342,8 +345,8 @@ Follow-up questions use the same tools, capped at 6 steps, with the same evidenc
 
 ```
 GET  /api/health                                   → { ok, db, queueDepth, version }
-POST /api/players/:platform/:username/import       → { jobId } (idempotent: returns the running job)
-GET  /api/players/:platform/:username              → profile + importState + counts + summary
+POST /api/players/:platform/:username/import       → 202 { jobId } or 200 { upToDate: true } (idempotent: returns the running job)
+GET  /api/players/:platform/:username              → { player, activeJob } (player: profile + importState + counts + summary)
 GET  /api/players/:platform/:username/games        → cursor pagination (?cursor=&limit=&speed=&color=&result=)
 GET  /api/games/:id                                → game + analysis + features
 GET  /api/analysis/claim?platform=&username=       → up to K games to analyse (leases)
@@ -360,6 +363,13 @@ Rules:
 - **Cursor pagination,** not skip/limit.
 - The SSE endpoints send a heartbeat comment every 15 s and close cleanly.
 - **CORS also applies to EventSource,** so the allowlist must include the Vercel site.
+- **POST import:** 202 `{ jobId }` starts (or rejoins) an import. 200 `{ upToDate: true }` when the last successful import is under **6 h** old and none is active (Chess.com only refreshes every 12–24 h anyway). Repeating the call is safe: while an import is queued or running, the same job comes back.
+- **GET player:** `{ player, activeJob }`. `player` is null while a first import is still queued (the job creates the player once the platform confirms they exist); `activeJob` lets a reloaded page reattach to the stream. 404 only when there is neither.
+- **Job SSE contract** (`GET /api/jobs/:id/stream`):
+  - Events: `snapshot`, `progress`, `retrying`, `done`, `failed`. Every event's `data` is the whole public job, and its `id:` is the job's `rev` (a counter bumped on every change).
+  - **Subscribe, then snapshot:** the route subscribes to the in-process event bus first, buffers, reads the job and sends it as `snapshot`, then sends only buffered/later events with `rev` greater than the snapshot's. Nothing is lost or duplicated in between.
+  - `retry: 3000`, a heartbeat comment every 15 s, and the server ends the stream after `done`/`failed`. A reconnect always starts with a fresh snapshot.
+  - A 429 is waited out inside the importer, so it doesn't produce a `retrying` event: the stream just goes quiet (the UI shows a hint after 20 s).
 
 ---
 
@@ -406,6 +416,14 @@ Render's free API sleeps after 15 minutes. The first request can take up to abou
 - **Outbound politeness:** the global serial queues for Chess.com and Lichess, the User-Agent with contact, backoff, and timeouts on every fetch.
 - **Logs:** structured one-line JSON logs with a request ID, the job ID and timings. `/api/health` reports the queue depth.
 - **Engine results are untrusted input:** validate their shape and bounds. The worst a faked result can do is mislabel one player's own games.
+- **Graceful shutdown** (`src/shutdown.ts`; SIGTERM on a Render redeploy, Ctrl+C locally), in this order:
+  1. Stop accepting new connections (`server.close()`).
+  2. Stop the worker: it aborts the running job, gives the handler **3 s** to wind down, then **releases** the job back to the queue with its attempt refunded, so the next process picks it up at once instead of waiting out the lease.
+  3. Close the SSE streams (after step 2, so viewers still get the `retrying` event). EventSource reconnects to the new instance and gets a fresh snapshot.
+  4. Give in-flight requests **2 s** to drain, then cut the remaining connections.
+  5. Disconnect from MongoDB (last, because the release needs it).
+  - A **10 s** force-exit timer covers anything that hangs (Render waits 30 s before SIGKILL).
+  - **Both kill tests passed (31 Oct 2026):** a hard kill mid-import was requeued by the lease reaper and resumed with 0 duplicates (Zhigalko_Sergei, 1,998 games); a graceful Ctrl+C released the job at once and the shutdown finished in 3.1 s (EricRosen); the released job was picked up and finished on the next start.
 
 ---
 
@@ -436,7 +454,7 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | Stage | Build | Demo at the end | Done when |
 |---|---|---|---|
 | **0. Scaffold + deploy** | Monorepo, Express app with health route, env validation, error handler, CORS, trust proxy, Mongo connection; Next.js skeleton with the palette and type; MongoDB MCP server (read-only) | Live site shows "API ok · DB ok" | Deployed on Vercel + Render; `/api/health` live; tests pass |
-| **1. Import + queue** | Job queue (leases, retries, idempotency), Chess.com + Lichess importers, SSE progress, games list with cursor pagination | Type a username, watch games stream in live | Re-import doesn't duplicate; killing the server mid-import resumes after restart; 429 handled |
+| **1. Import + queue** ✅ done 31 Oct 2026 | Job queue (leases, retries, idempotency), Chess.com + Lichess importers, SSE progress, games list with cursor pagination | Type a username, watch games stream in live | Re-import doesn't duplicate; killing the server mid-import resumes after restart; 429 handled |
 | **2. Engine + game review** | Stockfish worker pool, claim/results API, classification, board + eval graph + move list | "Here are your blunders" on real games | Closed tab loses no work; measured seconds per game written in the README |
 | **3. Patterns dashboard** | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
 | **4. The big dataset** | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
@@ -480,6 +498,9 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 - **TRUST_PROXY_HOPS must be 3 on Render.** Too low and everyone shares one rate-limit counter; too high and visitors can fake their address.
 - **CORS:** the Vercel URL must be in the allowlist, including for EventSource (SSE).
 - **Windows:** CRLF line endings make diffs noisy (`--ignore-cr-at-eol`); commands must work in cmd; watch the RAM during the import.
+- **cmd QuickEdit freezes the API:** clicking inside the cmd window running the API selects text and pauses the process (logs, requests and the job all stop until you press a key). Disable it: cmd window → Properties → Options → untick "QuickEdit Mode".
+- **Render's free CPU is ~15–20× slower than my laptop** (measured: chess.js replay 8 ms vs 110–160 ms a game; the text ply count 0.1 ms vs ~2 ms). Anything CPU-heavy in a request or job must be measured on Render, not just locally.
+- **Atlas writes from my home connection can be 10× slower than from Render** (import batches: 6–44 s from the laptop on 31 Oct vs 0.9–2.5 s from Render, both to the Singapore cluster). Time database-heavy work on Render, not locally.
 - **Never commit `.claude/`.**
 
 ---

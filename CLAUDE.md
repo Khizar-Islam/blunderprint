@@ -87,7 +87,7 @@ There is a **separate companion document**, `blunderprint-chat-companion.md`, fo
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Frontend | Next.js (App Router, TypeScript), Tailwind CSS v4, Framer Motion | Same family as my other projects. Check the current Next.js version. |
+| Frontend | Next.js (App Router, TypeScript), Tailwind CSS v4, `motion` (the package formerly called Framer Motion; import from `motion/react`) | Same family as my other projects. Check the current Next.js version. |
 | Board | `react-chessboard` (MIT) | Not Chessground: it's GPL and Lichess-styled. Custom board colours (section 12). |
 | Chess logic | `chess.js` | PGN parsing, legal moves, FEN, on both the frontend and the backend. |
 | Engine | npm `stockfish` v19, **lite single-threaded** build (~1.7 MB) | Runs in a Web Worker with no COOP/COEP headers needed. The multi-threaded builds need cross-origin isolation, so don't use them. GPL-3.0: see gotchas. |
@@ -95,7 +95,7 @@ There is a **separate companion document**, `blunderprint-chat-companion.md`, fo
 | TypeScript | **Pinned to 6.0.3** (exact version) in both `backend/` and `web/` | Not TS 7 for now: TS 7 is the new native (Go) compiler, and tools that use the TypeScript JS API, like Next's build-time type check, may not support it yet. |
 | Database | MongoDB Atlas M0 (free, 512 MB), **Mongoose** | Mongoose because MERN job ads expect it. Use `Model.aggregate()` for pipelines and `bulkWrite` for imports. |
 | AI | Google Gemini via `@google/genai` | Model from env `GEMINI_MODEL`. **Dev and the free demo use `gemini-3.5-flash-lite`:** on the free tier it gets 500 requests/day (15 RPM, 250K TPM), while `gemini-3.8-flash` gets only 20/day. Switch to `gemini-3.8-flash` at Stage 8 with the paid credit. Both were listed as stable on 30 Oct 2026. **Before Stage 5, verify that `gemini-3.5-flash-lite` supports function calling and structured output.** |
-| Tests | `node:test` (same style as Footnote), `mongodb-memory-server` for queue/DB tests | Check that mongodb-memory-server runs on my Windows machine in Stage 1. If not, use a separate test database. |
+| Tests | `node:test` (same style as Footnote), `mongodb-memory-server` for queue/DB tests | mongodb-memory-server works on my Windows machine (verified in Stage 1), with the MongoDB binary pinned to 8.0.34 in `backend/package.json` (`config.mongodbMemoryServer`). |
 | Hosting | Vercel (web), Render free web service (API) | The API sleeps after 15 minutes idle, so the UI must handle the wake-up (section 10). |
 | Dev tooling | Official MongoDB MCP server in **read-only** mode | Lets you inspect collections and explain plans safely. Setup is in the companion doc. |
 
@@ -111,20 +111,28 @@ blunderprint/
 │  ├─ src/
 │  │  ├─ app.ts              (createApp(): middleware order, routes, error handler)
 │  │  ├─ server.ts           (listen + start worker loop)
+│  │  ├─ shutdown.ts         (graceful shutdown order, section 13)
 │  │  ├─ config/env.ts       (zod-validated env, parseTrustProxyHops, CORS list)
 │  │  ├─ db/                 (mongoose connect, models/*.ts, indexes)
-│  │  ├─ jobs/               (queue.ts, worker.ts, handlers/*.ts)
-│  │  ├─ importers/          (chesscom.ts, lichess.ts, politeFetch.ts)
+│  │  ├─ jobs/               (queue.ts, worker.ts, events.ts in-process job event bus,
+│  │  │                       errors.ts, setup.ts, handlers/*.ts)
+│  │  ├─ importers/          (chesscom.ts, lichess.ts, politeFetch.ts, normalize.ts)
 │  │  ├─ chess/              (fen.ts normalize, classify.ts win%, features.ts, openings.ts)
 │  │  ├─ agent/              (tools/*.ts, loop.ts, verifier.ts, prompts.ts, schema.ts)
-│  │  ├─ routes/             (players, games, analysis, positions, coach, health)
-│  │  ├─ middleware/         (rateLimit.ts, errorHandler.ts, sse.ts, budget.ts)
-│  │  └─ lib/                (logger.ts, sse helpers, ids)
-│  ├─ scripts/               (test helpers, seed demo players)
+│  │  ├─ routes/             (players, games, jobs (SSE stream), analysis, positions, coach, health)
+│  │  ├─ middleware/         (requestId.ts, errorHandler.ts, rateLimit.ts, budget.ts)
+│  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
+│  │                          validate.ts zod → 400, sleep.ts, version.ts)
+│  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
+│  │                          importOnce, explainGames)
 │  └─ .env.example
+├─ docs/explain/             (saved .explain() output for the README)
 ├─ web/
 │  ├─ src/app/               (/, /p/[platform]/[username], /p/.../game/[id], /p/.../coach)
-│  ├─ src/components/        (Board, MoveRibbon, Blunderprint, EvalGraph, AgentTrace, PatternCard)
+│  ├─ src/lib/               (api.ts, useJobStream.ts, useWakingRequest.ts, format.ts)
+│  ├─ src/components/        (PlayerSearch, PlayerDashboard, ImportProgress, GamesList, HealthStatus,
+│  │                          MotionProvider; later Board, MoveRibbon, Blunderprint, EvalGraph,
+│  │                          AgentTrace, PatternCard)
 │  ├─ src/engine/            (stockfish worker wrapper, analysis scheduler)
 │  ├─ public/engine/         (stockfish-19-lite-single.js + .wasm + its LICENSE)
 │  └─ .env.example

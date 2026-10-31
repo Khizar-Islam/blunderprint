@@ -67,6 +67,42 @@ export function countPlies(pgn: string): number | null {
   }
 }
 
+// One SAN move: castling, or [piece][from file/rank][x]square[=promotion], then an optional
+// check/mate sign and annotation glyphs ("!", "?!"). Anything else means the text isn't a plain
+// movetext we understand, and the caller treats the game like one that doesn't replay.
+const SAN = /^(?:O-O(?:-O)?|[NBRQK]?[a-h]?[1-8]?x?[a-h][1-8](?:=[NBRQ])?)[+#]?[!?]{0,2}$/;
+const RESULTS = new Set(["1-0", "0-1", "1/2-1/2", "*"]);
+
+// Counts the plies straight from the PGN text, without replaying the moves: ~250× cheaper than
+// countPlies (0.03 vs 8 ms a game on a real 212-game month, measured in Stage 1). It checks
+// that the moves look like SAN, not that they're legal; Stage 2's browser engine replays every
+// game with chess.js, and the server checks the eval count against `plies`, so a bad PGN is
+// still caught there.
+// Returns null when the movetext has something that isn't a SAN move.
+export function countPliesFromText(pgn: string): number | null {
+  const movetext = pgn
+    .replace(/^\[.*\]\s*$/gm, "") // headers: [Name "value"]
+    .replace(/\{[^}]*\}/g, " ") // comments, e.g. {[%clk 0:02:59.6]} (they don't nest)
+    .replace(/;[^\n]*/g, " "); // rest-of-line comments
+  // Variations can nest, so remove the innermost (...) until none are left.
+  let text = movetext;
+  for (let previous = ""; previous !== text; ) {
+    previous = text;
+    text = text.replace(/\([^()]*\)/g, " ");
+  }
+  if (/[(){}]/.test(text)) return null; // unbalanced brackets
+
+  let plies = 0;
+  for (const raw of text.split(/\s+/)) {
+    // Move numbers: "12." for White, "12..." for Black, sometimes glued to the move ("12.e4").
+    const token = raw.replace(/^\d+\.+/, "");
+    if (token === "" || RESULTS.has(token) || /^\$\d+$/.test(token)) continue; // NAGs: $1, $14
+    if (!SAN.test(token)) return null;
+    plies++;
+  }
+  return plies;
+}
+
 // Lichess's speed buckets, from estimated duration = initial + 40 × increment (seconds).
 // Used when Chess.com doesn't say time_class. Source: lichess-org/scalachess, Speed.scala
 // (ranges: bullet 30–179, blitz 180–479, rapid 480–1499) and Clock.estimateTotalSeconds.

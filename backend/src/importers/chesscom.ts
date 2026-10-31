@@ -1,7 +1,7 @@
 import { SPEEDS, type Speed } from "../db/models/game.js";
 import {
   clocksFromPgn,
-  countPlies,
+  countPliesFromText,
   pgnHeader,
   speedFromTimeControl,
   type Importer,
@@ -55,14 +55,17 @@ function cheapCheck(game: ChessComGame, usernameLower: string): "white" | "black
 
 // Lets timers (lease renewal, SSE heartbeats) and requests (/api/health) run between games.
 const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
-const YIELD_EVERY = 10;
+// Yield once this much time has passed, not every N games: the cost per game differs ~15×
+// between a laptop and Render's free CPU, so a game count can't promise a bounded pause.
+const YIELD_AFTER_MS = 50;
 
 // Returns null for games we don't keep: variants, custom start positions, aborted games,
-// or a PGN that doesn't replay. plyCounter is injectable so tests can count the expensive calls.
+// or movetext that doesn't parse. plyCounter is injectable so tests can count the calls and
+// make them slow.
 export function normalizeChessComGame(
   game: ChessComGame,
   usernameLower: string,
-  plyCounter: (pgn: string) => number | null = countPlies,
+  plyCounter: (pgn: string) => number | null = countPliesFromText,
 ): NormalizedGame | null {
   const color = cheapCheck(game, usernameLower);
   if (!color || !game.pgn) return null;
@@ -106,7 +109,7 @@ const monthKeyOfDate = (d: Date) => `${d.getUTCFullYear()}/${String(d.getUTCMont
 
 export function createChessComImporter(
   client: PoliteClient,
-  { plyCounter = countPlies }: { plyCounter?: (pgn: string) => number | null } = {},
+  { plyCounter = countPliesFromText }: { plyCounter?: (pgn: string) => number | null } = {},
 ): Importer {
   const playerUrl = (username: string) => `${API}/${encodeURIComponent(username.toLowerCase())}`;
 
@@ -155,18 +158,23 @@ export function createChessComImporter(
         const fetchMs = Date.now() - fetchStart;
         const normalizeStart = Date.now();
         // 304: nothing changed in this month since we last fetched it.
-        // Replaying a PGN with chess.js is the expensive step (~25 ms a game locally, slower on
-        // Render's small CPU), and a busy month has 1,000+ games. So: cheap checks first, newest
-        // first, and replay only until we have the games we still need. A game that fails the
-        // replay just means we take the next one. Blocking the event loop for seconds would
-        // stall /api/health and SSE, and stop our own lease renewal.
+        // A busy month has 1,000+ games. Cheap checks first, newest first, and normalize only
+        // until we have the games we still need; a game that's rejected just means we take the
+        // next one. Plies are counted from the PGN text (~0.03 ms a game), not by replaying it
+        // with chess.js (~8 ms on a laptop, ~110–160 ms on Render's free CPU, which blocked
+        // /api/health for seconds). The time-based yield is a safety net on top: blocking the
+        // event loop would stall /api/health and SSE, and stop our own lease renewal.
         const candidates = (res.data?.games ?? [])
           .filter((g) => cheapCheck(g, usernameLower) !== null)
           .sort((a, b) => b.end_time - a.end_time);
         const needed = maxGames - state.collected;
         const games: NormalizedGame[] = [];
+        let sliceStart = performance.now();
         for (let i = 0; i < candidates.length && games.length < needed; i++) {
-          if (i > 0 && i % YIELD_EVERY === 0) await yieldToEventLoop();
+          if (performance.now() - sliceStart >= YIELD_AFTER_MS) {
+            await yieldToEventLoop();
+            sliceStart = performance.now();
+          }
           const game = normalizeChessComGame(candidates[i], usernameLower, plyCounter);
           if (game) games.push(game);
         }

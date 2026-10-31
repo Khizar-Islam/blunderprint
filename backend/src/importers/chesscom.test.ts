@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { jsonResponse, recordingFetch, statusResponse } from "../../scripts/fakeFetch.js";
 import { chessComGame, chessComPgn } from "../../scripts/fixtures.js";
 import { createChessComImporter, normalizeChessComGame, type ChessComGame } from "./chesscom.js";
-import { countPlies, type ImportBatch, type NormalizedGame } from "./normalize.js";
+import { countPliesFromText, type ImportBatch, type NormalizedGame } from "./normalize.js";
 import { createPoliteClient } from "./politeFetch.js";
 
 test("normalizes a game from the player's side", () => {
@@ -42,7 +42,7 @@ test("skips variants, custom start positions, aborted games and other players' g
     chessComGame({ initial_setup: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1" }),
     chessComGame({ pgn: chessComPgn("Alice", "bob", ['[SetUp "1"]', '[FEN "8/8/8/8/8/8/8/K6k w - - 0 1"]']) }),
     chessComGame({ pgn: '[White "Alice"]\n[Black "bob"]\n\n1. e4 {[%clk 0:02:59]} *' }), // 1 ply: aborted
-    chessComGame({ pgn: '[White "Alice"]\n[Black "bob"]\n\n1. e4 e5 2. Ke3?? Qh4 *' }), // doesn't replay
+    chessComGame({ pgn: '[White "Alice"]\n[Black "bob"]\n\n1. e4 e5 2. ??? Qh4 *' }), // movetext doesn't parse
     chessComGame({ pgn: undefined }),
   ];
   for (const game of skipped) assert.equal(normalizeChessComGame(game, "alice"), null);
@@ -149,14 +149,14 @@ function oneMonth(games: ChessComGame[]) {
   );
 }
 
-// A spy ply counter: counts calls and lets a test see them as they happen.
+// A spy around the real ply counter: counts calls and lets a test see them as they happen.
 function spyCounter(onCall?: (calls: number) => void) {
   const spy = {
     calls: 0,
     count: (pgn: string) => {
       spy.calls++;
       onCall?.(spy.calls);
-      return countPlies(pgn);
+      return countPliesFromText(pgn);
     },
   };
   return spy;
@@ -196,7 +196,7 @@ function busyMonth(n: number, seed = 42): ChessComGame[] {
   return games;
 }
 
-test("a busy month replays only the games still needed, newest first", async () => {
+test("a busy month normalizes only the games still needed, newest first", async () => {
   const counter = spyCounter();
   const stored = await importMonth(busyMonth(1_000), 5, counter);
   assert.equal(stored.length, 5);
@@ -207,11 +207,11 @@ test("a busy month replays only the games still needed, newest first", async () 
   );
 });
 
-test("games that fail the replay are replaced by the next ones from the same month", async () => {
+test("games whose moves don't parse are replaced by the next ones from the same month", async () => {
   const games = busyMonth(50);
   const newestFirst = [...games].sort((a, b) => b.end_time - a.end_time);
-  // The 3 newest games don't replay.
-  for (const g of newestFirst.slice(0, 3)) g.pgn = '[White "Alice"]\n[Black "bob"]\n\n1. e4 e5 2. Ke3?? Qh4 *';
+  // The 3 newest games have movetext that isn't SAN.
+  for (const g of newestFirst.slice(0, 3)) g.pgn = '[White "Alice"]\n[Black "bob"]\n\n1. e4 e5 2. ??? Qh4 *';
   const counter = spyCounter();
   const stored = await importMonth(games, 5, counter);
   assert.equal(stored.length, 5);
@@ -233,15 +233,35 @@ test("cheap checks skip variants and other players' games without replaying them
   assert.equal(counter.calls, 1);
 });
 
-test("processing a month yields to the event loop every 10 games", async () => {
-  // Schedule a setImmediate during the first replay: it can only run once the loop yields.
-  let callsWhenItRan: number | undefined;
-  const counter = spyCounter((calls) => {
-    if (calls === 1) setImmediate(() => (callsWhenItRan = counter.calls));
+// Burns CPU like a slow machine would: a busy wait, so nothing else can run meanwhile.
+function busyWait(ms: number) {
+  const until = performance.now() + ms;
+  while (performance.now() < until);
+}
+
+test("processing a month yields to the event loop once ~50 ms have passed", async () => {
+  // Each game costs 30 ms here, like a slow CPU. A setImmediate heartbeat can only run when
+  // the import yields. After each game we check how long ago it last ran: that's how long the
+  // event loop has been blocked. ~60 ms with a 50 ms budget; "every 10 games" would be ~300 ms.
+  // (The fake fetch resolves in microtasks, so without a yield the heartbeat never runs at all
+  // and the blocked time just keeps growing.)
+  let lastBeat = performance.now();
+  let beating = true;
+  const beat = () => {
+    lastBeat = performance.now();
+    if (beating) setImmediate(beat);
+  };
+  let longestBlock = 0;
+  const counter = spyCounter(() => {
+    busyWait(30);
+    longestBlock = Math.max(longestBlock, performance.now() - lastBeat);
   });
-  const stored = await importMonth(busyMonth(30), 30, counter);
-  assert.equal(stored.length, 30);
-  assert.equal(callsWhenItRan, 10);
+  setImmediate(beat);
+  const stored = await importMonth(busyMonth(20), 20, counter);
+  beating = false;
+
+  assert.equal(stored.length, 20);
+  assert.ok(longestBlock < 200, `event loop blocked for ${longestBlock.toFixed(0)} ms`);
 });
 
 test("resuming from a checkpoint skips the months already done", async () => {

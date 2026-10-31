@@ -24,12 +24,12 @@ export const fullDate = (iso: string) =>
   new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
 
 // Both importers store "<initial seconds>+<increment seconds>", or "1/<seconds per move>" for
-// daily games. Shown the way players say it: "3+2", "10+0", "½+0", "3 days".
+// daily games. Shown the way players say it: "3+2", "10+0", "½+0", "3d" (shown as "daily 3d").
 export function formatTimeControl(tc?: string): string | null {
   if (!tc) return null;
   if (tc.startsWith("1/")) {
     const days = Number(tc.slice(2)) / 86_400;
-    return Number.isFinite(days) ? `${days} day${days === 1 ? "" : "s"}` : null;
+    return Number.isFinite(days) ? `${days}d` : null; // "daily 3d": fits the row's speed column
   }
   const [initial, increment = "0"] = tc.split("+");
   const minutes = Number(initial) / 60;

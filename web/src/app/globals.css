@@ -28,3 +28,30 @@ body {
   background: var(--color-bone);
   color: var(--color-ink);
 }
+
+/* One focus ring for every interactive element: a solid ink outline with a gap, shown only for
+   keyboard focus (:focus-visible), never on mouse clicks. No glow or shadow. */
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+/* A small outlined button (Retry, Load more). Hover fills it; press shrinks it slightly. */
+@utility btn-quiet {
+  border-radius: 0.25rem;
+  border: 1px solid color-mix(in oklab, var(--color-ink) 30%, transparent);
+  padding: 0.125rem 0.5rem;
+  transition:
+    background-color 150ms,
+    color 150ms,
+    border-color 150ms,
+    transform 100ms;
+  &:hover {
+    border-color: var(--color-ink);
+    background-color: var(--color-ink);
+    color: var(--color-bone);
+  }
+  &:active {
+    transform: scale(0.95);
+  }
+}

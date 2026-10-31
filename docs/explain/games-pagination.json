@@ -1,0 +1,308 @@
+{
+  "generatedAt": "2026-10-31T11:36:44.551Z",
+  "mongoVersion": "8.0.36",
+  "index": "{ playerId: 1, playedAt: -1, _id: -1 }",
+  "limit": 21,
+  "players": [
+    {
+      "player": "lichess:zhigalko_sergei",
+      "games": 1998,
+      "pages": {
+        "first": {
+          "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+          "inMemorySort": false,
+          "nReturned": 21,
+          "keysExamined": 21,
+          "docsExamined": 21,
+          "ms": 0,
+          "rejectedPlans": 3
+        },
+        "middle": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 21,
+            "docsExamined": 21,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 22,
+            "docsExamined": 22,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "last": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 10,
+            "docsExamined": 10,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 11,
+            "docsExamined": 11,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "middleBlitz": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 254,
+            "docsExamined": 254,
+            "ms": 10,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 255,
+            "docsExamined": 255,
+            "ms": 5,
+            "rejectedPlans": 5
+          }
+        }
+      }
+    },
+    {
+      "player": "lichess:penguingim1",
+      "games": 1962,
+      "pages": {
+        "first": {
+          "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+          "inMemorySort": false,
+          "nReturned": 21,
+          "keysExamined": 21,
+          "docsExamined": 21,
+          "ms": 0,
+          "rejectedPlans": 3
+        },
+        "middle": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 21,
+            "docsExamined": 21,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 22,
+            "docsExamined": 22,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "last": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 10,
+            "docsExamined": 10,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 11,
+            "docsExamined": 11,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "middleBlitz": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 21,
+            "docsExamined": 21,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 22,
+            "docsExamined": 22,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        }
+      }
+    },
+    {
+      "player": "lichess:ericrosen",
+      "games": 350,
+      "pages": {
+        "first": {
+          "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+          "inMemorySort": false,
+          "nReturned": 21,
+          "keysExamined": 21,
+          "docsExamined": 21,
+          "ms": 0,
+          "rejectedPlans": 3
+        },
+        "middle": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 21,
+            "docsExamined": 21,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 22,
+            "docsExamined": 22,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "last": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 10,
+            "docsExamined": 10,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 11,
+            "docsExamined": 11,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "middleBlitz": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 119,
+            "docsExamined": 119,
+            "ms": 5,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 120,
+            "docsExamined": 120,
+            "ms": 4,
+            "rejectedPlans": 5
+          }
+        }
+      }
+    },
+    {
+      "player": "chesscom:hikaru",
+      "games": 200,
+      "pages": {
+        "first": {
+          "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+          "inMemorySort": false,
+          "nReturned": 21,
+          "keysExamined": 21,
+          "docsExamined": 21,
+          "ms": 0,
+          "rejectedPlans": 3
+        },
+        "middle": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 21,
+            "docsExamined": 21,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 22,
+            "docsExamined": 22,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "last": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 10,
+            "docsExamined": 10,
+            "ms": 1,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 10,
+            "keysExamined": 11,
+            "docsExamined": 11,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        },
+        "middleBlitz": {
+          "orOnly": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > SORT_MERGE[IXSCAN(playerId_1_playedAt_-1__id_-1) | IXSCAN(playerId_1_playedAt_-1__id_-1)]",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 33,
+            "docsExamined": 33,
+            "ms": 2,
+            "rejectedPlans": 5
+          },
+          "bounded": {
+            "plan": "LIMIT > PROJECTION_DEFAULT > FETCH > IXSCAN(playerId_1_playedAt_-1__id_-1)",
+            "inMemorySort": false,
+            "nReturned": 21,
+            "keysExamined": 34,
+            "docsExamined": 34,
+            "ms": 1,
+            "rejectedPlans": 5
+          }
+        }
+      }
+    }
+  ]
+}

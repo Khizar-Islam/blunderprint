@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { Job } from "../db/models/job.js";
 import { clearDb, startTestDb } from "../../scripts/testDb.js";
 import { FatalError, RetryableError } from "./errors.js";
+import { jobEvents, type JobEvent } from "./events.js";
 import { createQueue } from "./queue.js";
 
 let db: Awaited<ReturnType<typeof startTestDb>>;
@@ -187,4 +188,41 @@ test("depth counts queued and running jobs only", async () => {
   assert.equal(await queue.depth(), 2);
   await queue.complete(job!._id, "w1");
   assert.equal(await queue.depth(), 1);
+});
+
+test("every visible change bumps rev and emits one event; lease renewals and lost updates don't", async () => {
+  const queue = createQueue({ backoffBaseMs: 0 });
+  const { job: queued } = await queue.enqueue({ ...input, maxAttempts: 2 });
+  assert.equal(queued.rev, 0);
+
+  const seen: JobEvent[] = [];
+  const unsubscribe = jobEvents.subscribe(String(queued._id), (event) => seen.push(event));
+  try {
+    let job = await queue.claimNext("w1", LEASE);
+    await queue.renewLease(job!._id, "w1", LEASE);
+    await queue.saveProgress(job!._id, "w1", { done: 10, total: 200, message: "Fetched 2026/10" });
+    await queue.saveProgress(job!._id, "someone-else", { done: 99 });
+    await queue.fail(job!, "w1", new RetryableError("network"));
+    job = await queue.claimNext("w1", LEASE);
+    await queue.fail(job!, "w1", new FatalError("user_not_found", "No such player"));
+  } finally {
+    unsubscribe();
+  }
+
+  assert.deepEqual(
+    seen.map((e) => [e.type, e.job.status, e.job.rev]),
+    [
+      ["progress", "running", 1],
+      ["progress", "running", 2],
+      ["retrying", "queued", 3],
+      ["progress", "running", 4],
+      ["failed", "failed", 5],
+    ],
+  );
+  assert.deepEqual(seen[1]!.job.progress, { done: 10, total: 200, message: "Fetched 2026/10" });
+  assert.deepEqual(seen[4]!.job.error, { code: "user_not_found", message: "No such player" });
+  // Nothing internal leaks into what the browser will see.
+  assert.equal("workerId" in seen[0]!.job, false);
+  assert.equal((await Job.findById(queued._id))!.rev, 5);
+  assert.equal(jobEvents.listenerCount(String(queued._id)), 0);
 });

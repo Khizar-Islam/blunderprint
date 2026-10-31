@@ -129,6 +129,29 @@ test("stop() aborts the running job and releases it for an immediate restart", a
   assert.ok(stored!.runAfter.getTime() <= Date.now());
 });
 
+test("stop() releases the job even when the handler doesn't wind down within the grace period", async () => {
+  // Regression: a handler stuck in a slow DB write held the release past the 10 s force-exit.
+  const queue = createQueue();
+  const started = deferred();
+  const handler: JobHandler = {
+    async run() {
+      started.resolve();
+      await new Promise(() => {}); // ignores the abort entirely
+    },
+  };
+  const { job } = await queue.enqueue(input);
+  const w = startWorker({ queue, handlers: { import: handler }, pollMs: 10, shutdownGraceMs: 50 });
+  await started.promise;
+  const t0 = Date.now();
+  await w.stop();
+  assert.ok(Date.now() - t0 < 1_000, "stop() should not wait on a stuck handler");
+
+  const stored = await Job.findById(job._id).lean();
+  assert.equal(stored!.status, "queued");
+  assert.equal(stored!.attempts, 0);
+  assert.equal(stored!.workerId, undefined);
+});
+
 test("after a hard kill, the reaper requeues the job and the next worker resumes from the checkpoint", async () => {
   let t = Date.now();
   const queue = createQueue({ now: () => new Date(t) });

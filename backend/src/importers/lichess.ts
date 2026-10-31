@@ -151,7 +151,12 @@ export function createLichessImporter(client: PoliteClient): Importer {
       const flush = () => {
         const out: ImportBatch<LichessCheckpoint> = { games: batch, checkpoint: { ...state } };
         batch = [];
-        writes = writes.then(() => (writeError ? undefined : onBatch(out))).catch((err) => void (writeError ??= err));
+        // Once the job is aborted (shutdown, lost lease), queued batches are dropped instead of
+        // written: on a slow DB the backlog can take longer than the shutdown allows. Each batch
+        // carries its own checkpoint, so the dropped ones are simply fetched again on resume.
+        writes = writes
+          .then(() => (writeError || signal.aborted ? undefined : onBatch(out)))
+          .catch((err) => void (writeError ??= err));
       };
 
       try {

@@ -28,6 +28,8 @@ export interface WorkerOptions {
   leaseMs?: number;
   pollMs?: number;
   reapEveryMs?: number;
+  // After an abort, how long the handler gets to wind down before the worker stops waiting.
+  shutdownGraceMs?: number;
   sleep?: Sleep;
   now?: () => number;
 }
@@ -54,6 +56,7 @@ export function startWorker({
   leaseMs = 60_000,
   pollMs = 1_000,
   reapEveryMs = 15_000,
+  shutdownGraceMs = 3_000,
   sleep = realSleep,
   now = Date.now,
 }: WorkerOptions) {
@@ -100,11 +103,33 @@ export function startWorker({
       },
     };
 
+    // Once aborted, the handler gets shutdownGraceMs to wind down; after that we stop waiting.
+    // A handler stuck in a slow DB write must not hold the release past the shutdown deadline.
+    // What it does afterwards is harmless: game upserts are idempotent, and its progress or
+    // checkpoint saves fail because the job is no longer ours.
+    let graceTimer: NodeJS.Timeout | undefined;
+    let gaveUpWaiting = false;
+    const graceOver = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => {
+          graceTimer = setTimeout(() => {
+            gaveUpWaiting = true;
+            reject(controller.signal.reason);
+          }, shutdownGraceMs);
+        },
+        { once: true },
+      );
+    });
+
     logger.info("Job started", { jobId, key: job.key, attempt: job.attempts });
     try {
       const handler = handlers[job.type as JobType];
       if (!handler) throw new FatalError("unknown_job_type", `No handler for job type ${job.type}`);
-      await handler.run(ctx);
+      const running = handler.run(ctx);
+      // If we stop waiting, its eventual failure must not become an unhandled rejection.
+      running.catch(() => {});
+      await Promise.race([running, graceOver]);
       if (controller.signal.aborted) throw controller.signal.reason;
       await queue.complete(job._id, workerId);
       logger.info("Job done", { jobId, key: job.key, ms: now() - started });
@@ -114,8 +139,8 @@ export function startWorker({
         // Someone else owns the job now. Touch nothing.
         logger.warn("Job lease lost, stopping", { jobId, key: job.key });
       } else if (reason instanceof ShuttingDown) {
-        await queue.release(job._id, workerId);
-        logger.info("Job released for shutdown", { jobId, key: job.key, ms: now() - started });
+        const released = await queue.release(job._id, workerId);
+        logger.info("Job released for shutdown", { jobId, key: job.key, released, gaveUpWaiting, ms: now() - started });
       } else {
         const outcome = await queue.fail(job, workerId, err);
         logger.warn("Job error", {
@@ -130,6 +155,7 @@ export function startWorker({
         if (outcome === "failed") await handlers[job.type as JobType]?.onFailed?.(job);
       }
     } finally {
+      clearTimeout(graceTimer);
       clearInterval(renewTimer);
       current = null;
     }

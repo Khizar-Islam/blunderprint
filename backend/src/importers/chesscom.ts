@@ -9,6 +9,7 @@ import {
   type PlayerProfile,
 } from "./normalize.js";
 import type { PoliteClient } from "./politeFetch.js";
+import { logger } from "../lib/logger.js";
 
 // Chess.com Published-Data API: https://www.chess.com/news/view/published-data-api
 const API = "https://api.chess.com/pub/player";
@@ -146,10 +147,13 @@ export function createChessComImporter(
         if (done.has(key)) continue;
 
         const etag = known.monthEtags[key];
+        const fetchStart = Date.now();
         const res = await client.getJson<{ games: ChessComGame[] }>(url, {
           signal,
           headers: etag ? { "If-None-Match": etag } : {},
         });
+        const fetchMs = Date.now() - fetchStart;
+        const normalizeStart = Date.now();
         // 304: nothing changed in this month since we last fetched it.
         // Replaying a PGN with chess.js is the expensive step (~25 ms a game locally, slower on
         // Render's small CPU), and a busy month has 1,000+ games. So: cheap checks first, newest
@@ -166,6 +170,16 @@ export function createChessComImporter(
           const game = normalizeChessComGame(candidates[i], usernameLower, plyCounter);
           if (game) games.push(game);
         }
+        // Timings for the README and for comparing Render's CPU with a laptop's.
+        logger.info("Chess.com month", {
+          month: key,
+          status: res.status,
+          monthGames: res.data?.games.length ?? 0,
+          candidates: candidates.length,
+          kept: games.length,
+          fetchMs,
+          normalizeMs: Date.now() - normalizeStart,
+        });
 
         done.add(key);
         state.monthsDone = [...done];

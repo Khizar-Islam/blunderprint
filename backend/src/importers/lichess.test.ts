@@ -161,6 +161,29 @@ test("a failed batch write fails the import and stops further writes", async () 
   assert.equal(writes, 1);
 });
 
+test("after an abort, queued batch writes are dropped instead of drained", async () => {
+  // Regression: on Ctrl+C the importer waited for a backlog of slow Atlas writes (5–17 s each)
+  // and the shutdown's 10 s force-exit killed the process before the job was released.
+  const { fetch } = recordingFetch(() => chunkedResponse([exportOf(160)])); // 144 standard games: 3 batches
+  const controller = new AbortController();
+  const stored: number[] = [];
+  const run = createLichessImporter(createPoliteClient({ name: "Lichess", userAgent: "t", rateLimitWaitsMs: [1], fetch })).importGames({
+    username: "Alice",
+    maxGames: 200,
+    signal: controller.signal,
+    known: { monthEtags: {} },
+    onBatch: async (batch) => {
+      controller.abort(new Error("shutting down")); // the abort lands while this first write runs
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stored.push((batch.checkpoint as { collected: number }).collected);
+    },
+  });
+  await run.catch(() => {});
+  // Only the write already in flight finished. Its checkpoint (50) is where a resume starts,
+  // so the two dropped batches are fetched again rather than lost.
+  assert.deepEqual(stored, [50]);
+});
+
 test("re-imports use since; resumes use until and ask only for the games still missing", async () => {
   const { fetch, calls } = recordingFetch(() => chunkedResponse([""]));
   await runImport(fetch, {

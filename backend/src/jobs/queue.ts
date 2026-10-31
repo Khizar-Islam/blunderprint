@@ -1,5 +1,7 @@
-import { ACTIVE_JOB_STATUSES, Job, type JobDoc, type JobType } from "../db/models/job.js";
+import type { QueryFilter, UpdateQuery } from "mongoose";
+import { ACTIVE_JOB_STATUSES, Job, type JobDoc, type JobFields, type JobType } from "../db/models/job.js";
 import { FatalError, RetryableError } from "./errors.js";
+import { jobEvents, type JobEventType } from "./events.js";
 
 export interface EnqueueInput {
   type: JobType;
@@ -28,7 +30,8 @@ const DUPLICATE_KEY = 11000;
 
 // The job queue lives in MongoDB. Every state change is a single atomic update whose filter
 // checks the current state (and, for a running job, the owning workerId), so two workers or a
-// worker and the reaper can never both "win" the same job.
+// worker and the reaper can never both "win" the same job. Every change a viewer can see also
+// bumps `rev` and is announced on the in-process event bus for the SSE routes.
 export function createQueue({
   now = () => new Date(),
   backoffBaseMs = 5_000,
@@ -36,6 +39,23 @@ export function createQueue({
   random = Math.random,
 }: QueueOptions = {}) {
   const later = (ms: number) => new Date(now().getTime() + ms);
+
+  // Apply one atomic update, bump rev, and emit the updated job. null when the filter matched
+  // nothing (the job moved on, or the lease belongs to someone else): nothing is emitted then.
+  async function change(
+    filter: QueryFilter<JobFields>,
+    update: UpdateQuery<JobFields>,
+    event: JobEventType,
+    sort?: Record<string, 1 | -1>,
+  ): Promise<JobDoc | null> {
+    const job = await Job.findOneAndUpdate(
+      filter,
+      { ...update, $inc: { ...update.$inc, rev: 1 } },
+      { sort, returnDocument: "after" },
+    );
+    if (job) jobEvents.emit(event, job);
+    return job;
+  }
 
   // Idempotent: if a job with this key is already queued or running, return it instead.
   async function enqueue(input: EnqueueInput): Promise<{ job: JobDoc; created: boolean }> {
@@ -61,10 +81,11 @@ export function createQueue({
 
   // Atomically take the oldest due job and lease it to this worker.
   async function claimNext(workerId: string, leaseMs: number): Promise<JobDoc | null> {
-    return Job.findOneAndUpdate(
+    return change(
       { status: "queued", runAfter: { $lte: now() } },
       { $set: { status: "running", workerId, leaseUntil: later(leaseMs) }, $inc: { attempts: 1 } },
-      { sort: { runAfter: 1 }, returnDocument: "after" },
+      "progress",
+      { runAfter: 1 },
     );
   }
 
@@ -72,6 +93,7 @@ export function createQueue({
   const owned = (jobId: unknown, workerId: string) => ({ _id: jobId, workerId, status: "running" as const });
 
   // Returns false when the lease is gone (reaped and taken by someone else): stop working on it.
+  // No rev bump: a renewed lease is invisible to viewers.
   async function renewLease(jobId: unknown, workerId: string, leaseMs: number): Promise<boolean> {
     const res = await Job.updateOne(owned(jobId, workerId), { $set: { leaseUntil: later(leaseMs) } });
     return res.matchedCount === 1;
@@ -85,17 +107,17 @@ export function createQueue({
   ): Promise<boolean> {
     const set: Record<string, unknown> = { progress };
     if (checkpoint !== undefined) set.checkpoint = checkpoint;
-    const res = await Job.updateOne(owned(jobId, workerId), { $set: set });
-    return res.matchedCount === 1;
+    return (await change(owned(jobId, workerId), { $set: set }, "progress")) !== null;
   }
 
   async function complete(jobId: unknown, workerId: string): Promise<boolean> {
     // Clears the error left by an earlier failed attempt: a done job has no error to show.
-    const res = await Job.updateOne(owned(jobId, workerId), {
-      $set: { status: "done" },
-      $unset: { leaseUntil: 1, workerId: 1, error: 1 },
-    });
-    return res.matchedCount === 1;
+    const job = await change(
+      owned(jobId, workerId),
+      { $set: { status: "done" }, $unset: { leaseUntil: 1, workerId: 1, error: 1 } },
+      "done",
+    );
+    return job !== null;
   }
 
   function backoffMs(attempts: number): number {
@@ -108,28 +130,30 @@ export function createQueue({
     const fatal = err instanceof FatalError;
     if (!fatal && job.attempts < job.maxAttempts) {
       const delay = err instanceof RetryableError && err.retryAfterMs ? err.retryAfterMs : backoffMs(job.attempts);
-      const res = await Job.updateOne(owned(job._id, workerId), {
-        $set: { status: "queued", runAfter: later(delay), error: errorInfo(err) },
-        $unset: { leaseUntil: 1, workerId: 1 },
-      });
-      return res.matchedCount === 1 ? "retry" : "lost";
+      const retried = await change(
+        owned(job._id, workerId),
+        { $set: { status: "queued", runAfter: later(delay), error: errorInfo(err) }, $unset: { leaseUntil: 1, workerId: 1 } },
+        "retrying",
+      );
+      return retried ? "retry" : "lost";
     }
-    const res = await Job.updateOne(owned(job._id, workerId), {
-      $set: { status: "failed", error: errorInfo(err) },
-      $unset: { leaseUntil: 1, workerId: 1 },
-    });
-    return res.matchedCount === 1 ? "failed" : "lost";
+    const failed = await change(
+      owned(job._id, workerId),
+      { $set: { status: "failed", error: errorInfo(err) }, $unset: { leaseUntil: 1, workerId: 1 } },
+      "failed",
+    );
+    return failed ? "failed" : "lost";
   }
 
   // Graceful shutdown (Ctrl+C, Render redeploy): hand the job back right away instead of
   // waiting for the lease to run out, and give back the attempt it was charged.
   async function release(jobId: unknown, workerId: string): Promise<boolean> {
-    const res = await Job.updateOne(owned(jobId, workerId), {
-      $set: { status: "queued", runAfter: now() },
-      $unset: { leaseUntil: 1, workerId: 1 },
-      $inc: { attempts: -1 },
-    });
-    return res.matchedCount === 1;
+    const job = await change(
+      owned(jobId, workerId),
+      { $set: { status: "queued", runAfter: now() }, $unset: { leaseUntil: 1, workerId: 1 }, $inc: { attempts: -1 } },
+      "retrying",
+    );
+    return job !== null;
   }
 
   // Finds running jobs whose lease ran out (the worker died or the server slept) and puts them
@@ -142,7 +166,7 @@ export function createQueue({
     const failed: JobDoc[] = [];
     for (const job of expired) {
       const outOfAttempts = job.attempts >= job.maxAttempts;
-      const updated = await Job.findOneAndUpdate(
+      const updated = await change(
         { _id: job._id, status: "running", leaseUntil: { $lt: cutoff } },
         outOfAttempts
           ? {
@@ -153,7 +177,7 @@ export function createQueue({
               $unset: { leaseUntil: 1, workerId: 1 },
             }
           : { $set: { status: "queued", runAfter: cutoff }, $unset: { leaseUntil: 1, workerId: 1 } },
-        { returnDocument: "after" },
+        outOfAttempts ? "failed" : "retrying",
       );
       if (updated) (outOfAttempts ? failed : requeued).push(updated);
     }

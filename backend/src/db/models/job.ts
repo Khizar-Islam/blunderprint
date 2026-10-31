@@ -28,6 +28,9 @@ const jobSchema = new Schema(
     checkpoint: Schema.Types.Mixed,
     // Safe-to-show error. code is machine-readable (e.g. "user_not_found").
     error: { code: String, message: String },
+    // Revision: +1 on every change a viewer can see (claim, progress, retry, done, failed).
+    // SSE uses it as the event id, so a stream can drop events older than its snapshot.
+    rev: { type: Number, default: 0 },
   },
   { timestamps: true, minimize: false },
 );

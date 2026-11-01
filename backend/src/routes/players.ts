@@ -40,13 +40,15 @@ const gamesQuery = z.object({
   result: z.enum(RESULTS).optional(),
 });
 
-// The list view doesn't need the heavy fields: PGN, clocks and evals come with GET /api/games/:id.
+// The list view doesn't need the heavy fields: PGN, clocks, evals and best moves come with
+// GET /api/games/:id. Rows keep the classifications (their ribbon) and the accuracy.
 export const LIST_PROJECTION = {
   pgn: 0,
   clocks: 0,
   playerId: 0,
   __v: 0,
   "analysis.evals": 0,
+  "analysis.best": 0,
   "analysis.claimedBy": 0,
   "analysis.claimExpiresAt": 0,
 };

@@ -1,16 +1,28 @@
 "use client";
 
 import { motion } from "motion/react";
+import Link from "next/link";
 import { memo, useState } from "react";
 import type { LiveGame } from "@/engine/useAnalysis";
-import type { GameRow } from "@/lib/api";
+import type { GameRow, Platform } from "@/lib/api";
 import { formatTimeControl, fullDate, relativeTime } from "@/lib/format";
 import { classifiedRibbon, progressRibbon } from "@/lib/ribbon";
 
 const STAGGER_S = 0.03; // between rows of one batch
 const MAX_STAGGERED = 20; // later rows of a big batch share the last delay, so none waits long
 
-export function GamesList({ games, live = {} }: { games: GameRow[]; live?: Record<string, LiveGame> }) {
+export function GamesList({
+  games,
+  live = {},
+  platform,
+  username,
+}: {
+  games: GameRow[];
+  live?: Record<string, LiveGame>;
+  platform: Platform;
+  username: string;
+}) {
+  const base = `/p/${platform}/${encodeURIComponent(username)}/game/`;
   // Which rows are new since the last list, and their order among the new ones: only those
   // reveal, staggered. React's "adjust state while rendering" pattern (no effect, no extra
   // render pass): when the games prop changes, recompute before rendering the rows.
@@ -32,6 +44,7 @@ export function GamesList({ games, live = {} }: { games: GameRow[]; live?: Recor
           key={game.id}
           game={game}
           live={live[game.id]}
+          href={base + game.id}
           delay={Math.min(newOrder.get(game.id) ?? 0, MAX_STAGGERED) * STAGGER_S}
         />
       ))}
@@ -100,56 +113,73 @@ function Ribbon({ game, live }: { game: GameRow; live?: LiveGame }) {
 
 // memo: while the engine runs, `live` changes ~10 times a second for one or two games; only
 // those rows re-render.
-const Row = memo(function Row({ game, live, delay }: { game: GameRow; live?: LiveGame; delay: number }) {
+const Row = memo(function Row({
+  game,
+  live,
+  href,
+  delay,
+}: {
+  game: GameRow;
+  live?: LiveGame;
+  href: string;
+  delay: number;
+}) {
   const tc = formatTimeControl(game.timeControl);
   const speed = [game.speed, tc].filter(Boolean).join(" ");
   const opening = game.opening?.name ?? game.opening?.eco;
 
   return (
     // `initial` only applies when a row mounts, so rows already on screen never re-animate.
-    // Not a link yet (the game review page comes in Stage 2), so only a quiet hover tint.
     <motion.li
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: "easeOut", delay }}
-      className="border-b border-ink/10 px-1 py-2.5 transition-colors hover:bg-square-light/40 sm:px-2"
+      className="border-b border-ink/10"
     >
-      {/* Mobile: two lines. sm and up: one grid row. */}
-      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-0.5 sm:grid-cols-[auto_minmax(0,1.7fr)_4.5rem_minmax(0,1.3fr)_6rem]">
-        <span className="row-span-2 flex items-center gap-2 sm:row-span-1">
-          <ResultMark result={game.result} />
-          <ColorChip color={game.color} />
-        </span>
-
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-ink">{game.opponentName ?? "Unknown"}</span>
-          {game.opponentRating != null && (
-            <span className="shrink-0 font-mono text-xs text-graphite/80 tabular-nums">{game.opponentRating}</span>
-          )}
-          {game.playerRating != null && (
-            <span className="hidden shrink-0 font-mono text-xs whitespace-nowrap text-graphite/50 tabular-nums lg:inline">
-              you {game.playerRating}
-            </span>
-          )}
-        </span>
-
-        <time
-          dateTime={game.playedAt}
-          title={fullDate(game.playedAt)}
-          className="text-right font-mono text-xs text-graphite/70 sm:order-last"
-        >
-          {relativeTime(game.playedAt)}
-        </time>
-
-        <span className="col-start-2 col-end-4 flex min-w-0 gap-2 text-xs text-graphite/80 sm:contents">
-          <span className="shrink-0 font-mono sm:text-xs">{speed}</span>
-          <span className="truncate sm:text-sm" title={opening}>
-            <span className="sm:hidden">· </span>
-            {opening ?? "—"}
+      {/* The whole row opens the game review. prefetch off: Next would prefetch every row that
+          scrolls into view (up to 200), and the review page loads its data in the browser anyway. */}
+      <Link
+        href={href}
+        prefetch={false}
+        className="block px-1 py-2.5 transition-colors hover:bg-square-light/40 active:bg-square-light/70 sm:px-2"
+      >
+        {/* Mobile: two lines. sm and up: one grid row. */}
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-0.5 sm:grid-cols-[auto_minmax(0,1.7fr)_4.5rem_minmax(0,1.3fr)_6rem]">
+          <span className="row-span-2 flex items-center gap-2 sm:row-span-1">
+            <ResultMark result={game.result} />
+            <ColorChip color={game.color} />
           </span>
-        </span>
-      </div>
-      <Ribbon game={game} live={live} />
+
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-ink">{game.opponentName ?? "Unknown"}</span>
+            {game.opponentRating != null && (
+              <span className="shrink-0 font-mono text-xs text-graphite/80 tabular-nums">{game.opponentRating}</span>
+            )}
+            {game.playerRating != null && (
+              <span className="hidden shrink-0 font-mono text-xs whitespace-nowrap text-graphite/50 tabular-nums lg:inline">
+                you {game.playerRating}
+              </span>
+            )}
+          </span>
+
+          <time
+            dateTime={game.playedAt}
+            title={fullDate(game.playedAt)}
+            className="text-right font-mono text-xs text-graphite/70 sm:order-last"
+          >
+            {relativeTime(game.playedAt)}
+          </time>
+
+          <span className="col-start-2 col-end-4 flex min-w-0 gap-2 text-xs text-graphite/80 sm:contents">
+            <span className="shrink-0 font-mono sm:text-xs">{speed}</span>
+            <span className="truncate sm:text-sm" title={opening}>
+              <span className="sm:hidden">· </span>
+              {opening ?? "—"}
+            </span>
+          </span>
+        </div>
+        <Ribbon game={game} live={live} />
+      </Link>
     </motion.li>
   );
 });

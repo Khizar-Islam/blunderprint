@@ -49,7 +49,14 @@ const notDesktop = () => false;
 // What the visitor chose. "auto" = they haven't touched the button: run on desktop only.
 type Choice = "auto" | "paused" | "resumed";
 
-export function useAnalysis(platform: Platform, username: string, enabled: boolean): AnalysisView {
+// prefer: a game id to claim first (the game review page asks for the game it shows).
+// engines: how many to run; default 1–2 by CPU cores. The review page wants one game, so one.
+export function useAnalysis(
+  platform: Platform,
+  username: string,
+  enabled: boolean,
+  { prefer, engines }: { prefer?: string; engines?: number } = {},
+): AnalysisView {
   const [state, setState] = useState<SchedulerState>("stopped");
   const [choice, setChoice] = useState<Choice>("auto");
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, notDesktop);
@@ -116,6 +123,8 @@ export function useAnalysis(platform: Platform, username: string, enabled: boole
       },
       createEngine: () => new StockfishEngine(),
       onEvent,
+      prefer,
+      ...(engines ? { engines } : {}),
       locks: (navigator.locks as LockManagerLike | undefined) ?? null,
       onPageHide: (handler) => {
         window.addEventListener("pagehide", handler);
@@ -136,7 +145,7 @@ export function useAnalysis(platform: Platform, username: string, enabled: boole
       void s.stop(); // leaving the page: hand the games back with a normal request
       scheduler.current = null;
     };
-  }, [enabled, platform, username, onEvent]);
+  }, [enabled, platform, username, onEvent, prefer, engines]);
 
   // Run or stop to match the choice. Declared after the effect above, so on the first render
   // the scheduler exists by the time this runs (effects run in order).

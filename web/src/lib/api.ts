@@ -137,6 +137,27 @@ export function fetchGames(platform: Platform, username: string, cursor: string 
   return getJson<GamesPage>(`${playerPath(platform, username)}/games?${query}`, { signal });
 }
 
+// GET /api/games/:id: one game with PGN, clocks and the full analysis (backend routes/games.ts).
+export interface GameDetail extends Omit<GameRow, "analysis"> {
+  pgn: string;
+  clocks?: number[];
+  analysis: {
+    status: "pending" | "claimed" | "done" | "imported" | "unanalysable";
+    evals?: { cp?: number; mate?: number }[]; // per ply, White's view
+    best?: (string | null)[]; // engine's move before each ply (imported Lichess: judged plies only)
+    classifications?: MoveClass[];
+    accuracy?: number;
+    error?: { code: string; atPly?: number };
+  };
+}
+
+export function fetchGame(id: string, signal: AbortSignal) {
+  return getJson<{ game: GameDetail; player: { platform: Platform; username: string } | null }>(
+    `/api/games/${encodeURIComponent(id)}`,
+    { signal },
+  );
+}
+
 export const jobStreamUrl = (jobId: string) => `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/stream`;
 
 // ── Browser engine analysis (backend/src/routes/analysis.ts) ─────────────────────────────

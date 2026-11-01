@@ -235,7 +235,7 @@ function Dashboard({ platform, username }: Props) {
         <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
       )}
 
-      <GamesList games={games} live={analysis.live} />
+      <GamesList games={games} live={analysis.live} platform={platform} username={username} />
     </div>
   );
 }

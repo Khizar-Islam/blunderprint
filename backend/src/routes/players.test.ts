@@ -54,7 +54,17 @@ async function makeGames(playerId: Types.ObjectId) {
       pgn: "1. e4 e5",
       plies: 2,
       clocks: [180, 179],
-      analysis: { status: "pending" },
+      // The newest game is analysed, to check what the list leaves out.
+      analysis:
+        i === 0
+          ? {
+              status: "done",
+              evals: [{ cp: 30 }, { cp: 20 }],
+              best: ["e2e4", "c7c5"],
+              classifications: ["best", "good"],
+              accuracy: 97.5,
+            }
+          : { status: "pending" },
     })),
   );
 }
@@ -174,6 +184,16 @@ test("games: cursor pages walk every game exactly once, newest first, ties broke
 
   assert.deepEqual(pageSizes, [10, 10, 5]);
   assert.deepEqual(seen, expected);
+});
+
+test("games: the list sends classifications and accuracy, not evals or best moves", async () => {
+  const player = await makePlayer();
+  await makeGames(player._id);
+  const page = (await (await api("/players/lichess/alice/games?limit=1")).json()) as {
+    games: Array<{ sourceId: string; analysis: Record<string, unknown> }>;
+  };
+  assert.equal(page.games[0]!.sourceId, "g00");
+  assert.deepEqual(page.games[0]!.analysis, { status: "done", classifications: ["best", "good"], accuracy: 97.5 });
 });
 
 test("games: filters combine with the cursor", async () => {

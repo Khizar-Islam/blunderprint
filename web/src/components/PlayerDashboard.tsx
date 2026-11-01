@@ -16,6 +16,8 @@ import {
 import { relativeTime } from "@/lib/format";
 import { useJobStream, type JobEventType } from "@/lib/useJobStream";
 import { useWakingRequest } from "@/lib/useWakingRequest";
+import { useAnalysis } from "@/engine/useAnalysis";
+import { AnalysisBar } from "./AnalysisBar";
 import { GamesList } from "./GamesList";
 import { ImportProgress } from "./ImportProgress";
 
@@ -144,6 +146,15 @@ function Dashboard({ platform, username }: Props) {
   const stream = useJobStream(started?.jobId ?? null, onEvent);
   const job = stream.job;
 
+  // ---- Browser engine analysis (CLAUDE.md 8.2) -----------------------------------------------
+  // Runs once the player exists (the claim route needs them). While an import streams in,
+  // every new page of games kicks the scheduler, so an idle one claims the new games.
+  const analysis = useAnalysis(platform, username, player != null);
+  const { kick } = analysis;
+  useEffect(() => {
+    if (games.length > 0) kick();
+  }, [games, kick]);
+
   // ---- Render --------------------------------------------------------------------------------
   const chessComNote = platform === "chesscom" && (
     <p className="text-sm text-graphite/70">Chess.com publishes games with a 12–24 hour delay, so the newest may be missing.</p>
@@ -220,7 +231,11 @@ function Dashboard({ platform, username }: Props) {
         </Notice>
       )}
 
-      <GamesList games={games} />
+      {player && games.length > 0 && (
+        <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
+      )}
+
+      <GamesList games={games} live={analysis.live} />
     </div>
   );
 }

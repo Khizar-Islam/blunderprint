@@ -1,14 +1,16 @@
 "use client";
 
 import { motion } from "motion/react";
-import { useState } from "react";
+import { memo, useState } from "react";
+import type { LiveGame } from "@/engine/useAnalysis";
 import type { GameRow } from "@/lib/api";
 import { formatTimeControl, fullDate, relativeTime } from "@/lib/format";
+import { classifiedRibbon, progressRibbon } from "@/lib/ribbon";
 
 const STAGGER_S = 0.03; // between rows of one batch
 const MAX_STAGGERED = 20; // later rows of a big batch share the last delay, so none waits long
 
-export function GamesList({ games }: { games: GameRow[] }) {
+export function GamesList({ games, live = {} }: { games: GameRow[]; live?: Record<string, LiveGame> }) {
   // Which rows are new since the last list, and their order among the new ones: only those
   // reveal, staggered. React's "adjust state while rendering" pattern (no effect, no extra
   // render pass): when the games prop changes, recompute before rendering the rows.
@@ -26,7 +28,12 @@ export function GamesList({ games }: { games: GameRow[] }) {
   return (
     <ol className="flex flex-col border-t border-ink/10" aria-label="Games, newest first">
       {games.map((game) => (
-        <Row key={game.id} game={game} delay={Math.min(newOrder.get(game.id) ?? 0, MAX_STAGGERED) * STAGGER_S} />
+        <Row
+          key={game.id}
+          game={game}
+          live={live[game.id]}
+          delay={Math.min(newOrder.get(game.id) ?? 0, MAX_STAGGERED) * STAGGER_S}
+        />
       ))}
     </ol>
   );
@@ -64,7 +71,36 @@ function ColorChip({ color }: { color: GameRow["color"] }) {
   );
 }
 
-function Row({ game, delay }: { game: GameRow; delay: number }) {
+// The ribbon under a row, from the freshest source: this tab's live analysis, else what the
+// list says is stored. Pending games get an empty track, so a row's height never jumps.
+function Ribbon({ game, live }: { game: GameRow; live?: LiveGame }) {
+  const stored = game.analysis;
+  const classes = live?.classifications ?? stored?.classifications;
+  let background = "none";
+  let label = "Not analysed yet";
+  if (live?.unanalysable || (!live && stored?.status === "unanalysable")) {
+    label = "Couldn't analyse this game";
+  } else if (classes?.length) {
+    background = classifiedRibbon(classes, game.color);
+    label = "Analysed";
+  } else if (live) {
+    background = progressRibbon(live.evaluated, live.plies);
+    label = `Analysing: move ${Math.ceil(live.evaluated / 2)} of ${Math.ceil(live.plies / 2)}`;
+  }
+  return (
+    <div
+      className="mt-2 h-1 w-full rounded-full bg-ink/5"
+      style={{ backgroundImage: background }}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
+  );
+}
+
+// memo: while the engine runs, `live` changes ~10 times a second for one or two games; only
+// those rows re-render.
+const Row = memo(function Row({ game, live, delay }: { game: GameRow; live?: LiveGame; delay: number }) {
   const tc = formatTimeControl(game.timeControl);
   const speed = [game.speed, tc].filter(Boolean).join(" ");
   const opening = game.opening?.name ?? game.opening?.eco;
@@ -113,6 +149,7 @@ function Row({ game, delay }: { game: GameRow; delay: number }) {
           </span>
         </span>
       </div>
+      <Ribbon game={game} live={live} />
     </motion.li>
   );
-}
+});

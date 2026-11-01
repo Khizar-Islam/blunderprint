@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { jsonResponse, recordingFetch, statusResponse } from "../../scripts/fakeFetch.js";
 import { chessComGame, chessComPgn } from "../../scripts/fixtures.js";
-import { createChessComImporter, normalizeChessComGame, type ChessComGame } from "./chesscom.js";
+import { createChessComImporter, normalizeChessComGame, openingNameFromEcoUrl, type ChessComGame } from "./chesscom.js";
 import { countPliesFromText, type ImportBatch, type NormalizedGame } from "./normalize.js";
 import { createPoliteClient } from "./politeFetch.js";
 
@@ -24,6 +24,24 @@ test("normalizes a game from the player's side", () => {
   assert.equal(asBlack.color, "black");
   assert.equal(asBlack.result, "loss");
   assert.equal(asBlack.playerRating, 1480);
+});
+
+test("opening names come from ECOUrl; Chess.com's \"Undefined\" means no name", () => {
+  const url = (slug: string) => `https://www.chess.com/openings/${slug}`;
+  assert.equal(openingNameFromEcoUrl(url("Sicilian-Defense-Open-2...Nc6")), "Sicilian Defense Open 2...Nc6");
+  assert.equal(openingNameFromEcoUrl(url("Caro-Kann-Defense%3A-Advance")), "Caro Kann Defense: Advance");
+  assert.equal(openingNameFromEcoUrl(url("Undefined")), undefined);
+  assert.equal(openingNameFromEcoUrl(url("undefined")), undefined);
+  assert.equal(openingNameFromEcoUrl(url("")), undefined);
+  assert.equal(openingNameFromEcoUrl(undefined), undefined);
+  assert.equal(openingNameFromEcoUrl(url("Bad-%E0-Escape")), "Bad %E0 Escape"); // kept, not thrown
+
+  // End to end through the normalizer, with the header as Chess.com really sends it (ECO A00).
+  const raw = chessComGame();
+  raw.pgn = raw.pgn!
+    .replace(/\[ECOUrl "[^"]*"\]/, `[ECOUrl "${url("Undefined")}"]`)
+    .replace(/\[ECO "[^"]*"\]/, '[ECO "A00"]');
+  assert.deepEqual(normalizeChessComGame(raw, "alice")!.opening, { eco: "A00", name: undefined });
 });
 
 test("draw codes become a draw", () => {

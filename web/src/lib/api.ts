@@ -64,6 +64,13 @@ export interface GameRow {
   opponentName?: string;
   plies: number;
   opening?: { eco?: string; name?: string };
+  // The list leaves out the evals (backend LIST_PROJECTION); classifications are enough for
+  // the row's ribbon.
+  analysis?: {
+    status: "pending" | "claimed" | "done" | "imported" | "unanalysable";
+    classifications?: MoveClass[];
+    accuracy?: number;
+  };
 }
 
 export interface GamesPage {
@@ -131,3 +138,54 @@ export function fetchGames(platform: Platform, username: string, cursor: string 
 }
 
 export const jobStreamUrl = (jobId: string) => `${API_URL}/api/jobs/${encodeURIComponent(jobId)}/stream`;
+
+// ── Browser engine analysis (backend/src/routes/analysis.ts) ─────────────────────────────
+
+export type MoveClass = "best" | "good" | "inaccuracy" | "mistake" | "blunder";
+
+export interface AnalysisClaim {
+  claimId: string; // the lease: only this token may post these games' results
+  expiresAt: string;
+  engine: string;
+  games: { id: string; pgn: string; plies: number; color: "white" | "black" }[];
+}
+
+const postJson = <T>(path: string, body: unknown, init: RequestInit = {}) =>
+  getJson<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    ...init,
+  });
+
+// Leases up to 3 of the player's unanalysed games (newest first, `prefer` first) to this tab.
+export function claimAnalysis(platform: Platform, username: string, prefer?: string, signal?: AbortSignal) {
+  return postJson<AnalysisClaim>("/api/analysis/claim", { platform, username, prefer }, { signal });
+}
+
+// One game's result. 409 = the lease is gone (another tab reclaimed the game): drop it.
+// No abort signal on purpose: a finished analysis is worth saving even while pausing.
+// keepalive: the browser finishes the request even if the tab closes meanwhile (allowed for
+// bodies up to 64 KB; a result is at most ~20 KB, see MAX_PLIES in the route).
+export function postAnalysisResult(claimId: string, result: object) {
+  return postJson<{ ok: true; alreadyDone?: boolean; classifications?: MoveClass[]; accuracy?: number }>(
+    "/api/analysis/results",
+    { claimId, ...result },
+    { keepalive: true },
+  );
+}
+
+// Hands unfinished games back so the next tab can take them at once instead of waiting out
+// the 10-minute lease. `beacon` is for a closing page: navigator.sendBeacon still delivers
+// after the page is gone, but only as a "simple" request (text/plain body, no preflight), so
+// the route parses the JSON itself. Best effort either way: an expired lease frees them too.
+export function releaseAnalysis(claimId: string, gameIds: string[], { beacon = false } = {}): void {
+  if (gameIds.length === 0) return;
+  const url = `${API_URL}/api/analysis/release`;
+  const body = JSON.stringify({ claimId, gameIds });
+  if (beacon && typeof navigator !== "undefined" && navigator.sendBeacon?.(url, new Blob([body], { type: "text/plain" }))) {
+    return;
+  }
+  // keepalive lets the request finish even if the page navigates away meanwhile.
+  fetch(url, { method: "POST", headers: { "Content-Type": "text/plain" }, body, keepalive: true }).catch(() => {});
+}

@@ -97,10 +97,24 @@ export function normalizeChessComGame(
     clocks: clocksFromPgn(game.pgn, plies),
     opening: {
       eco: pgnHeader(game.pgn, "ECO"),
-      // ".../openings/Sicilian-Defense-Open-2...Nc6" → "Sicilian Defense Open 2...Nc6"
-      name: ecoUrl ? decodeURIComponent(ecoUrl.split("/").pop() ?? "").replace(/-/g, " ") || undefined : undefined,
+      name: openingNameFromEcoUrl(ecoUrl),
     },
   };
+}
+
+// ".../openings/Sicilian-Defense-Open-2...Nc6" → "Sicilian Defense Open 2...Nc6".
+// Chess.com sends ".../openings/Undefined" when the game has no named opening (seen on 17
+// stored games, all ECO A00): that's no name, not an opening called "Undefined".
+export function openingNameFromEcoUrl(ecoUrl: string | undefined): string | undefined {
+  if (!ecoUrl) return undefined;
+  let last = ecoUrl.split("/").pop() ?? "";
+  try {
+    last = decodeURIComponent(last);
+  } catch {
+    // a malformed %-escape: keep the raw text rather than failing the whole game
+  }
+  const name = last.replace(/-/g, " ").trim();
+  return name && name.toLowerCase() !== "undefined" ? name : undefined;
 }
 
 // Archive URLs end in /YYYY/MM.

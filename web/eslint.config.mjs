@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Stockfish's minified build, copied from node_modules by scripts/copy-engine.mjs: third-party
+    // output, not our source.
+    "public/engine/**",
   ]),
 ]);
 

@@ -15,7 +15,8 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "import:once": "tsx --env-file=.env scripts/importOnce.ts",
     "explain:games": "tsx --env-file=.env scripts/explainGames.ts",
-    "backfill:classifications": "tsx --env-file=.env scripts/backfillClassifications.ts"
+    "backfill:classifications": "tsx --env-file=.env scripts/backfillClassifications.ts",
+    "fix:undefined-openings": "tsx --env-file=.env scripts/fixUndefinedOpenings.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

@@ -37,6 +37,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Stockfish engine files: copied from node_modules/stockfish by scripts/copy-engine.mjs before
+# every dev/build (version pinned in package.json), so no binaries in git.
+/public/engine/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

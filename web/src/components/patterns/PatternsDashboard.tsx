@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import type { Platform, Rate, Summary } from "@/lib/api";
 import { apiQuery, filtersToQuery, parseFilters, type DashboardFilters } from "@/lib/filters";
+import { count } from "@/lib/format";
 import { useSummary } from "@/lib/useSummary";
 import { Blunderprint } from "./Blunderprint";
 import { StackedBars, type BarRow } from "./charts/StackedBars";
@@ -24,7 +25,6 @@ const PHASE_LABEL = { opening: "Opening", middlegame: "Middlegame", endgame: "En
 const CLOCK_LABEL = { over50: "Over 50% left", from25to50: "25–50% left", from10to25: "10–25% left", under10: "Under 10% left" } as const;
 const SPEED_LABEL = { bullet: "Bullet", blitz: "Blitz", rapid: "Rapid", classical: "Classical", daily: "Daily" } as const;
 
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const one = (n: number) => n.toFixed(1);
 const two = (n: number) => n.toFixed(2);
 
@@ -118,23 +118,23 @@ export function PatternsDashboard({
                 <div className="grid gap-x-10 gap-y-8 md:grid-cols-2">
                   <StackedBars
                     title="Phase"
-                    rows={summary.byPhase.map((p) => bar(p.phase, PHASE_LABEL[p.phase], p, rate))}
+                    rows={summary.byPhase.map((p) => bar(p.phase, PHASE_LABEL[p.phase], p, rate, summary.totals.analysed))}
                     format={rate === "per100" ? one : two}
                   />
                   <StackedBars
                     title="Clock"
                     caption="Time left when the move was played. Daily games and games without clock data aren't counted."
-                    rows={summary.byClock.map((c) => bar(c.bucket, CLOCK_LABEL[c.bucket], c, rate))}
+                    rows={summary.byClock.map((c) => bar(c.bucket, CLOCK_LABEL[c.bucket], c, rate, summary.totals.analysed))}
                     format={rate === "per100" ? one : two}
                   />
                   <StackedBars
                     title="Move number"
-                    rows={summary.byMoveNumber.map((m) => bar(m.bucket, `Moves ${m.bucket.replace("-", "–")}`, m, rate))}
+                    rows={summary.byMoveNumber.map((m) => bar(m.bucket, `Moves ${m.bucket.replace("-", "–")}`, m, rate, summary.totals.analysed))}
                     format={rate === "per100" ? one : two}
                   />
                   <StackedBars
                     title="Speed"
-                    rows={summary.bySpeed.map((s) => ({ ...bar(s.speed, SPEED_LABEL[s.speed], s, rate), sub: `${s.games} games` }))}
+                    rows={summary.bySpeed.map((s) => ({ ...bar(s.speed, SPEED_LABEL[s.speed], s, rate, s.games), sub: count(s.games, "game", "games") }))}
                     format={rate === "per100" ? one : two}
                   />
                 </div>
@@ -149,10 +149,13 @@ export function PatternsDashboard({
   );
 }
 
-function bar(key: string, label: string, r: Rate, rate: RateMode): BarRow {
+// `games`: what the bar is built on. Speed bars have their own count; the phase, clock and
+// move-number bars are all built on every analysed game in the filter.
+function bar(key: string, label: string, r: Rate, rate: RateMode, games: number): BarRow {
   return {
     key,
     label,
+    games,
     counts: { inaccuracy: r.inaccuracy, mistake: r.mistake, blunder: r.blunder },
     value: rate === "per100" ? r.per100 : r.perGame,
   };

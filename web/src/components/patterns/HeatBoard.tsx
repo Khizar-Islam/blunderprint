@@ -2,19 +2,17 @@
 
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
-import type { ErrorKind, Summary } from "@/lib/api";
-import { displayOrder, dominantKind, edgeLabels, heatSquares, intensity, squareLabel, type HeatMode } from "./heat";
+import type { Summary } from "@/lib/api";
+import { displayOrder, edgeLabels, heatOpacity, heatSquares, severity, squareLabel, type HeatMode } from "./heat";
 
 // The 8×8 board of where the player's errors land (the moved piece's destination square).
 // 64 plain elements: cheap at this size, and each square can be a focusable button with a real
-// label for screen readers. Colour = the square's most common kind, strength = how many errors
-// (heat.ts intensity). The view follows the colour filter: both / White / Black.
+// label for screen readers. One hue (brick); the strength is how costly the square's errors
+// were (heat.ts severity: blunder 3, mistake 2, inaccuracy 1), on a scale from 0, so only the
+// hot spots stand out. The label still breaks the count down by kind. The view follows the
+// colour filter: both / White / Black.
 
-const KIND_COLOR: Record<ErrorKind, string> = {
-  inaccuracy: "var(--color-inaccuracy)",
-  mistake: "var(--color-mistake)",
-  blunder: "var(--color-blunder)",
-};
+const HEAT = "var(--color-blunder)";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const describe = (sq: { inaccuracy: number; mistake: number; blunder: number; total: number }) =>
@@ -31,7 +29,7 @@ const describe = (sq: { inaccuracy: number; mistake: number; blunder: number; to
 export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode: HeatMode }) {
   const reduced = useReducedMotion();
   const cells = heatSquares(squares, mode);
-  const max = Math.max(0, ...cells.map((c) => c.total));
+  const max = Math.max(0, ...cells.map(severity));
   const order = displayOrder(mode);
   const labels = edgeLabels(mode);
   const [focus, setFocus] = useState<number | null>(null);
@@ -60,7 +58,6 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
         <div className="grid aspect-square grid-cols-8 overflow-hidden rounded-sm" role="list" aria-label="Errors by square">
           {order.map((i, n) => {
             const cell = cells[i]!;
-            const kind = dominantKind(cell);
             const light = (Math.floor(n / 8) + n) % 2 === 0; // top-left is a light square, like a real board
             const label = `${squareLabel(i, mode)}: ${describe(cell)}`;
             return (
@@ -76,12 +73,12 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
                 onBlur={() => setFocus(null)}
                 className={`relative transition-transform duration-100 active:scale-95 ${light ? "bg-square-light/60" : "bg-square-dark/35"} focus-visible:z-10`}
               >
-                {kind && (
+                {cell.total > 0 && (
                   <motion.span
                     className="absolute inset-0"
-                    style={{ backgroundColor: KIND_COLOR[kind] }}
+                    style={{ backgroundColor: HEAT }}
                     initial={{ opacity: 0 }}
-                    animate={{ opacity: intensity(cell.total, max) }}
+                    animate={{ opacity: heatOpacity(severity(cell), max) }}
                     transition={reduced ? { duration: 0 } : { duration: 0.5, delay: (n % 8) * 0.02 + Math.floor(n / 8) * 0.02 }}
                   />
                 )}
@@ -102,15 +99,17 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
       <p className="min-h-5 font-mono text-xs text-graphite" aria-live="polite">
         {focused ? `${squareLabel(focus!, mode)}: ${describe(focused)}` : max === 0 ? "No errors yet." : "Hover a square for its count."}
       </p>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-graphite/80">
-        {(["blunder", "mistake", "inaccuracy"] as const).map((k) => (
-          <li key={k} className="flex items-center gap-1.5">
-            <span className="size-2.5 rounded-[2px]" style={{ backgroundColor: KIND_COLOR[k] }} />
-            {k === "blunder" ? "mostly blunders" : k === "mistake" ? "mostly mistakes" : "mostly inaccuracies"}
-          </li>
-        ))}
-        <li className="text-graphite/60">paler = fewer</li>
-      </ul>
+      <div className="flex flex-col gap-1 text-xs text-graphite/80">
+        <span className="flex items-center gap-2">
+          <span
+            className="h-2.5 w-24 rounded-[2px]"
+            style={{ backgroundImage: `linear-gradient(to right, transparent, color-mix(in oklab, ${HEAT} 90%, transparent))` }}
+            aria-hidden="true"
+          />
+          darker = more costly errors
+        </span>
+        <span className="text-graphite/60">A blunder counts 3, a mistake 2, an inaccuracy 1.</span>
+      </div>
     </figure>
   );
 }

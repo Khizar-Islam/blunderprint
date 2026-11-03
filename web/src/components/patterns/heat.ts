@@ -17,7 +17,6 @@ export type HeatMode = "both" | "white" | "black";
 export type HeatSquare = SquareCount;
 
 export const FILES = "abcdefgh";
-const KINDS_BY_SEVERITY: ErrorKind[] = ["blunder", "mistake", "inaccuracy"];
 
 const fileOf = (i: number) => i % 8;
 const rankOf = (i: number) => Math.floor(i / 8); // 0 = rank 1
@@ -68,17 +67,18 @@ export function squareLabel(i: number, mode: HeatMode): string {
   return mode === "both" ? `${nameOf(i)} from your side` : nameOf(i);
 }
 
-// The kind with the most errors on a square; a tie goes to the more severe kind. Null when empty.
-export function dominantKind(sq: Pick<HeatSquare, ErrorKind>): ErrorKind | null {
-  let best: ErrorKind | null = null;
-  for (const kind of KINDS_BY_SEVERITY) if (sq[kind] > 0 && (best === null || sq[kind] > sq[best])) best = kind;
-  return best;
-}
+// How costly a square's errors were: a blunder counts 3, a mistake 2, an inaccuracy 1. Plain
+// counts let the many inaccuracies (which land everywhere) tint the whole board evenly; the
+// weighting lets the squares where real damage happens stand out.
+export const SEVERITY_WEIGHT: Record<ErrorKind, number> = { blunder: 3, mistake: 2, inaccuracy: 1 };
+export const severity = (sq: Pick<HeatSquare, ErrorKind>) =>
+  SEVERITY_WEIGHT.blunder * sq.blunder + SEVERITY_WEIGHT.mistake * sq.mistake + SEVERITY_WEIGHT.inaccuracy * sq.inaccuracy;
 
-// Fill opacity for a square: 0 when empty, otherwise 0.15–0.9 on a square-root scale. The root
-// keeps a square with 1–2 errors visible next to one with 30, where a straight line would make
-// it nearly invisible.
-export function intensity(total: number, max: number): number {
-  if (total <= 0 || max <= 0) return 0;
-  return 0.15 + 0.75 * Math.sqrt(Math.min(total, max) / max);
+// Fill opacity for a square, one hue (brick): a straight line from 0 up to 0.9 for the costliest
+// square. Starting at 0 (no floor) keeps quiet squares close to plain board colour, so only the
+// hot spots stand out.
+export const HEAT_MAX_OPACITY = 0.9;
+export function heatOpacity(score: number, max: number): number {
+  if (score <= 0 || max <= 0) return 0;
+  return HEAT_MAX_OPACITY * (Math.min(score, max) / max);
 }

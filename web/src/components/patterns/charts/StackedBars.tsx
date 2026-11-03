@@ -3,6 +3,7 @@
 import { motion, useReducedMotion } from "motion/react";
 import type { ErrorKind, KindCounts } from "@/lib/api";
 import { AnimatedNumber } from "./AnimatedNumber";
+import { fewGames } from "./sample";
 import { niceMax, ticks } from "./scale";
 
 // A horizontal bar per bucket, split by error kind (blunders first from the left), hand-drawn in
@@ -20,6 +21,7 @@ export interface BarRow {
   key: string;
   label: string;
   sub?: string; // e.g. "38 games"
+  games: number; // the games the bar is built on: under 5, it's greyed out (charts/sample.ts)
   counts: KindCounts;
   value: number | null; // the rate shown (per 100 moves or per game); null = no data
 }
@@ -28,6 +30,13 @@ const FILL: Record<ErrorKind, string> = {
   inaccuracy: "var(--color-inaccuracy)",
   mistake: "var(--color-mistake)",
   blunder: "var(--color-blunder)",
+};
+
+// A bar on too few games keeps its shape but loses its colours: stone greys, darkest for blunders.
+const FEW: Record<ErrorKind, string> = {
+  inaccuracy: "var(--color-square-light)",
+  mistake: "color-mix(in oklab, var(--color-square-dark) 60%, var(--color-square-light))",
+  blunder: "var(--color-square-dark)",
 };
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -64,15 +73,20 @@ export function StackedBars({
             mistake: part(row.counts.blunder + row.counts.mistake),
             inaccuracy: part(total),
           };
+          const few = fewGames(row.games);
           return (
             <li
               key={row.key}
               className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[8.5rem_1fr_3.5rem]"
-              aria-label={`${row.label}: ${row.value === null ? "no data" : format(row.value)}; ${row.counts.blunder} blunders, ${row.counts.mistake} mistakes, ${row.counts.inaccuracy} inaccuracies`}
+              aria-label={`${row.label}: ${row.value === null ? "no data" : format(row.value)}; ${row.counts.blunder} blunders, ${row.counts.mistake} mistakes, ${row.counts.inaccuracy} inaccuracies${few ? "; few games, read with care" : ""}`}
             >
-              <span className="flex min-w-0 items-baseline gap-2 text-sm text-ink">
-                <span className="truncate">{row.label}</span>
-                {row.sub && <span className="shrink-0 font-mono text-xs text-graphite/60">{row.sub}</span>}
+              <span className={`flex min-w-0 flex-col text-sm ${few ? "text-graphite/60" : "text-ink"}`}>
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate">{row.label}</span>
+                  {row.sub && <span className="shrink-0 font-mono text-xs text-graphite/60">{row.sub}</span>}
+                </span>
+                {/* Its own line, so it never squeezes the label in the narrow label column. */}
+                {few && <span className="font-mono text-[11px] leading-tight text-graphite/60 italic">few games</span>}
               </span>
               <svg
                 className="col-span-2 row-start-2 h-3 w-full sm:col-span-1 sm:row-start-auto"
@@ -99,14 +113,14 @@ export function StackedBars({
                     x="0"
                     y="0"
                     height="10"
-                    style={{ fill: FILL[kind] }}
+                    style={{ fill: few ? FEW[kind] : FILL[kind] }}
                     initial={{ width: 0 }}
                     animate={{ width: widths[kind] }}
                     transition={reduced ? { duration: 0 } : { duration: 0.6, ease: EASE }}
                   />
                 ))}
               </svg>
-              <span className="text-right font-mono text-sm text-ink tabular-nums">
+              <span className={`text-right font-mono text-sm tabular-nums ${few ? "text-graphite/60" : "text-ink"}`}>
                 <AnimatedNumber value={row.value} format={format} />
               </span>
             </li>

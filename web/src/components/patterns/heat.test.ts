@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { SquareCount, Summary } from "@/lib/api";
-import { displayOrder, dominantKind, edgeLabels, heatSquares, intensity, mirrorRank, nameOf, squareLabel } from "./heat";
+import { displayOrder, edgeLabels, heatOpacity, heatSquares, HEAT_MAX_OPACITY, mirrorRank, nameOf, severity, squareLabel } from "./heat";
 
 const FILES = "abcdefgh";
 const empty = (): SquareCount[] =>
@@ -74,26 +74,26 @@ describe("displayOrder and edgeLabels", () => {
   });
 });
 
-describe("dominantKind", () => {
-  test("the most common kind", () => {
-    assert.equal(dominantKind({ inaccuracy: 4, mistake: 1, blunder: 2 }), "inaccuracy");
-    assert.equal(dominantKind({ inaccuracy: 0, mistake: 3, blunder: 2 }), "mistake");
+describe("severity", () => {
+  test("a blunder counts 3, a mistake 2, an inaccuracy 1", () => {
+    assert.equal(severity({ inaccuracy: 0, mistake: 0, blunder: 0 }), 0);
+    assert.equal(severity({ inaccuracy: 1, mistake: 0, blunder: 0 }), 1);
+    assert.equal(severity({ inaccuracy: 4, mistake: 2, blunder: 3 }), 4 + 4 + 9);
   });
-  test("a tie goes to the more severe kind", () => {
-    assert.equal(dominantKind({ inaccuracy: 2, mistake: 2, blunder: 2 }), "blunder");
-    assert.equal(dominantKind({ inaccuracy: 1, mistake: 1, blunder: 0 }), "mistake");
-  });
-  test("no errors: none", () => {
-    assert.equal(dominantKind({ inaccuracy: 0, mistake: 0, blunder: 0 }), null);
+  test("three blunders outweigh eight inaccuracies (the quilt problem)", () => {
+    assert.ok(severity({ inaccuracy: 0, mistake: 0, blunder: 3 }) > severity({ inaccuracy: 8, mistake: 0, blunder: 0 }));
   });
 });
 
-describe("intensity", () => {
-  test("0 when empty; 0.15 to 0.9 on a square-root scale otherwise", () => {
-    assert.equal(intensity(0, 10), 0);
-    assert.equal(intensity(10, 10), 0.9);
-    assert.equal(intensity(1, 0), 0, "an all-empty board has max 0");
-    assert.ok(Math.abs(intensity(1, 4) - (0.15 + 0.75 * 0.5)) < 1e-9);
-    assert.ok(intensity(1, 30) > 0.25, "one error next to thirty is still visible");
+describe("heatOpacity", () => {
+  test("a straight line from 0: no floor, so quiet squares stay plain", () => {
+    assert.equal(heatOpacity(0, 30), 0);
+    assert.equal(heatOpacity(30, 30), HEAT_MAX_OPACITY);
+    assert.ok(Math.abs(heatOpacity(15, 30) - HEAT_MAX_OPACITY / 2) < 1e-9);
+    assert.ok(heatOpacity(1, 30) < 0.05, "one inaccuracy next to the hot spot barely tints");
+  });
+  test("an all-empty board (max 0) and out-of-range scores", () => {
+    assert.equal(heatOpacity(1, 0), 0);
+    assert.equal(heatOpacity(40, 30), HEAT_MAX_OPACITY, "never past the max");
   });
 });

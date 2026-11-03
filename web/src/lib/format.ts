@@ -37,3 +37,6 @@ export function formatTimeControl(tc?: string): string | null {
   const shown = minutes === 0.5 ? "½" : minutes === 0.25 ? "¼" : Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1);
   return `${shown}+${increment}`;
 }
+
+// "1 game", "5 games", "1 inaccuracy", "3 inaccuracies": the number with the right word.
+export const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

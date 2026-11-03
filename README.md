@@ -4,6 +4,21 @@ Enter any Chess.com or Lichess username, and Blunderprint imports the games, fin
 
 Work in progress.
 
+## What it does now (Stage 2)
+
+- **Import:** type a Chess.com or Lichess username and the newest 200 games stream in live over Server-Sent Events. Re-imports are idempotent and fetch only what's new.
+- **Analysis in your browser:** Stockfish 19 runs on the visitor's own machine (details below). Each game's move ribbon fills tick by tick as the engine works, and the bar shows the measured speed ("~N s per game").
+  - Desktop starts by itself, with Pause/Resume. Phones get an "Analyse on this device" button, because the engine uses the battery.
+  - Only one tab per browser runs engines (a Web Lock). A second tab waits and takes over when the first closes.
+- **Move classification on the server:** Lichess's win-percentage formula and thresholds (inaccuracy / mistake / blunder). On 276 real Lichess games, it matched all 3,212 of Lichess's own judgements. Games imported from Lichess with analysis keep Lichess's evals and skip the engine.
+- **Game review page** (`/p/[platform]/[username]/game/[id]`):
+  - Board, an eval graph that draws itself (click or drag to jump to a move), and a move list coloured by classification that scrolls to the current move. Arrow keys and Home/End step through the game.
+  - On a mistake: "Nxe5?? was a blunder. Better was Nf3", with a **Show** control (click, press-and-hold, or hold B). It shows the position before the move, with an arrow for the better move and one for the move played.
+  - A game that isn't analysed yet is analysed first, on one engine.
+- **Free-tier cold starts:** pages show "Waking the server up… (Ns)" while the sleeping API starts.
+
+Tests (3 Nov 2026): backend 147 passing, web 55 passing (`npm test` in each folder).
+
 ## The engine runs in your browser
 
 The server is on a free tier whose CPU is far too slow for Stockfish, so each visitor's browser analyses the games instead. The server hands out games on a lease (`POST /api/analysis/claim`), checks every result it gets back, and classifies the moves itself.

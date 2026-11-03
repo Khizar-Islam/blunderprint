@@ -124,17 +124,25 @@ blunderprint/
 │  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
 │  │                          validate.ts zod → 400, sleep.ts, version.ts)
 │  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
-│  │                          importOnce, explainGames)
+│  │                          importOnce, explainGames; one-off fixes: backfillClassifications,
+│  │                          fixUndefinedOpenings)
 │  └─ .env.example
 ├─ docs/explain/             (saved .explain() output for the README)
 ├─ web/
-│  ├─ src/app/               (/, /p/[platform]/[username], /p/.../game/[id], /p/.../coach)
-│  ├─ src/lib/               (api.ts, useJobStream.ts, useWakingRequest.ts, format.ts)
+│  ├─ src/app/               (/, /p/[platform]/[username], /p/.../game/[id], /p/.../coach;
+│  │                          /dev/engine: engine timing lab used for the Stage 2 measurements, dev only (404 in production))
+│  ├─ src/lib/               (api.ts, useJobStream.ts, useWakingRequest.ts, format.ts,
+│  │                          ribbon.ts, timeline.ts replay + SAN, winPercent.ts graph + accuracy)
 │  ├─ src/components/        (PlayerSearch, PlayerDashboard, ImportProgress, GamesList, HealthStatus,
-│  │                          MotionProvider; later Board, MoveRibbon, Blunderprint, EvalGraph,
-│  │                          AgentTrace, PatternCard)
-│  ├─ src/engine/            (stockfish worker wrapper, analysis scheduler)
-│  ├─ public/engine/         (stockfish-19-lite-single.js + .wasm + its LICENSE)
+│  │                          MotionProvider, AnalysisBar;
+│  │                          review/: GameReview, Board, EvalGraph, MoveList, BetterMove, classes;
+│  │                          later Blunderprint, AgentTrace, PatternCard)
+│  ├─ src/engine/            (stockfish.ts worker wrapper, uci.ts parsing, analyseGame.ts,
+│  │                          replay.ts, scheduler.ts claim/analyse/post + Web Lock,
+│  │                          useAnalysis.ts React hook, throughput.ts s/game)
+│  ├─ scripts/copy-engine.mjs (predev/prebuild: copies the engine from node_modules/stockfish)
+│  ├─ public/engine/         (gitignored, copied at build: stockfish-19-lite-single.js + .wasm,
+│  │                          Copying.txt GPL text, SOURCE.txt where the source is)
 │  └─ .env.example
 └─ scripts/
    └─ import-positions/      (offline: Lichess parquet → positionStats)
@@ -274,8 +282,11 @@ A **storage guard** job runs after imports. It reads `dbStats`, and over the thr
 6. Errors: on 404 the user doesn't exist (fail cleanly); on 429 back off (Lichess: 60 s); network errors retry with exponential backoff up to `maxAttempts`.
 
 ### 8.2 Browser engine analysis
-1. The web app asks `POST /api/analysis/claim { platform, username, prefer? }` (POST, not GET: it changes data, and a GET can be prefetched or retried by the browser) and receives up to K pending games (K=3), newest first, with `prefer` first. The server marks them `claimed` by a random claim token with a 10-minute `claimExpiresAt`.
-2. The engine runs in 1–2 Web Workers (based on `navigator.hardwareConcurrency`). It evaluates the position after every ply with a fixed **node or time budget**, not unbounded depth, so the time per game is predictable. **Measure in Stage 2** and pick settings that keep a typical game under about 15 seconds.
+1. The web app asks `POST /api/analysis/claim { platform, username, prefer? }` (POST, not GET: it changes data, and a GET can be prefetched or retried by the browser) and receives up to K pending games (K=3), newest first, with `prefer` first. The server marks them `claimed` by a random claim token with a 10-minute `claimExpiresAt`. The game review page claims with `prefer` = its own game and runs **one** engine, and stops once that game is stored.
+2. The engine runs in Web Workers: **2 on machines with 4+ cores** (`navigator.hardwareConcurrency`), 1 otherwise. It evaluates the position after every ply with a fixed **100,000 nodes**, not unbounded depth or a time limit, so the time per game is predictable and the result doesn't depend on the machine (measured 1 Nov 2026: ~150 ms per position on 1 engine; with 2 engines roughly one 111-ply game every 10 s; table in the README).
+   - **One tab at a time:** `scheduler.ts` takes the Web Lock `blunderprint:engine` (`navigator.locks`, shared by every tab of the site). A second tab shows "another Blunderprint tab is analysing" and takes over by itself when the first closes or pauses.
+   - **Start:** desktop (fine pointer, ≥ 640 px) starts by itself, with Pause/Resume. Phones wait for an **"Analyse on this device"** button, because the engine drains the battery.
+   - **Progress:** the bar shows "N of M analysed" and an effective **"~N s per game"** (analysing time ÷ games finished, both engines together, so it matches how fast the list fills). Ribbons fill tick by tick as plies are evaluated.
 3. It posts `POST /api/analysis/results` with per-ply evals, best moves and played moves (UCI). The server validates the counts against the stored plies, the bounds, and that the game is still claimed by this token (a reclaim changes the token, so a late result from an old tab gets 409; a repeat from the same claim gets 200). It then classifies the moves and stores the result. Enqueuing `extract` waits for Stage 3. If chess.js can't replay the PGN (or replays a different number of plies), the browser reports `illegal_pgn`/`ply_mismatch` and the game becomes `unanalysable`.
 4. Expired claims are claimable again, so a closed tab never loses work. Anyone viewing the player later continues the analysis. On `pagehide` the browser also sends `POST /api/analysis/release` with `navigator.sendBeacon` (a text/plain body, parsed by the route's own `express.text`) so its unfinished games go back at once.
 5. **Classification** (`chess/classify.ts`, ported from lila's `Advice.scala` and scalachess's `WinPercent`, with sources cited there): win chances `2/(1+e^(−0.00368208·cp))−1`; a drop of ≥ 0.1 / 0.2 / 0.3 is an inaccuracy / mistake / blunder; mate transitions follow lila's `MateAdvice`; ply 1 is judged against +15 cp; the engine's own best move is `best` and never judged. Imported Lichess games keep **Lichess's own judgements** (it skips moves that were the engine's best, which its export doesn't fully name). On 276 real games our formula matched all 3,212 of Lichess's judgements and added 65 extras.
@@ -390,7 +401,12 @@ Rules:
 ### Pages
 - `/`: landing. A pre-analysed demo player's Blunderprint animating, plus one input: username and platform toggle.
 - `/p/[platform]/[username]`: dashboard. Import progress, then analysis progress, then the patterns dashboard, with a "Coach me" button.
-- `/p/[platform]/[username]/game/[id]`: game review. Board, eval graph, move list with classifications, and a "what players at your level play here" panel.
+- `/p/[platform]/[username]/game/[id]`: game review. Board, eval graph, move list with classifications, and (Stage 4) a "what players at your level play here" panel. Built in Stage 2:
+  - The game is fetched in the browser, so the "Waking the server up…" counter works here too. A game that isn't this player's (platform + username) shows "not found".
+  - The header shows the result, opponent and the player's **avg move accuracy**.
+  - The eval graph draws itself; clicking or dragging across it jumps to that move. The move list scrolls to the current move. Keys: ←/→, Home/End.
+  - On an inaccuracy/mistake/blunder: "Nxe5?? was a blunder. Better was Nf3" plus a **Show** control. Show switches the board to the position **before** the move, with a teal arrow for the better move and a muted rust arrow for the move played (not on the position after, where the piece may have moved or been taken). Show works by click (toggles until clicked again or the move changes), press-and-hold (only while held), or holding B.
+  - If the game isn't analysed yet, the page analyses it first (see 8.2, `prefer` + one engine).
 - `/p/[platform]/[username]/coach`: the agent trace and the report.
 
 ### Design direction (no "AI slop")
@@ -400,7 +416,7 @@ Rules:
   - Classifications: inaccuracy Amber `#D4A72C`, mistake Rust `#D9772B`, blunder Brick `#B3362B`, best/good Teal `#3E7C74`.
 - **Type:** Newsreader (display serif, the "chess book" feel), Geist (UI), Geist Mono (notation, numbers, the agent trace).
 - **Signature visual: the Blunderprint.**
-  - Every analysed game is a thin horizontal **move ribbon**, one tick per move, coloured by classification.
+  - Every analysed game is a thin horizontal **move ribbon**, one tick per move, coloured by classification. Only the imported player's moves are coloured; opponent ticks are faint stone.
   - Stacked, the ribbons form a fingerprint-like texture of the player's habits.
   - Beside it sits an 8×8 **heat board** of where mistakes happen.
   - Clicking a tick opens that exact position.
@@ -467,13 +483,13 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 |---|---|---|---|
 | **0. Scaffold + deploy** | Monorepo, Express app with health route, env validation, error handler, CORS, trust proxy, Mongo connection; Next.js skeleton with the palette and type; MongoDB MCP server (read-only) | Live site shows "API ok · DB ok" | Deployed on Vercel + Render; `/api/health` live; tests pass |
 | **1. Import + queue** ✅ done 31 Oct 2026 | Job queue (leases, retries, idempotency), Chess.com + Lichess importers, SSE progress, games list with cursor pagination | Type a username, watch games stream in live | Re-import doesn't duplicate; killing the server mid-import resumes after restart; 429 handled |
-| **2. Engine + game review** | Stockfish worker pool, claim/results API, classification, board + eval graph + move list | "Here are your blunders" on real games | Closed tab loses no work; measured seconds per game written in the README |
+| **2. Engine + game review** ✅ done 3 Nov 2026 (5e4ec5d, a27157d, 6cba1ad) | Stockfish worker pool, claim/results API, classification, board + eval graph + move list | "Here are your blunders" on real games | Closed tab loses no work; measured seconds per game written in the README |
 | **3. Patterns dashboard** | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
 | **4. The big dataset** | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
 | **5. Coach agent** | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
 | **6. Ask + guards** | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
 | **7. Landing + animation pass** | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
-| **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat) | Portfolio-ready | Everything in section 16 has a fallback in place |
+| **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences: final check of the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), **verify the licence of react-chessboard's piece set**, and **decide the repo's own licence** | Portfolio-ready | Everything in section 16 has a fallback in place |
 
 ---
 
@@ -499,6 +515,8 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 - **Gemini model names** get deprecated faster than published dates suggest. `gemini-3.5-flash` was retired on 8 Oct 2026. Keep the model in env and verify it before Stage 5. Don't confuse the retired `gemini-3.5-flash` with `gemini-3.5-flash-lite` (current; no shutdown date announced as of 30 Oct 2026). `gemini-3.1-flash-lite` shuts down on 7 May 2027.
 - Next 16: check node_modules/next/dist/docs/ for version-matched API docs before using Next APIs.
 - **Stockfish:** use the *lite single-threaded* build. The multi-threaded builds need `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers, which would also break other things on the page. Serve `.wasm` with the `application/wasm` MIME type, from `web/public/engine/`.
+- **react-chessboard arrows are SVG attributes,** so arrow colours must be hex (e.g. `#3E7C74`), not CSS variables: `var(--…)` doesn't work in an SVG attribute.
+- **The same username on Chess.com and Lichess can be different people.** The platform is part of every URL (`/p/[platform]/[username]`), key and index; never look a player up by username alone.
 - **Chess.com:** serial requests only; 12–24 h data delay; skip variants; don't copy their visual assets.
 - **Lichess:** one request at a time globally; wait 60 s on 429; verify parameter names in the official docs.
 - **Ratings differ between sites.** Bands are approximate for Chess.com players. Label them so.

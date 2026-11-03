@@ -1,0 +1,2566 @@
+{
+  "generatedAt": "2026-11-03T10:45:49.497Z",
+  "mongoVersion": "8.0.36",
+  "player": "lichess:DrNykterstein",
+  "filters": {},
+  "index": "{ playerId: 1, playedAt: -1, _id: -1 }",
+  "games": 200,
+  "analysed": 170,
+  "indexScans": [
+    "playerId_1_playedAt_-1__id_-1"
+  ],
+  "collectionScan": false,
+  "inMemorySort": false,
+  "keysExamined": 200,
+  "docsExamined": 200,
+  "executionTimeMillis": 36,
+  "roundTripMs": {
+    "runs": [
+      207,
+      129,
+      125,
+      131,
+      115
+    ],
+    "median": 129,
+    "from": "my laptop (Karachi) to Atlas (Singapore)"
+  },
+  "explain": {
+    "explainVersion": "1",
+    "stages": [
+      {
+        "$cursor": {
+          "queryPlanner": {
+            "namespace": "blunderprint.games",
+            "parsedQuery": {
+              "playerId": {
+                "$eq": "6ae4e9795599b736e9db1382"
+              }
+            },
+            "indexFilterSet": false,
+            "queryHash": "7C4EFA18",
+            "planCacheShapeHash": "7C4EFA18",
+            "planCacheKey": "01AD787A",
+            "optimizationTimeMillis": 6,
+            "maxIndexedOrSolutionsReached": false,
+            "maxIndexedAndSolutionsReached": false,
+            "maxScansToExplodeReached": false,
+            "prunedSimilarIndexes": false,
+            "winningPlan": {
+              "isCached": true,
+              "stage": "PROJECTION_DEFAULT",
+              "transformBy": {
+                "_id": true,
+                "playedAt": true,
+                "color": true,
+                "result": true,
+                "speed": true,
+                "timeControl": true,
+                "plies": true,
+                "opening": true,
+                "features": true,
+                "analysis": {
+                  "status": true,
+                  "classifications": true
+                }
+              },
+              "inputStage": {
+                "stage": "FETCH",
+                "inputStage": {
+                  "stage": "IXSCAN",
+                  "keyPattern": {
+                    "playerId": 1,
+                    "playedAt": -1,
+                    "_id": -1
+                  },
+                  "indexName": "playerId_1_playedAt_-1__id_-1",
+                  "isMultiKey": false,
+                  "multiKeyPaths": {
+                    "playerId": [],
+                    "playedAt": [],
+                    "_id": []
+                  },
+                  "isUnique": false,
+                  "isSparse": false,
+                  "isPartial": false,
+                  "indexVersion": 2,
+                  "direction": "forward",
+                  "indexBounds": {
+                    "playerId": [
+                      "[ObjectId('6ae4e9795599b736e9db1382'), ObjectId('6ae4e9795599b736e9db1382')]"
+                    ],
+                    "playedAt": [
+                      "[MaxKey, MinKey]"
+                    ],
+                    "_id": [
+                      "[MaxKey, MinKey]"
+                    ]
+                  }
+                }
+              }
+            },
+            "rejectedPlans": [
+              {
+                "isCached": false,
+                "stage": "SORT",
+                "sortPattern": {
+                  "playedAt": -1,
+                  "_id": -1
+                },
+                "memLimit": 33554432,
+                "type": "simple",
+                "inputStage": {
+                  "stage": "PROJECTION_DEFAULT",
+                  "transformBy": {
+                    "_id": true,
+                    "playedAt": true,
+                    "color": true,
+                    "result": true,
+                    "speed": true,
+                    "timeControl": true,
+                    "plies": true,
+                    "opening": true,
+                    "features": true,
+                    "analysis": {
+                      "status": true,
+                      "classifications": true
+                    }
+                  },
+                  "inputStage": {
+                    "stage": "FETCH",
+                    "inputStage": {
+                      "stage": "IXSCAN",
+                      "keyPattern": {
+                        "playerId": 1,
+                        "sourceId": 1
+                      },
+                      "indexName": "playerId_1_sourceId_1",
+                      "isMultiKey": false,
+                      "multiKeyPaths": {
+                        "playerId": [],
+                        "sourceId": []
+                      },
+                      "isUnique": true,
+                      "isSparse": false,
+                      "isPartial": false,
+                      "indexVersion": 2,
+                      "direction": "forward",
+                      "indexBounds": {
+                        "playerId": [
+                          "[ObjectId('6ae4e9795599b736e9db1382'), ObjectId('6ae4e9795599b736e9db1382')]"
+                        ],
+                        "sourceId": [
+                          "[MinKey, MaxKey]"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "isCached": false,
+                "stage": "SORT",
+                "sortPattern": {
+                  "playedAt": -1,
+                  "_id": -1
+                },
+                "memLimit": 33554432,
+                "type": "simple",
+                "inputStage": {
+                  "stage": "PROJECTION_DEFAULT",
+                  "transformBy": {
+                    "_id": true,
+                    "playedAt": true,
+                    "color": true,
+                    "result": true,
+                    "speed": true,
+                    "timeControl": true,
+                    "plies": true,
+                    "opening": true,
+                    "features": true,
+                    "analysis": {
+                      "status": true,
+                      "classifications": true
+                    }
+                  },
+                  "inputStage": {
+                    "stage": "FETCH",
+                    "inputStage": {
+                      "stage": "IXSCAN",
+                      "keyPattern": {
+                        "playerId": 1,
+                        "analysis.status": 1
+                      },
+                      "indexName": "playerId_1_analysis.status_1",
+                      "isMultiKey": false,
+                      "multiKeyPaths": {
+                        "playerId": [],
+                        "analysis.status": []
+                      },
+                      "isUnique": false,
+                      "isSparse": false,
+                      "isPartial": false,
+                      "indexVersion": 2,
+                      "direction": "forward",
+                      "indexBounds": {
+                        "playerId": [
+                          "[ObjectId('6ae4e9795599b736e9db1382'), ObjectId('6ae4e9795599b736e9db1382')]"
+                        ],
+                        "analysis.status": [
+                          "[MinKey, MaxKey]"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "isCached": false,
+                "stage": "SORT",
+                "sortPattern": {
+                  "playedAt": -1,
+                  "_id": -1
+                },
+                "memLimit": 33554432,
+                "type": "simple",
+                "inputStage": {
+                  "stage": "PROJECTION_DEFAULT",
+                  "transformBy": {
+                    "_id": true,
+                    "playedAt": true,
+                    "color": true,
+                    "result": true,
+                    "speed": true,
+                    "timeControl": true,
+                    "plies": true,
+                    "opening": true,
+                    "features": true,
+                    "analysis": {
+                      "status": true,
+                      "classifications": true
+                    }
+                  },
+                  "inputStage": {
+                    "stage": "FETCH",
+                    "inputStage": {
+                      "stage": "IXSCAN",
+                      "keyPattern": {
+                        "playerId": 1,
+                        "opening.eco": 1
+                      },
+                      "indexName": "playerId_1_opening.eco_1",
+                      "isMultiKey": false,
+                      "multiKeyPaths": {
+                        "playerId": [],
+                        "opening.eco": []
+                      },
+                      "isUnique": false,
+                      "isSparse": false,
+                      "isPartial": false,
+                      "indexVersion": 2,
+                      "direction": "forward",
+                      "indexBounds": {
+                        "playerId": [
+                          "[ObjectId('6ae4e9795599b736e9db1382'), ObjectId('6ae4e9795599b736e9db1382')]"
+                        ],
+                        "opening.eco": [
+                          "[MinKey, MaxKey]"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "executionStats": {
+            "executionSuccess": true,
+            "nReturned": 200,
+            "executionTimeMillis": 36,
+            "totalKeysExamined": 200,
+            "totalDocsExamined": 200,
+            "executionStages": {
+              "isCached": true,
+              "stage": "PROJECTION_DEFAULT",
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 3,
+              "works": 201,
+              "advanced": 200,
+              "needTime": 0,
+              "needYield": 0,
+              "saveState": 3,
+              "restoreState": 3,
+              "isEOF": 1,
+              "transformBy": {
+                "_id": true,
+                "playedAt": true,
+                "color": true,
+                "result": true,
+                "speed": true,
+                "timeControl": true,
+                "plies": true,
+                "opening": true,
+                "features": true,
+                "analysis": {
+                  "status": true,
+                  "classifications": true
+                }
+              },
+              "inputStage": {
+                "stage": "FETCH",
+                "nReturned": 200,
+                "executionTimeMillisEstimate": 3,
+                "works": 201,
+                "advanced": 200,
+                "needTime": 0,
+                "needYield": 0,
+                "saveState": 3,
+                "restoreState": 3,
+                "isEOF": 1,
+                "docsExamined": 200,
+                "alreadyHasObj": 0,
+                "inputStage": {
+                  "stage": "IXSCAN",
+                  "nReturned": 200,
+                  "executionTimeMillisEstimate": 0,
+                  "works": 201,
+                  "advanced": 200,
+                  "needTime": 0,
+                  "needYield": 0,
+                  "saveState": 3,
+                  "restoreState": 3,
+                  "isEOF": 1,
+                  "keyPattern": {
+                    "playerId": 1,
+                    "playedAt": -1,
+                    "_id": -1
+                  },
+                  "indexName": "playerId_1_playedAt_-1__id_-1",
+                  "isMultiKey": false,
+                  "multiKeyPaths": {
+                    "playerId": [],
+                    "playedAt": [],
+                    "_id": []
+                  },
+                  "isUnique": false,
+                  "isSparse": false,
+                  "isPartial": false,
+                  "indexVersion": 2,
+                  "direction": "forward",
+                  "indexBounds": {
+                    "playerId": [
+                      "[ObjectId('6ae4e9795599b736e9db1382'), ObjectId('6ae4e9795599b736e9db1382')]"
+                    ],
+                    "playedAt": [
+                      "[MaxKey, MinKey]"
+                    ],
+                    "_id": [
+                      "[MaxKey, MinKey]"
+                    ]
+                  },
+                  "keysExamined": 200,
+                  "seeks": 1,
+                  "dupsTested": 0,
+                  "dupsDropped": 0
+                }
+              }
+            }
+          }
+        },
+        "nReturned": 200,
+        "executionTimeMillisEstimate": 1
+      },
+      {
+        "$facet": {
+          "totals": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 1
+            },
+            {
+              "$group": {
+                "_id": {
+                  "$const": null
+                },
+                "games": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                },
+                "analysed": {
+                  "$sum": {
+                    "$cond": [
+                      {
+                        "$and": [
+                          {
+                            "$eq": [
+                              "$features.version",
+                              {
+                                "$const": 1
+                              }
+                            ]
+                          },
+                          {
+                            "$not": [
+                              "$features.error"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 1
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "firstPlayedAt": {
+                  "$min": "$playedAt"
+                },
+                "lastPlayedAt": {
+                  "$max": "$playedAt"
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "games": 128,
+                "analysed": 128,
+                "firstPlayedAt": 72,
+                "lastPlayedAt": 72
+              },
+              "totalOutputDataSizeBytes": 341,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 1,
+              "executionTimeMillisEstimate": 1
+            }
+          ],
+          "openings": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$group": {
+                "_id": {
+                  "eco": "$opening.eco",
+                  "name": "$opening.name"
+                },
+                "games": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                },
+                "wins": {
+                  "$sum": {
+                    "$cond": [
+                      {
+                        "$eq": [
+                          "$result",
+                          {
+                            "$const": "win"
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 1
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "draws": {
+                  "$sum": {
+                    "$cond": [
+                      {
+                        "$eq": [
+                          "$result",
+                          {
+                            "$const": "draw"
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 1
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "analysed": {
+                  "$sum": {
+                    "$cond": [
+                      {
+                        "$and": [
+                          {
+                            "$eq": [
+                              "$features.version",
+                              {
+                                "$const": 1
+                              }
+                            ]
+                          },
+                          {
+                            "$not": [
+                              "$features.error"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 1
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "mistakes": {
+                  "$sum": {
+                    "$size": [
+                      {
+                        "$ifNull": [
+                          "$features.mistakes",
+                          {
+                            "$const": []
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "games": 14720,
+                "wins": 14720,
+                "draws": 14720,
+                "analysed": 14720,
+                "mistakes": 14720
+              },
+              "totalOutputDataSizeBytes": 78022,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 115,
+              "executionTimeMillisEstimate": 2
+            },
+            {
+              "$sort": {
+                "sortKey": {
+                  "_id.eco": 1,
+                  "games": -1,
+                  "_id.name": 1
+                }
+              },
+              "totalDataSizeSortedBytesEstimate": 96014,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "nReturned": 115,
+              "executionTimeMillisEstimate": 2
+            },
+            {
+              "$group": {
+                "_id": "$_id.eco",
+                "name": {
+                  "$first": "$_id.name"
+                },
+                "games": {
+                  "$sum": "$games"
+                },
+                "wins": {
+                  "$sum": "$wins"
+                },
+                "draws": {
+                  "$sum": "$draws"
+                },
+                "analysed": {
+                  "$sum": "$analysed"
+                },
+                "mistakes": {
+                  "$sum": "$mistakes"
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "name": 8901,
+                "games": 8448,
+                "wins": 8448,
+                "draws": 8448,
+                "analysed": 8448,
+                "mistakes": 8448
+              },
+              "totalOutputDataSizeBytes": 30879,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 66,
+              "executionTimeMillisEstimate": 2
+            },
+            {
+              "$sort": {
+                "sortKey": {
+                  "games": -1,
+                  "_id": 1
+                },
+                "limit": 25
+              },
+              "totalDataSizeSortedBytesEstimate": 13478,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "nReturned": 25,
+              "executionTimeMillisEstimate": 2
+            }
+          ],
+          "moves": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$match": {
+                "$and": [
+                  {
+                    "features.version": {
+                      "$eq": 1
+                    }
+                  },
+                  {
+                    "features.error": {
+                      "$not": {
+                        "$exists": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$set": {
+                "lastMove": {
+                  "$cond": [
+                    {
+                      "$eq": [
+                        "$color",
+                        {
+                          "$const": "white"
+                        }
+                      ]
+                    },
+                    {
+                      "$ceil": [
+                        {
+                          "$divide": [
+                            "$plies",
+                            {
+                              "$const": 2
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "$floor": [
+                        {
+                          "$divide": [
+                            "$plies",
+                            {
+                              "$const": 2
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$group": {
+                "_id": "$speed",
+                "games": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                },
+                "opening": {
+                  "$sum": "$features.moveCounts.opening"
+                },
+                "middlegame": {
+                  "$sum": "$features.moveCounts.middlegame"
+                },
+                "endgame": {
+                  "$sum": "$features.moveCounts.endgame"
+                },
+                "clock_over50": {
+                  "$sum": {
+                    "$ifNull": [
+                      "$features.moveCounts.clock.over50",
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "clock_from25to50": {
+                  "$sum": {
+                    "$ifNull": [
+                      "$features.moveCounts.clock.from25to50",
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "clock_from10to25": {
+                  "$sum": {
+                    "$ifNull": [
+                      "$features.moveCounts.clock.from10to25",
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "clock_under10": {
+                  "$sum": {
+                    "$ifNull": [
+                      "$features.moveCounts.clock.under10",
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "move_0": {
+                  "$sum": {
+                    "$max": [
+                      {
+                        "$add": [
+                          {
+                            "$subtract": [
+                              {
+                                "$min": [
+                                  "$lastMove",
+                                  {
+                                    "$const": 10
+                                  }
+                                ]
+                              },
+                              {
+                                "$const": 1
+                              }
+                            ]
+                          },
+                          {
+                            "$const": 1
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "move_1": {
+                  "$sum": {
+                    "$max": [
+                      {
+                        "$add": [
+                          {
+                            "$subtract": [
+                              {
+                                "$min": [
+                                  "$lastMove",
+                                  {
+                                    "$const": 20
+                                  }
+                                ]
+                              },
+                              {
+                                "$const": 11
+                              }
+                            ]
+                          },
+                          {
+                            "$const": 1
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "move_2": {
+                  "$sum": {
+                    "$max": [
+                      {
+                        "$add": [
+                          {
+                            "$subtract": [
+                              {
+                                "$min": [
+                                  "$lastMove",
+                                  {
+                                    "$const": 30
+                                  }
+                                ]
+                              },
+                              {
+                                "$const": 21
+                              }
+                            ]
+                          },
+                          {
+                            "$const": 1
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "move_3": {
+                  "$sum": {
+                    "$max": [
+                      {
+                        "$add": [
+                          {
+                            "$subtract": [
+                              {
+                                "$min": [
+                                  "$lastMove",
+                                  {
+                                    "$const": 40
+                                  }
+                                ]
+                              },
+                              {
+                                "$const": 31
+                              }
+                            ]
+                          },
+                          {
+                            "$const": 1
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                },
+                "move_4": {
+                  "$sum": {
+                    "$max": [
+                      {
+                        "$add": [
+                          {
+                            "$subtract": [
+                              "$lastMove",
+                              {
+                                "$const": 41
+                              }
+                            ]
+                          },
+                          {
+                            "$const": 1
+                          }
+                        ]
+                      },
+                      {
+                        "$const": 0
+                      }
+                    ]
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "games": 384,
+                "opening": 384,
+                "middlegame": 384,
+                "endgame": 384,
+                "clock_over50": 384,
+                "clock_from25to50": 384,
+                "clock_from10to25": 384,
+                "clock_under10": 384,
+                "move_0": 384,
+                "move_1": 384,
+                "move_2": 384,
+                "move_3": 384,
+                "move_4": 384
+              },
+              "totalOutputDataSizeBytes": 3423,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 3,
+              "executionTimeMillisEstimate": 1
+            }
+          ],
+          "byPhase": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$match": {
+                "$and": [
+                  {
+                    "features.version": {
+                      "$eq": 1
+                    }
+                  },
+                  {
+                    "features.error": {
+                      "$not": {
+                        "$exists": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$unwind": {
+                "path": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$set": {
+                "m": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$group": {
+                "_id": {
+                  "key": "$m.phase",
+                  "kind": "$m.kind"
+                },
+                "n": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "n": 1152
+              },
+              "totalOutputDataSizeBytes": 4410,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 9,
+              "executionTimeMillisEstimate": 2
+            },
+            {
+              "$group": {
+                "_id": "$_id.key",
+                "kinds": {
+                  "$push": {
+                    "k": "$_id.kind",
+                    "v": "$n"
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "kinds": 2565
+              },
+              "totalOutputDataSizeBytes": 3204,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 3,
+              "executionTimeMillisEstimate": 2
+            },
+            {
+              "$project": {
+                "_id": true,
+                "counts": {
+                  "$arrayToObject": [
+                    "$kinds"
+                  ]
+                }
+              },
+              "nReturned": 3,
+              "executionTimeMillisEstimate": 2
+            }
+          ],
+          "bySpeed": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$match": {
+                "$and": [
+                  {
+                    "features.version": {
+                      "$eq": 1
+                    }
+                  },
+                  {
+                    "features.error": {
+                      "$not": {
+                        "$exists": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 3
+            },
+            {
+              "$unwind": {
+                "path": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 3
+            },
+            {
+              "$set": {
+                "m": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 3
+            },
+            {
+              "$group": {
+                "_id": {
+                  "key": "$speed",
+                  "kind": "$m.kind"
+                },
+                "n": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "n": 896
+              },
+              "totalOutputDataSizeBytes": 3430,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 7,
+              "executionTimeMillisEstimate": 3
+            },
+            {
+              "$group": {
+                "_id": "$_id.key",
+                "kinds": {
+                  "$push": {
+                    "k": "$_id.kind",
+                    "v": "$n"
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "kinds": 2043
+              },
+              "totalOutputDataSizeBytes": 2682,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 3,
+              "executionTimeMillisEstimate": 3
+            },
+            {
+              "$project": {
+                "_id": true,
+                "counts": {
+                  "$arrayToObject": [
+                    "$kinds"
+                  ]
+                }
+              },
+              "nReturned": 3,
+              "executionTimeMillisEstimate": 3
+            }
+          ],
+          "byClock": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$match": {
+                "$and": [
+                  {
+                    "features.version": {
+                      "$eq": 1
+                    }
+                  },
+                  {
+                    "features.error": {
+                      "$not": {
+                        "$exists": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$unwind": {
+                "path": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$set": {
+                "m": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$match": {
+                "m.clockLeft": {
+                  "$exists": true
+                }
+              },
+              "nReturned": 852,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$set": {
+                "share": {
+                  "$divide": [
+                    "$m.clockLeft",
+                    {
+                      "$convert": {
+                        "input": {
+                          "$arrayElemAt": [
+                            {
+                              "$split": [
+                                "$timeControl",
+                                {
+                                  "$const": "+"
+                                }
+                              ]
+                            },
+                            {
+                              "$const": 0
+                            }
+                          ]
+                        },
+                        "to": {
+                          "$const": "double"
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "nReturned": 852,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$group": {
+                "_id": {
+                  "key": {
+                    "$switch": {
+                      "branches": [
+                        {
+                          "case": {
+                            "$gt": [
+                              "$share",
+                              {
+                                "$const": 0.5
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$const": "over50"
+                          }
+                        },
+                        {
+                          "case": {
+                            "$gt": [
+                              "$share",
+                              {
+                                "$const": 0.25
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$const": "from25to50"
+                          }
+                        },
+                        {
+                          "case": {
+                            "$gte": [
+                              "$share",
+                              {
+                                "$const": 0.1
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$const": "from10to25"
+                          }
+                        }
+                      ],
+                      "default": {
+                        "$const": "under10"
+                      }
+                    }
+                  },
+                  "kind": "$m.kind"
+                },
+                "n": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "n": 1536
+              },
+              "totalOutputDataSizeBytes": 5880,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 12,
+              "executionTimeMillisEstimate": 5
+            },
+            {
+              "$group": {
+                "_id": "$_id.key",
+                "kinds": {
+                  "$push": {
+                    "k": "$_id.kind",
+                    "v": "$n"
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "kinds": 3420
+              },
+              "totalOutputDataSizeBytes": 4272,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 4,
+              "executionTimeMillisEstimate": 5
+            },
+            {
+              "$project": {
+                "_id": true,
+                "counts": {
+                  "$arrayToObject": [
+                    "$kinds"
+                  ]
+                }
+              },
+              "nReturned": 4,
+              "executionTimeMillisEstimate": 5
+            }
+          ],
+          "byMoveNumber": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$match": {
+                "$and": [
+                  {
+                    "features.version": {
+                      "$eq": 1
+                    }
+                  },
+                  {
+                    "features.error": {
+                      "$not": {
+                        "$exists": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$unwind": {
+                "path": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$set": {
+                "m": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$set": {
+                "moveNumber": {
+                  "$ceil": [
+                    {
+                      "$divide": [
+                        "$m.ply",
+                        {
+                          "$const": 2
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$group": {
+                "_id": {
+                  "key": {
+                    "$switch": {
+                      "branches": [
+                        {
+                          "case": {
+                            "$lte": [
+                              "$moveNumber",
+                              {
+                                "$const": 10
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$const": "1-10"
+                          }
+                        },
+                        {
+                          "case": {
+                            "$lte": [
+                              "$moveNumber",
+                              {
+                                "$const": 20
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$const": "11-20"
+                          }
+                        },
+                        {
+                          "case": {
+                            "$lte": [
+                              "$moveNumber",
+                              {
+                                "$const": 30
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$const": "21-30"
+                          }
+                        },
+                        {
+                          "case": {
+                            "$lte": [
+                              "$moveNumber",
+                              {
+                                "$const": 40
+                              }
+                            ]
+                          },
+                          "then": {
+                            "$const": "31-40"
+                          }
+                        }
+                      ],
+                      "default": {
+                        "$const": "41+"
+                      }
+                    }
+                  },
+                  "kind": "$m.kind"
+                },
+                "n": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "n": 1920
+              },
+              "totalOutputDataSizeBytes": 7350,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 15,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$group": {
+                "_id": "$_id.key",
+                "kinds": {
+                  "$push": {
+                    "k": "$_id.kind",
+                    "v": "$n"
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "kinds": 4275
+              },
+              "totalOutputDataSizeBytes": 5340,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 5,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$project": {
+                "_id": true,
+                "counts": {
+                  "$arrayToObject": [
+                    "$kinds"
+                  ]
+                }
+              },
+              "nReturned": 5,
+              "executionTimeMillisEstimate": 0
+            }
+          ],
+          "squares": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 0
+            },
+            {
+              "$match": {
+                "$and": [
+                  {
+                    "features.version": {
+                      "$eq": 1
+                    }
+                  },
+                  {
+                    "features.error": {
+                      "$not": {
+                        "$exists": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 5
+            },
+            {
+              "$unwind": {
+                "path": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 5
+            },
+            {
+              "$set": {
+                "m": "$features.mistakes"
+              },
+              "nReturned": 853,
+              "executionTimeMillisEstimate": 5
+            },
+            {
+              "$group": {
+                "_id": {
+                  "key": "$m.square",
+                  "kind": "$m.kind"
+                },
+                "n": {
+                  "$sum": {
+                    "$const": 1
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "n": 23296
+              },
+              "totalOutputDataSizeBytes": 89180,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 182,
+              "executionTimeMillisEstimate": 6
+            },
+            {
+              "$group": {
+                "_id": "$_id.key",
+                "kinds": {
+                  "$push": {
+                    "k": "$_id.kind",
+                    "v": "$n"
+                  }
+                }
+              },
+              "maxAccumulatorMemoryUsageBytes": {
+                "kinds": 52110
+              },
+              "totalOutputDataSizeBytes": 65742,
+              "usedDisk": false,
+              "spills": 0,
+              "spilledDataStorageSize": 0,
+              "numBytesSpilledEstimate": 0,
+              "spilledRecords": 0,
+              "nReturned": 64,
+              "executionTimeMillisEstimate": 6
+            },
+            {
+              "$project": {
+                "_id": true,
+                "counts": {
+                  "$arrayToObject": [
+                    "$kinds"
+                  ]
+                }
+              },
+              "nReturned": 64,
+              "executionTimeMillisEstimate": 6
+            }
+          ],
+          "ribbons": [
+            {
+              "$internalFacetTeeConsumer": {},
+              "nReturned": 200,
+              "executionTimeMillisEstimate": 1
+            },
+            {
+              "$match": {
+                "$and": [
+                  {
+                    "analysis.status": {
+                      "$in": [
+                        "done",
+                        "imported"
+                      ]
+                    }
+                  },
+                  {
+                    "analysis.classifications.0": {
+                      "$exists": true
+                    }
+                  }
+                ]
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 1
+            },
+            {
+              "$project": {
+                "_id": true,
+                "playedAt": true,
+                "color": true,
+                "result": true,
+                "speed": true,
+                "classes": {
+                  "$reduce": {
+                    "input": "$analysis.classifications",
+                    "initialValue": {
+                      "$const": ""
+                    },
+                    "in": {
+                      "$concat": [
+                        "$$value",
+                        {
+                          "$switch": {
+                            "branches": [
+                              {
+                                "case": {
+                                  "$eq": [
+                                    "$$this",
+                                    {
+                                      "$const": "best"
+                                    }
+                                  ]
+                                },
+                                "then": {
+                                  "$const": "b"
+                                }
+                              },
+                              {
+                                "case": {
+                                  "$eq": [
+                                    "$$this",
+                                    {
+                                      "$const": "good"
+                                    }
+                                  ]
+                                },
+                                "then": {
+                                  "$const": "g"
+                                }
+                              },
+                              {
+                                "case": {
+                                  "$eq": [
+                                    "$$this",
+                                    {
+                                      "$const": "inaccuracy"
+                                    }
+                                  ]
+                                },
+                                "then": {
+                                  "$const": "i"
+                                }
+                              },
+                              {
+                                "case": {
+                                  "$eq": [
+                                    "$$this",
+                                    {
+                                      "$const": "mistake"
+                                    }
+                                  ]
+                                },
+                                "then": {
+                                  "$const": "m"
+                                }
+                              },
+                              {
+                                "case": {
+                                  "$eq": [
+                                    "$$this",
+                                    {
+                                      "$const": "blunder"
+                                    }
+                                  ]
+                                },
+                                "then": {
+                                  "$const": "x"
+                                }
+                              }
+                            ],
+                            "default": {
+                              "$const": "g"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "nReturned": 170,
+              "executionTimeMillisEstimate": 9
+            }
+          ]
+        },
+        "nReturned": 1,
+        "executionTimeMillisEstimate": 29
+      }
+    ],
+    "queryShapeHash": "359D8BCAB5E58FBB06E0635B25D4863EA15B1A2A35DB6A0E378185DBBD3FA0EE",
+    "serverParameters": {
+      "internalQueryFacetBufferSizeBytes": 104857600,
+      "internalQueryFacetMaxOutputDocSizeBytes": 104857600,
+      "internalLookupStageIntermediateDocumentMaxSizeBytes": 16793600,
+      "internalDocumentSourceGroupMaxMemoryBytes": 104857600,
+      "internalQueryMaxBlockingSortMemoryUsageBytes": 33554432,
+      "internalQueryProhibitBlockingMergeOnMongoS": 0,
+      "internalQueryMaxAddToSetBytes": 104857600,
+      "internalDocumentSourceSetWindowFieldsMaxMemoryBytes": 104857600,
+      "internalQueryFrameworkControl": "trySbeRestricted",
+      "internalQueryPlannerIgnoreIndexWithCollationForRegex": 1
+    },
+    "command": {
+      "aggregate": "games",
+      "pipeline": [
+        {
+          "$match": {
+            "playerId": "6ae4e9795599b736e9db1382"
+          }
+        },
+        {
+          "$sort": {
+            "playedAt": -1,
+            "_id": -1
+          }
+        },
+        {
+          "$project": {
+            "playedAt": 1,
+            "color": 1,
+            "result": 1,
+            "speed": 1,
+            "timeControl": 1,
+            "plies": 1,
+            "opening": 1,
+            "analysis.status": 1,
+            "analysis.classifications": 1,
+            "features": 1
+          }
+        },
+        {
+          "$facet": {
+            "totals": [
+              {
+                "$group": {
+                  "_id": null,
+                  "games": {
+                    "$sum": 1
+                  },
+                  "analysed": {
+                    "$sum": {
+                      "$cond": [
+                        {
+                          "$and": [
+                            {
+                              "$eq": [
+                                "$features.version",
+                                1
+                              ]
+                            },
+                            {
+                              "$not": [
+                                "$features.error"
+                              ]
+                            }
+                          ]
+                        },
+                        1,
+                        0
+                      ]
+                    }
+                  },
+                  "firstPlayedAt": {
+                    "$min": "$playedAt"
+                  },
+                  "lastPlayedAt": {
+                    "$max": "$playedAt"
+                  }
+                }
+              }
+            ],
+            "openings": [
+              {
+                "$group": {
+                  "_id": {
+                    "eco": "$opening.eco",
+                    "name": "$opening.name"
+                  },
+                  "games": {
+                    "$sum": 1
+                  },
+                  "wins": {
+                    "$sum": {
+                      "$cond": [
+                        {
+                          "$eq": [
+                            "$result",
+                            "win"
+                          ]
+                        },
+                        1,
+                        0
+                      ]
+                    }
+                  },
+                  "draws": {
+                    "$sum": {
+                      "$cond": [
+                        {
+                          "$eq": [
+                            "$result",
+                            "draw"
+                          ]
+                        },
+                        1,
+                        0
+                      ]
+                    }
+                  },
+                  "analysed": {
+                    "$sum": {
+                      "$cond": [
+                        {
+                          "$and": [
+                            {
+                              "$eq": [
+                                "$features.version",
+                                1
+                              ]
+                            },
+                            {
+                              "$not": [
+                                "$features.error"
+                              ]
+                            }
+                          ]
+                        },
+                        1,
+                        0
+                      ]
+                    }
+                  },
+                  "mistakes": {
+                    "$sum": {
+                      "$size": {
+                        "$ifNull": [
+                          "$features.mistakes",
+                          []
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "$sort": {
+                  "_id.eco": 1,
+                  "games": -1,
+                  "_id.name": 1
+                }
+              },
+              {
+                "$group": {
+                  "_id": "$_id.eco",
+                  "name": {
+                    "$first": "$_id.name"
+                  },
+                  "games": {
+                    "$sum": "$games"
+                  },
+                  "wins": {
+                    "$sum": "$wins"
+                  },
+                  "draws": {
+                    "$sum": "$draws"
+                  },
+                  "analysed": {
+                    "$sum": "$analysed"
+                  },
+                  "mistakes": {
+                    "$sum": "$mistakes"
+                  }
+                }
+              },
+              {
+                "$sort": {
+                  "games": -1,
+                  "_id": 1
+                }
+              },
+              {
+                "$limit": 25
+              }
+            ],
+            "moves": [
+              {
+                "$match": {
+                  "features.version": 1,
+                  "features.error": {
+                    "$exists": false
+                  }
+                }
+              },
+              {
+                "$set": {
+                  "lastMove": {
+                    "$cond": [
+                      {
+                        "$eq": [
+                          "$color",
+                          "white"
+                        ]
+                      },
+                      {
+                        "$ceil": {
+                          "$divide": [
+                            "$plies",
+                            2
+                          ]
+                        }
+                      },
+                      {
+                        "$floor": {
+                          "$divide": [
+                            "$plies",
+                            2
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": "$speed",
+                  "games": {
+                    "$sum": 1
+                  },
+                  "opening": {
+                    "$sum": "$features.moveCounts.opening"
+                  },
+                  "middlegame": {
+                    "$sum": "$features.moveCounts.middlegame"
+                  },
+                  "endgame": {
+                    "$sum": "$features.moveCounts.endgame"
+                  },
+                  "clock_over50": {
+                    "$sum": {
+                      "$ifNull": [
+                        "$features.moveCounts.clock.over50",
+                        0
+                      ]
+                    }
+                  },
+                  "clock_from25to50": {
+                    "$sum": {
+                      "$ifNull": [
+                        "$features.moveCounts.clock.from25to50",
+                        0
+                      ]
+                    }
+                  },
+                  "clock_from10to25": {
+                    "$sum": {
+                      "$ifNull": [
+                        "$features.moveCounts.clock.from10to25",
+                        0
+                      ]
+                    }
+                  },
+                  "clock_under10": {
+                    "$sum": {
+                      "$ifNull": [
+                        "$features.moveCounts.clock.under10",
+                        0
+                      ]
+                    }
+                  },
+                  "move_0": {
+                    "$sum": {
+                      "$max": [
+                        0,
+                        {
+                          "$add": [
+                            {
+                              "$subtract": [
+                                {
+                                  "$min": [
+                                    10,
+                                    "$lastMove"
+                                  ]
+                                },
+                                1
+                              ]
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "move_1": {
+                    "$sum": {
+                      "$max": [
+                        0,
+                        {
+                          "$add": [
+                            {
+                              "$subtract": [
+                                {
+                                  "$min": [
+                                    20,
+                                    "$lastMove"
+                                  ]
+                                },
+                                11
+                              ]
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "move_2": {
+                    "$sum": {
+                      "$max": [
+                        0,
+                        {
+                          "$add": [
+                            {
+                              "$subtract": [
+                                {
+                                  "$min": [
+                                    30,
+                                    "$lastMove"
+                                  ]
+                                },
+                                21
+                              ]
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "move_3": {
+                    "$sum": {
+                      "$max": [
+                        0,
+                        {
+                          "$add": [
+                            {
+                              "$subtract": [
+                                {
+                                  "$min": [
+                                    40,
+                                    "$lastMove"
+                                  ]
+                                },
+                                31
+                              ]
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "move_4": {
+                    "$sum": {
+                      "$max": [
+                        0,
+                        {
+                          "$add": [
+                            {
+                              "$subtract": [
+                                "$lastMove",
+                                41
+                              ]
+                            },
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "byPhase": [
+              {
+                "$match": {
+                  "features.version": 1,
+                  "features.error": {
+                    "$exists": false
+                  }
+                }
+              },
+              {
+                "$unwind": "$features.mistakes"
+              },
+              {
+                "$set": {
+                  "m": "$features.mistakes"
+                }
+              },
+              {
+                "$group": {
+                  "_id": {
+                    "key": "$m.phase",
+                    "kind": "$m.kind"
+                  },
+                  "n": {
+                    "$sum": 1
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": "$_id.key",
+                  "kinds": {
+                    "$push": {
+                      "k": "$_id.kind",
+                      "v": "$n"
+                    }
+                  }
+                }
+              },
+              {
+                "$project": {
+                  "_id": 1,
+                  "counts": {
+                    "$arrayToObject": "$kinds"
+                  }
+                }
+              }
+            ],
+            "bySpeed": [
+              {
+                "$match": {
+                  "features.version": 1,
+                  "features.error": {
+                    "$exists": false
+                  }
+                }
+              },
+              {
+                "$unwind": "$features.mistakes"
+              },
+              {
+                "$set": {
+                  "m": "$features.mistakes"
+                }
+              },
+              {
+                "$group": {
+                  "_id": {
+                    "key": "$speed",
+                    "kind": "$m.kind"
+                  },
+                  "n": {
+                    "$sum": 1
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": "$_id.key",
+                  "kinds": {
+                    "$push": {
+                      "k": "$_id.kind",
+                      "v": "$n"
+                    }
+                  }
+                }
+              },
+              {
+                "$project": {
+                  "_id": 1,
+                  "counts": {
+                    "$arrayToObject": "$kinds"
+                  }
+                }
+              }
+            ],
+            "byClock": [
+              {
+                "$match": {
+                  "features.version": 1,
+                  "features.error": {
+                    "$exists": false
+                  }
+                }
+              },
+              {
+                "$unwind": "$features.mistakes"
+              },
+              {
+                "$set": {
+                  "m": "$features.mistakes"
+                }
+              },
+              {
+                "$match": {
+                  "m.clockLeft": {
+                    "$exists": true
+                  }
+                }
+              },
+              {
+                "$set": {
+                  "share": {
+                    "$divide": [
+                      "$m.clockLeft",
+                      {
+                        "$toDouble": {
+                          "$arrayElemAt": [
+                            {
+                              "$split": [
+                                "$timeControl",
+                                "+"
+                              ]
+                            },
+                            0
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": {
+                    "key": {
+                      "$switch": {
+                        "branches": [
+                          {
+                            "case": {
+                              "$gt": [
+                                "$share",
+                                0.5
+                              ]
+                            },
+                            "then": "over50"
+                          },
+                          {
+                            "case": {
+                              "$gt": [
+                                "$share",
+                                0.25
+                              ]
+                            },
+                            "then": "from25to50"
+                          },
+                          {
+                            "case": {
+                              "$gte": [
+                                "$share",
+                                0.1
+                              ]
+                            },
+                            "then": "from10to25"
+                          }
+                        ],
+                        "default": "under10"
+                      }
+                    },
+                    "kind": "$m.kind"
+                  },
+                  "n": {
+                    "$sum": 1
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": "$_id.key",
+                  "kinds": {
+                    "$push": {
+                      "k": "$_id.kind",
+                      "v": "$n"
+                    }
+                  }
+                }
+              },
+              {
+                "$project": {
+                  "_id": 1,
+                  "counts": {
+                    "$arrayToObject": "$kinds"
+                  }
+                }
+              }
+            ],
+            "byMoveNumber": [
+              {
+                "$match": {
+                  "features.version": 1,
+                  "features.error": {
+                    "$exists": false
+                  }
+                }
+              },
+              {
+                "$unwind": "$features.mistakes"
+              },
+              {
+                "$set": {
+                  "m": "$features.mistakes"
+                }
+              },
+              {
+                "$set": {
+                  "moveNumber": {
+                    "$ceil": {
+                      "$divide": [
+                        "$m.ply",
+                        2
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": {
+                    "key": {
+                      "$switch": {
+                        "branches": [
+                          {
+                            "case": {
+                              "$lte": [
+                                "$moveNumber",
+                                10
+                              ]
+                            },
+                            "then": "1-10"
+                          },
+                          {
+                            "case": {
+                              "$lte": [
+                                "$moveNumber",
+                                20
+                              ]
+                            },
+                            "then": "11-20"
+                          },
+                          {
+                            "case": {
+                              "$lte": [
+                                "$moveNumber",
+                                30
+                              ]
+                            },
+                            "then": "21-30"
+                          },
+                          {
+                            "case": {
+                              "$lte": [
+                                "$moveNumber",
+                                40
+                              ]
+                            },
+                            "then": "31-40"
+                          }
+                        ],
+                        "default": "41+"
+                      }
+                    },
+                    "kind": "$m.kind"
+                  },
+                  "n": {
+                    "$sum": 1
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": "$_id.key",
+                  "kinds": {
+                    "$push": {
+                      "k": "$_id.kind",
+                      "v": "$n"
+                    }
+                  }
+                }
+              },
+              {
+                "$project": {
+                  "_id": 1,
+                  "counts": {
+                    "$arrayToObject": "$kinds"
+                  }
+                }
+              }
+            ],
+            "squares": [
+              {
+                "$match": {
+                  "features.version": 1,
+                  "features.error": {
+                    "$exists": false
+                  }
+                }
+              },
+              {
+                "$unwind": "$features.mistakes"
+              },
+              {
+                "$set": {
+                  "m": "$features.mistakes"
+                }
+              },
+              {
+                "$group": {
+                  "_id": {
+                    "key": "$m.square",
+                    "kind": "$m.kind"
+                  },
+                  "n": {
+                    "$sum": 1
+                  }
+                }
+              },
+              {
+                "$group": {
+                  "_id": "$_id.key",
+                  "kinds": {
+                    "$push": {
+                      "k": "$_id.kind",
+                      "v": "$n"
+                    }
+                  }
+                }
+              },
+              {
+                "$project": {
+                  "_id": 1,
+                  "counts": {
+                    "$arrayToObject": "$kinds"
+                  }
+                }
+              }
+            ],
+            "ribbons": [
+              {
+                "$match": {
+                  "analysis.status": {
+                    "$in": [
+                      "done",
+                      "imported"
+                    ]
+                  },
+                  "analysis.classifications.0": {
+                    "$exists": true
+                  }
+                }
+              },
+              {
+                "$project": {
+                  "playedAt": 1,
+                  "color": 1,
+                  "result": 1,
+                  "speed": 1,
+                  "classes": {
+                    "$reduce": {
+                      "input": "$analysis.classifications",
+                      "initialValue": "",
+                      "in": {
+                        "$concat": [
+                          "$$value",
+                          {
+                            "$switch": {
+                              "branches": [
+                                {
+                                  "case": {
+                                    "$eq": [
+                                      "$$this",
+                                      "best"
+                                    ]
+                                  },
+                                  "then": "b"
+                                },
+                                {
+                                  "case": {
+                                    "$eq": [
+                                      "$$this",
+                                      "good"
+                                    ]
+                                  },
+                                  "then": "g"
+                                },
+                                {
+                                  "case": {
+                                    "$eq": [
+                                      "$$this",
+                                      "inaccuracy"
+                                    ]
+                                  },
+                                  "then": "i"
+                                },
+                                {
+                                  "case": {
+                                    "$eq": [
+                                      "$$this",
+                                      "mistake"
+                                    ]
+                                  },
+                                  "then": "m"
+                                },
+                                {
+                                  "case": {
+                                    "$eq": [
+                                      "$$this",
+                                      "blunder"
+                                    ]
+                                  },
+                                  "then": "x"
+                                }
+                              ],
+                              "default": "g"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "cursor": {},
+      "$db": "blunderprint"
+    },
+    "ok": 1
+  }
+}

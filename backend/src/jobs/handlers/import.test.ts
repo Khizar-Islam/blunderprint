@@ -8,6 +8,7 @@ import { chessComGame, lichessGame, LICHESS_ANALYSIS } from "../../../scripts/fi
 import { normalizeChessComGame } from "../../importers/chesscom.js";
 import { normalizeLichessGame } from "../../importers/lichess.js";
 import type { ImportGamesInput, Importer, NormalizedGame } from "../../importers/normalize.js";
+import { SUMMARY_VERSION, type Summary } from "../../stats/summary.js";
 import { FatalError } from "../errors.js";
 import { createQueue, type Progress } from "../queue.js";
 import { createImportHandler, importJobKey } from "./import.js";
@@ -134,6 +135,14 @@ test("games that arrive analysed (Lichess evals) start one feature-extraction jo
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0]!.key, `extract:${String(player!._id)}`);
   assert.deepEqual(jobs[0]!.payload, { playerId: String(player!._id) });
+});
+
+test("an import rebuilds the cached summary (new games change totals and openings)", async () => {
+  await run(fakeImporter(games(3)).importer, fakeJob("chesscom", "alice"));
+  const player = await Player.findOne().lean();
+  assert.equal(player!.summaryVersion, SUMMARY_VERSION);
+  assert.equal((player!.summary as Summary).totals.games, 3);
+  assert.equal((player!.summary as Summary).totals.analysed, 0);
 });
 
 test("an import with nothing analysed starts no extraction job", async () => {

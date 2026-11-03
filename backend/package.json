@@ -18,7 +18,8 @@
     "backfill:classifications": "tsx --env-file=.env scripts/backfillClassifications.ts",
     "fix:undefined-openings": "tsx --env-file=.env scripts/fixUndefinedOpenings.ts",
     "fetch:division-fixture": "tsx --env-file=.env scripts/fetchDivisionFixture.ts",
-    "extract:features": "tsx --env-file=.env scripts/extractFeatures.ts"
+    "extract:features": "tsx --env-file=.env scripts/extractFeatures.ts",
+    "explain:summary": "tsx --env-file=.env scripts/explainSummary.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

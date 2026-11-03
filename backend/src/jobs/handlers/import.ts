@@ -5,6 +5,7 @@ import type { JobDoc } from "../../db/models/job.js";
 import { Player, type Platform } from "../../db/models/player.js";
 import type { Importer, NormalizedGame } from "../../importers/normalize.js";
 import { logger } from "../../lib/logger.js";
+import { rebuildCachedSummary } from "../../stats/summary.js";
 import { FatalError } from "../errors.js";
 import type { Queue } from "../queue.js";
 import type { JobHandler } from "../worker.js";
@@ -156,6 +157,9 @@ export function createImportHandler({
       //    A separate job (it runs after this one), so a slow extraction never holds up the
       //    import being reported done. Skipped when there's nothing to extract.
       if (await Game.exists(needsExtraction(player._id))) await enqueueExtract(queue, player._id);
+      // 5. The cached dashboard summary counts every game (results by opening, totals), so new
+      //    or trimmed games change it even when nothing new is analysed.
+      await rebuildCachedSummary(player._id);
 
       await reportProgress({ done: gamesCount, total: gamesCount, message: `Imported ${gamesCount} games` });
     },

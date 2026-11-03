@@ -8,6 +8,7 @@ import { gamesRouter } from "./routes/games.js";
 import { healthRouter } from "./routes/health.js";
 import { jobsRouter } from "./routes/jobs.js";
 import { playersRouter } from "./routes/players.js";
+import { summaryRouter } from "./routes/summary.js";
 
 export interface AppOptions {
   corsOrigins: string[];
@@ -56,6 +57,7 @@ export function createApp({
   // 5. Routes.
   app.use("/api", healthRouter({ getDbStatus, getQueueDepth: () => queue.depth(), version, cacheMs: healthCacheMs }));
   app.use("/api", playersRouter({ queue }));
+  app.use("/api", summaryRouter({ queue }));
   app.use("/api", jobsRouter({ heartbeatMs: sseHeartbeatMs }));
   app.use("/api", gamesRouter());
   app.use("/api", analysisRouter(queue, analysis));

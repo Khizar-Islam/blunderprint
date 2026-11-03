@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { extractFeatures, FEATURES_VERSION, type FeatureInput } from "../../chess/features.js";
 import { Game, type AnalysisStatus, type Classification } from "../../db/models/game.js";
 import { logger } from "../../lib/logger.js";
+import { rebuildCachedSummary } from "../../stats/summary.js";
 import { FatalError } from "../errors.js";
 import type { Queue } from "../queue.js";
 import type { JobHandler } from "../worker.js";
@@ -145,6 +146,11 @@ export function createExtractHandler({
       }
 
       if (failed > 0) logger.warn("Games whose PGN didn't replay for features", { jobId: String(job._id), playerId, failed });
+      // The dashboard's cached (unfiltered) summary now includes these games. Rebuilt even when
+      // nothing was extracted: a run with nothing to do is cheap, and it also repairs a
+      // summary from an older SUMMARY_VERSION.
+      if (signal.aborted) throw signal.reason;
+      await rebuildCachedSummary(playerId);
       await reportProgress({ done: extracted, total: extracted, message: `Extracted ${extracted} games` });
     },
   };

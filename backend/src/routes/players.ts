@@ -25,6 +25,9 @@ const playerParams = z
   .object({ platform: z.enum(PLATFORMS), username: z.string() })
   .refine(({ platform, username }) => USERNAME_RULES[platform].test(username));
 
+// :platform and :username of every /players/:platform/:username route (also routes/summary.ts).
+export const parsePlayerParams = (raw: unknown) => parseOr400(playerParams, raw, "Invalid platform or username");
+
 // A player imported less than this long ago is served as-is: Chess.com's data only refreshes
 // every 12–24 h anyway, and it saves both sites (and our job queue) needless work.
 const FRESH_IMPORT_MS = 6 * 60 * 60_000;
@@ -55,7 +58,7 @@ export const LIST_PROJECTION = {
 
 export function playersRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Router {
   const router = Router();
-  const params = (raw: unknown) => parseOr400(playerParams, raw, "Invalid platform or username");
+  const params = parsePlayerParams;
   // Uses the partial unique index on key: this filter matches its partialFilterExpression.
   const findActiveImport = (platform: Platform, username: string) =>
     Job.findOne({ key: importJobKey(platform, username), status: { $in: [...ACTIVE_JOB_STATUSES] } });
@@ -90,7 +93,8 @@ export function playersRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
   router.get("/players/:platform/:username", async (req, res) => {
     const { platform, username } = params(req.params);
     const [player, activeJob] = await Promise.all([
-      Player.findOne({ platform, usernameLower: username.toLowerCase() }, { importMeta: 0, __v: 0 }).lean(),
+      // Not the cached summary (~30 KB with its ribbons): the dashboard gets it from /summary.
+      Player.findOne({ platform, usernameLower: username.toLowerCase() }, { importMeta: 0, summary: 0, __v: 0 }).lean(),
       findActiveImport(platform, username),
     ]);
     if (!player && !activeJob) throw new HttpError(404, "Player not found");

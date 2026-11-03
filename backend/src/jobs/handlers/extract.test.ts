@@ -6,6 +6,7 @@ import { FEATURES_VERSION } from "../../chess/features.js";
 import { Game, type AnalysisStatus, type Classification } from "../../db/models/game.js";
 import type { JobDoc } from "../../db/models/job.js";
 import { Player } from "../../db/models/player.js";
+import { SUMMARY_VERSION, type Summary } from "../../stats/summary.js";
 import type { Progress } from "../queue.js";
 import { createExtractHandler, extractJobKey, makeYielder } from "./extract.js";
 
@@ -91,6 +92,20 @@ test("extracts analysed games (ours and Lichess-imported), leaves the others alo
   }
   for (const id of [pending, unanalysable]) assert.equal((await Game.findById(id).lean())!.features, undefined);
   assert.deepEqual(progress.at(-1), { done: 2, total: 2, message: "Extracted 2 games" });
+});
+
+test("rebuilds the player's cached summary at the end of the run", async () => {
+  const p = await player();
+  await makeGame(p._id, "done");
+  await makeGame(p._id, "imported");
+  await makeGame(p._id, "pending");
+  await run(p._id);
+  const stored = await Player.findById(p._id).lean();
+  assert.equal(stored!.summaryVersion, SUMMARY_VERSION);
+  const summary = stored!.summary as Summary;
+  assert.equal(summary.totals.games, 3);
+  assert.equal(summary.totals.analysed, 2);
+  assert.equal(summary.totals.mistakes.blunder, 2); // 3...Nf6?? in each analysed game
 });
 
 test("running again changes nothing; a FEATURES_VERSION change re-extracts", async () => {

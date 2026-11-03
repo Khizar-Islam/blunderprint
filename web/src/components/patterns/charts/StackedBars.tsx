@@ -1,0 +1,121 @@
+"use client";
+
+import { motion, useReducedMotion } from "motion/react";
+import type { ErrorKind, KindCounts } from "@/lib/api";
+import { AnimatedNumber } from "./AnimatedNumber";
+import { niceMax, ticks } from "./scale";
+
+// A horizontal bar per bucket, split by error kind (blunders first from the left), hand-drawn in
+// SVG. Colours go in `style`, not in fill=/stroke= attributes: var() only works in CSS, not
+// in an SVG attribute. Each bar's SVG uses a 0–100 viewBox stretched to the width (preserveAspectRatio="none"),
+// so it fits any screen; the text is plain HTML beside it, so it never stretches.
+//
+// The kinds are drawn as three rectangles that all start at x = 0 and overlap: the widest
+// (all errors, inaccuracy colour) underneath, then blunders + mistakes, then blunders on top.
+// Only `width` changes, so motion animates one attribute per rectangle from the old value to the
+// new one when the filters change; bars are keyed by bucket, so a bucket keeps its rectangles
+// (and animates) instead of being replaced.
+
+export interface BarRow {
+  key: string;
+  label: string;
+  sub?: string; // e.g. "38 games"
+  counts: KindCounts;
+  value: number | null; // the rate shown (per 100 moves or per game); null = no data
+}
+
+const FILL: Record<ErrorKind, string> = {
+  inaccuracy: "var(--color-inaccuracy)",
+  mistake: "var(--color-mistake)",
+  blunder: "var(--color-blunder)",
+};
+
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+export function StackedBars({
+  title,
+  caption,
+  rows,
+  format,
+}: {
+  title: string;
+  caption?: string;
+  rows: BarRow[];
+  format: (n: number) => string;
+}) {
+  const reduced = useReducedMotion();
+  const max = niceMax(Math.max(0, ...rows.map((r) => r.value ?? 0)));
+  const grid = ticks(max).slice(1, -1); // inner gridlines only
+
+  return (
+    <figure className="flex flex-col gap-3">
+      <figcaption className="flex flex-col gap-0.5">
+        <span className="font-display text-xl text-ink">{title}</span>
+        {caption && <span className="text-xs text-graphite/70">{caption}</span>}
+      </figcaption>
+      <ul className="flex flex-col gap-2.5">
+        {rows.map((row) => {
+          const v = row.value ?? 0;
+          const total = row.counts.inaccuracy + row.counts.mistake + row.counts.blunder;
+          // Each kind's share of the rate, stacked: blunder | mistake | inaccuracy.
+          const part = (n: number) => (total > 0 ? (v * n) / total / max : 0) * 100;
+          const widths = {
+            blunder: part(row.counts.blunder),
+            mistake: part(row.counts.blunder + row.counts.mistake),
+            inaccuracy: part(total),
+          };
+          return (
+            <li
+              key={row.key}
+              className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[8.5rem_1fr_3.5rem]"
+              aria-label={`${row.label}: ${row.value === null ? "no data" : format(row.value)}; ${row.counts.blunder} blunders, ${row.counts.mistake} mistakes, ${row.counts.inaccuracy} inaccuracies`}
+            >
+              <span className="flex min-w-0 items-baseline gap-2 text-sm text-ink">
+                <span className="truncate">{row.label}</span>
+                {row.sub && <span className="shrink-0 font-mono text-xs text-graphite/60">{row.sub}</span>}
+              </span>
+              <svg
+                className="col-span-2 row-start-2 h-3 w-full sm:col-span-1 sm:row-start-auto"
+                viewBox="0 0 100 10"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <rect x="0" y="0" width="100" height="10" style={{ fill: "var(--color-ink)", fillOpacity: 0.05 }} />
+                {grid.map((t) => (
+                  <line
+                    key={t}
+                    x1={(t / max) * 100}
+                    x2={(t / max) * 100}
+                    y1="0"
+                    y2="10"
+                    style={{ stroke: "var(--color-bone)" }}
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
+                {(["inaccuracy", "mistake", "blunder"] as const).map((kind) => (
+                  <motion.rect
+                    key={kind}
+                    x="0"
+                    y="0"
+                    height="10"
+                    style={{ fill: FILL[kind] }}
+                    initial={{ width: 0 }}
+                    animate={{ width: widths[kind] }}
+                    transition={reduced ? { duration: 0 } : { duration: 0.6, ease: EASE }}
+                  />
+                ))}
+              </svg>
+              <span className="text-right font-mono text-sm text-ink tabular-nums">
+                <AnimatedNumber value={row.value} format={format} />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="font-mono text-[11px] text-graphite/60">
+        scale 0–{format(max)}
+      </p>
+    </figure>
+  );
+}

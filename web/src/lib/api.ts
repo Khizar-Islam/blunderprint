@@ -210,3 +210,63 @@ export function releaseAnalysis(claimId: string, gameIds: string[], { beacon = f
   // keepalive lets the request finish even if the page navigates away meanwhile.
   fetch(url, { method: "POST", headers: { "Content-Type": "text/plain" }, body, keepalive: true }).catch(() => {});
 }
+
+// ── Patterns summary (backend/src/stats/summary.ts, SUMMARY_VERSION 2) ───────────────────
+
+export type ErrorKind = "inaccuracy" | "mistake" | "blunder";
+export type KindCounts = Record<ErrorKind, number>;
+
+export interface Rate extends KindCounts {
+  total: number;
+  moves: number; // the player's moves in the bucket: the per-100 denominator
+  perGame: number | null;
+  per100: number | null;
+}
+
+export type SquareCount = KindCounts & { square: string; total: number };
+
+export interface Summary {
+  version: number;
+  generatedAt: string;
+  filters: { color?: "white" | "black"; speed?: Speed; from?: string; to?: string };
+  totals: {
+    games: number; // every game in the filter, analysed or not
+    analysed: number; // games with features: the base of every rate
+    moves: number;
+    mistakes: KindCounts & { total: number };
+    firstPlayedAt: string | null;
+    lastPlayedAt: string | null;
+  };
+  openings: {
+    eco: string | null;
+    name: string | null;
+    games: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    score: number; // 0–100
+    analysed: number;
+    mistakesPerGame: number | null;
+  }[];
+  byPhase: ({ phase: "opening" | "middlegame" | "endgame" } & Rate)[];
+  bySpeed: ({ speed: Speed; games: number } & Rate)[];
+  byClock: ({ bucket: "over50" | "from25to50" | "from10to25" | "under10" } & Rate)[];
+  byMoveNumber: ({ bucket: string } & Rate)[];
+  // All 64 squares per colour the player had, a1, b1 … h8, on the real board.
+  squares: Record<"white" | "black", SquareCount[]>;
+  // One per analysed game, newest first. classes: one letter per ply, both sides
+  // (b best, g good, i inaccuracy, m mistake, x blunder).
+  ribbons: { gameId: string; playedAt: string; color: "white" | "black"; result: "win" | "loss" | "draw"; speed: Speed; classes: string }[];
+}
+
+// extracting: some analysed games have no features yet, so the numbers will still change.
+export interface SummaryResponse {
+  summary: Summary;
+  cached: boolean;
+  extracting: boolean;
+}
+
+// `query` is the API query string (lib/filters.ts apiQuery), "" for the unfiltered summary.
+export function fetchSummary(platform: Platform, username: string, query: string, signal: AbortSignal) {
+  return getJson<SummaryResponse>(`${playerPath(platform, username)}/summary${query ? `?${query}` : ""}`, { signal });
+}

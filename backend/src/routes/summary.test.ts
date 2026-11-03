@@ -143,6 +143,19 @@ test("backstop: nothing to extract, no job", async () => {
   assert.equal(await Job.countDocuments({ type: "extract" }), 0);
 });
 
+test("extracting stays true while the extract job is active, though every game already has features", async () => {
+  // The window between the job writing a game's features and rebuilding the cached summary at
+  // the end of its run: nothing is missing, but the cached summary is still the old one.
+  const p = await makePlayer();
+  await makeGame(p._id);
+  const job = await Job.create({ type: "extract", key: `extract:${String(p._id)}`, payload: {}, status: "running", runAfter: new Date() });
+  assert.equal((await getJson()).extracting, true);
+  await Job.updateOne({ _id: job._id }, { $set: { status: "done" } });
+  assert.equal((await getJson()).extracting, false, "a finished job doesn't count");
+  await Job.create({ type: "extract", key: "extract:someone-else", payload: {}, status: "queued", runAfter: new Date() });
+  assert.equal((await getJson()).extracting, false, "another player's job doesn't count");
+});
+
 test("GET /players/:platform/:username doesn't send the cached summary", async () => {
   const p = await makePlayer();
   await makeGame(p._id);

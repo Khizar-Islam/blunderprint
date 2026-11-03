@@ -2,7 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { COLORS, Game, SPEEDS } from "../db/models/game.js";
 import { Player } from "../db/models/player.js";
-import { enqueueExtract, needsExtraction } from "../jobs/handlers/extract.js";
+import { Job } from "../db/models/job.js";
+import { enqueueExtract, extractJobKey, needsExtraction } from "../jobs/handlers/extract.js";
 import type { Queue } from "../jobs/queue.js";
 import { logger } from "../lib/logger.js";
 import { parseOr400 } from "../lib/validate.js";
@@ -49,8 +50,8 @@ export function summaryRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
     // features would show, so viewing it is the natural moment to catch up. It's safe to repeat:
     // the queue's unique key allows one queued-or-running extract job per player, so a hundred
     // page loads still mean one job, and the check itself is an index lookup.
-    const extracting = (await Game.exists(needsExtraction(player._id))) !== null;
-    if (extracting) {
+    const missing = (await Game.exists(needsExtraction(player._id))) !== null;
+    if (missing) {
       try {
         await enqueueExtract(queue, player._id);
       } catch (err) {
@@ -58,6 +59,15 @@ export function summaryRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
         logger.warn("Summary backstop could not enqueue extraction", { playerId: String(player._id), error: String(err) });
       }
     }
+
+    // extracting: the numbers will still change, so the dashboard should ask again shortly.
+    // True while games lack features, AND while the player's extract job is still queued or
+    // running: the job writes each game's features first and rebuilds the cached summary only at
+    // the end of its run, so in between nothing is "missing" but the cached summary is still the
+    // old one. The lookup is the unique { key } index (active jobs only).
+    const extracting =
+      missing ||
+      (await Job.exists({ key: extractJobKey(player._id), status: { $in: ["queued", "running"] } })) !== null;
 
     const unfiltered = Object.keys(filters).every((k) => filters[k as keyof SummaryFilters] === undefined);
     let summary: Summary;
@@ -72,8 +82,6 @@ export function summaryRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
       summary = await computeSummary(player._id, filters);
     }
 
-    // extracting: some analysed games don't have features yet, so the numbers will still
-    // change; the dashboard can say "working out patterns…" and ask again shortly.
     res.json({ summary, cached, extracting });
   });
 

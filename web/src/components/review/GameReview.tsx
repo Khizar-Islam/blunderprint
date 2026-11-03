@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAnalysis, type AnalysisView, type LiveGame } from "@/engine/useAnalysis";
 import { fetchGame, PLATFORM_NAMES, type GameDetail, type Platform } from "@/lib/api";
 import { formatTimeControl, fullDate } from "@/lib/format";
+import { clampPly } from "@/lib/plyParam";
 import { progressRibbon } from "@/lib/ribbon";
 import { buildTimeline, uciToSan, type Timeline } from "@/lib/timeline";
 import { useWakingRequest } from "@/lib/useWakingRequest";
@@ -14,9 +15,9 @@ import { Board, type BoardArrow } from "./Board";
 import { GLYPH, HEX, isError } from "./classes";
 import { MoveList } from "./MoveList";
 
-type Props = { platform: Platform; username: string; gameId: string };
+type Props = { platform: Platform; username: string; gameId: string; initialPly?: number | null };
 
-export function GameReview({ platform, username, gameId }: Props) {
+export function GameReview({ platform, username, gameId, initialPly = null }: Props) {
   const request = useWakingRequest((signal) => fetchGame(gameId, signal));
 
   if (request.state.kind === "loading") {
@@ -42,12 +43,22 @@ export function GameReview({ platform, username, gameId }: Props) {
   if (!player || player.platform !== platform || player.username.toLowerCase() !== username.toLowerCase()) {
     return <NotFound platform={platform} username={username} />;
   }
-  return <Review game={game} platform={platform} username={player.username} />;
+  return <Review game={game} platform={platform} username={player.username} initialPly={initialPly} />;
 }
 
 const unfinished = (g: GameDetail) => g.analysis.status === "pending" || g.analysis.status === "claimed";
 
-function Review({ game: initial, platform, username }: { game: GameDetail; platform: Platform; username: string }) {
+function Review({
+  game: initial,
+  platform,
+  username,
+  initialPly,
+}: {
+  game: GameDetail;
+  platform: Platform;
+  username: string;
+  initialPly: number | null;
+}) {
   const [game, setGame] = useState(initial);
 
   // ---- Not analysed yet: analyse it here, this game first -----------------------------------
@@ -79,7 +90,8 @@ function Review({ game: initial, platform, username }: { game: GameDetail; platf
   }, [needsAnalysis, finishedHere, game.id]);
 
   const timeline = useMemo<Timeline | null>(() => buildTimeline(game.pgn), [game.pgn]);
-  const [ply, setPly] = useState(0); // 0 = start position, k = after ply k
+  // 0 = start position, k = after ply k. Starts at ?ply=N when given, clamped to the game.
+  const [ply, setPly] = useState(() => clampPly(initialPly, timeline ? timeline.plies.length : 0));
   const [peekState, setPeek] = useState<{ ply: number; on: boolean }>({ ply: 0, on: false });
   // A peek belongs to the move it was opened on (so a stale one never shows on another move),
   // and every move change closes it: coming back to the mistake shows the position after it.

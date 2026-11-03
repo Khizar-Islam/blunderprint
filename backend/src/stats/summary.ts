@@ -12,7 +12,8 @@ import { Player } from "../db/models/player.js";
 //
 // Bump SUMMARY_VERSION when the response shape changes: a cached summary with another version
 // is ignored and rebuilt.
-export const SUMMARY_VERSION = 1;
+// v2: squares split by the colour the player had (the heat board mirrors Black's ranks).
+export const SUMMARY_VERSION = 2;
 
 export interface SummaryFilters {
   color?: Color;
@@ -46,6 +47,8 @@ export interface Rate extends KindCounts {
   per100: number | null;
 }
 
+export type SquareCount = { square: string; total: number } & KindCounts;
+
 export interface Summary {
   version: number;
   generatedAt: string;
@@ -74,7 +77,9 @@ export interface Summary {
   bySpeed: ({ speed: Speed; games: number } & Rate)[];
   byClock: ({ bucket: (typeof CLOCK_BUCKETS)[number] } & Rate)[];
   byMoveNumber: ({ bucket: string } & Rate)[];
-  squares: ({ square: string; total: number } & KindCounts)[]; // all 64, a1, b1 … h8
+  // Errors per destination square, split by the player's colour: all 64 for each, a1, b1 … h8.
+  // Real board squares; the dashboard mirrors Black's ranks itself for "both colours".
+  squares: Record<Color, SquareCount[]>;
   // One per analysed game, newest first. classes: one letter per ply, both sides
   // (b best, g good, i inaccuracy, m mistake, x blunder); the client knows which plies are the
   // player's from color.
@@ -278,8 +283,9 @@ export function summaryPipeline(playerId: Types.ObjectId, filters: SummaryFilter
           }),
         ],
 
-        // Errors per destination square and kind: the heat board.
-        squares: [...unwindMistakes, ...countKinds("$m.square")],
+        // Errors per destination square, colour and kind: the heat board. Split by colour so the
+        // dashboard can show White's games, Black's, or both with Black's ranks mirrored.
+        squares: [...unwindMistakes, ...countKinds({ square: "$m.square", color: "$color" })],
 
         // One ribbon per analysed game (ours or Lichess's), in the newest-first order of stage 2.
         // Classifications become a one-letter-per-ply string: ~80 bytes a game instead of an
@@ -328,7 +334,7 @@ interface FacetResult {
   bySpeed: { _id: Speed; counts: Partial<KindCounts> }[];
   byClock: { _id: string; counts: Partial<KindCounts> }[];
   byMoveNumber: { _id: string; counts: Partial<KindCounts> }[];
-  squares: { _id: string; counts: Partial<KindCounts> }[];
+  squares: { _id: { square: string; color: Color }; counts: Partial<KindCounts> }[];
   ribbons: { _id: Types.ObjectId; playedAt: Date; color: Color; result: string; speed: Speed; classes: string }[];
 }
 
@@ -384,12 +390,14 @@ export function shapeSummary(raw: FacetResult, filters: SummaryFilters, readAt: 
   const moveRows = byKey(raw.byMoveNumber);
   const byMoveNumber = MOVE_BUCKETS.map((b, i) => ({ bucket: b.label, ...rate(moveRows.get(b.label)?.counts, sum(`move_${i}`), analysed) }));
 
-  const squareRows = byKey(raw.squares);
-  const squares = Array.from({ length: 64 }, (_, i) => {
-    const square = `${FILES[i % 8]}${Math.floor(i / 8) + 1}`;
-    const k = kindsOf(squareRows.get(square)?.counts);
-    return { square, ...k, total: k.inaccuracy + k.mistake + k.blunder };
-  });
+  const squareRows = new Map(raw.squares.map((r) => [`${r._id.color}:${r._id.square}`, r.counts]));
+  const squaresFor = (color: Color): SquareCount[] =>
+    Array.from({ length: 64 }, (_, i) => {
+      const square = `${FILES[i % 8]}${Math.floor(i / 8) + 1}`;
+      const k = kindsOf(squareRows.get(`${color}:${square}`));
+      return { square, ...k, total: k.inaccuracy + k.mistake + k.blunder };
+    });
+  const squares = { white: squaresFor("white"), black: squaresFor("black") };
 
   return {
     version: SUMMARY_VERSION,

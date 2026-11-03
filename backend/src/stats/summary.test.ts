@@ -207,14 +207,21 @@ describe("computeSummary: every breakdown on known games", () => {
     ]);
   });
 
-  it("squares: all 64, a1 first, counts by kind", () => {
-    assert.equal(s.squares.length, 64);
-    assert.deepEqual(s.squares[0], { square: "a1", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
-    assert.deepEqual(s.squares[28], { square: "e4", inaccuracy: 1, mistake: 1, blunder: 0, total: 2 });
-    assert.deepEqual(s.squares[53], { square: "f7", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
-    assert.equal(s.squares[63]!.square, "h8");
-    assert.equal(s.squares[63]!.total, 0, "bob's h8 blunder isn't alice's");
-    assert.equal(s.squares.reduce((n, sq) => n + sq.total, 0), 4);
+  it("squares: all 64 per colour, a1 first, counts by kind and the colour alice had", () => {
+    const { white, black } = s.squares;
+    assert.equal(white.length, 64);
+    assert.equal(black.length, 64);
+    // G1 (white): e4 inaccuracy, f7 blunder. G2 (black): e4 mistake, a1 blunder.
+    assert.deepEqual(white[28], { square: "e4", inaccuracy: 1, mistake: 0, blunder: 0, total: 1 });
+    assert.deepEqual(white[53], { square: "f7", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
+    assert.deepEqual(white[0], { square: "a1", inaccuracy: 0, mistake: 0, blunder: 0, total: 0 });
+    assert.deepEqual(black[0], { square: "a1", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
+    assert.deepEqual(black[28], { square: "e4", inaccuracy: 0, mistake: 1, blunder: 0, total: 1 });
+    assert.equal(black[63]!.square, "h8");
+    assert.equal(black[63]!.total, 0, "bob's h8 blunder isn't alice's");
+    const sum = (rows: typeof white) => rows.reduce((n, sq) => n + sq.total, 0);
+    assert.equal(sum(white), 2);
+    assert.equal(sum(black), 2);
   });
 
   it("ribbons: every game with classifications (ours or imported), newest first, one letter per ply", () => {
@@ -262,7 +269,8 @@ describe("computeSummary: filters", () => {
     assert.equal(s.totals.analysed, 0);
     assert.deepEqual(s.openings, []);
     assert.equal(s.byPhase[0]!.perGame, null);
-    assert.equal(s.squares.length, 64);
+    assert.equal(s.squares.white.length, 64);
+    assert.equal(s.squares.black.every((sq) => sq.total === 0), true);
     assert.deepEqual(s.ribbons, []);
   });
 });

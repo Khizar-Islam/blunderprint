@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   fetchGames,
@@ -20,6 +20,7 @@ import { useAnalysis } from "@/engine/useAnalysis";
 import { AnalysisBar } from "./AnalysisBar";
 import { GamesList } from "./GamesList";
 import { ImportProgress } from "./ImportProgress";
+import { PatternsDashboard } from "./patterns/PatternsDashboard";
 
 type Props = { platform: Platform; username: string };
 
@@ -63,6 +64,8 @@ function Dashboard({ platform, username }: Props) {
   const [games, setGames] = useState<GameRow[]>([]);
   const [gamesState, setGamesState] = useState<"idle" | "loading" | "error">("idle");
   const [lastEventAt, setLastEventAt] = useState(() => Date.now());
+  // Bumped when an import finishes: the patterns refetch (new games, trimmed old ones).
+  const [importsDone, setImportsDone] = useState(0);
 
   // ---- Loading games -------------------------------------------------------------------------
   // `pageCursor` is the cursor of the last page we fetched (null = the first page). While an
@@ -134,6 +137,7 @@ function Dashboard({ platform, username }: Props) {
       if (type === "progress") void load("sync");
       if (type === "done") {
         void load("reload");
+        setImportsDone((n) => n + 1);
         // Fresh counts and lastImportedAt for the summary line.
         const signal = controller.current!.signal;
         fetchPlayer(platform, username, signal)
@@ -234,6 +238,17 @@ function Dashboard({ platform, username }: Props) {
       {player && games.length > 0 && (
         <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
       )}
+
+      {/* Patterns refetch when the engine stores a game or an import finishes (the pulse), at most
+          every 10 s. Suspense: the section reads the URL's filters (useSearchParams). */}
+      <Suspense fallback={null}>
+        <PatternsDashboard
+          platform={platform}
+          username={username}
+          enabled={player != null}
+          pulse={analysis.doneThisSession + importsDone}
+        />
+      </Suspense>
 
       <GamesList games={games} live={analysis.live} platform={platform} username={username} />
     </div>

@@ -115,28 +115,34 @@ blunderprint/
 │  │  ├─ config/env.ts       (zod-validated env, parseTrustProxyHops, CORS list)
 │  │  ├─ db/                 (mongoose connect, models/*.ts, indexes)
 │  │  ├─ jobs/               (queue.ts, worker.ts, events.ts in-process job event bus,
-│  │  │                       errors.ts, setup.ts, handlers/*.ts)
+│  │  │                       errors.ts, setup.ts, handlers/ import.ts + extract.ts)
 │  │  ├─ importers/          (chesscom.ts, lichess.ts, politeFetch.ts, normalize.ts)
-│  │  ├─ chess/              (fen.ts normalize, classify.ts win%, features.ts, openings.ts)
+│  │  ├─ chess/              (fen.ts normalize, classify.ts win%, phase.ts Lichess Divider port,
+│  │  │                       features.ts per-game features; openings.ts in Stage 4)
+│  │  ├─ stats/summary.ts    (the dashboard's one $facet pipeline + response shape, SUMMARY_VERSION)
 │  │  ├─ agent/              (tools/*.ts, loop.ts, verifier.ts, prompts.ts, schema.ts)
-│  │  ├─ routes/             (players, games, jobs (SSE stream), analysis, positions, coach, health)
+│  │  ├─ routes/             (players, games, jobs (SSE stream), analysis, summary, positions, coach, health)
 │  │  ├─ middleware/         (requestId.ts, errorHandler.ts, rateLimit.ts, budget.ts)
 │  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
-│  │                          validate.ts zod → 400, sleep.ts, version.ts)
+│  │                          validate.ts zod → 400, sleep.ts, version.ts, explain.ts explain summaries)
 │  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
-│  │                          importOnce, explainGames; one-off fixes: backfillClassifications,
+│  │                          importOnce, explainGames, explainSummary, extractFeatures (backfill),
+│  │                          fetchDivisionFixture; one-off fixes: backfillClassifications,
 │  │                          fixUndefinedOpenings)
 │  └─ .env.example
 ├─ docs/explain/             (saved .explain() output for the README)
 ├─ web/
-│  ├─ src/app/               (/, /p/[platform]/[username], /p/.../game/[id], /p/.../coach;
+│  ├─ src/app/               (/, /p/[platform]/[username], /p/.../game/[id] (?ply=N), /p/.../coach;
 │  │                          /dev/engine: engine timing lab used for the Stage 2 measurements, dev only (404 in production))
 │  ├─ src/lib/               (api.ts, useJobStream.ts, useWakingRequest.ts, format.ts,
-│  │                          ribbon.ts, timeline.ts replay + SAN, winPercent.ts graph + accuracy)
+│  │                          ribbon.ts, timeline.ts replay + SAN, winPercent.ts graph + accuracy,
+│  │                          filters.ts URL ⇄ filters, useSummary.ts + refetch.ts, plyParam.ts)
 │  ├─ src/components/        (PlayerSearch, PlayerDashboard, ImportProgress, GamesList, HealthStatus,
 │  │                          MotionProvider, AnalysisBar;
 │  │                          review/: GameReview, Board, EvalGraph, MoveList, BetterMove, classes;
-│  │                          later Blunderprint, AgentTrace, PatternCard)
+│  │                          patterns/: PatternsDashboard, Filters, Blunderprint (canvas) + geometry.ts,
+│  │                          HeatBoard + heat.ts, OpeningsTable, charts/ (StackedBars, AnimatedNumber,
+│  │                          scale.ts, sample.ts); later AgentTrace, PatternCard)
 │  ├─ src/engine/            (stockfish.ts worker wrapper, uci.ts parsing, analyseGame.ts,
 │  │                          replay.ts, scheduler.ts claim/analyse/post + Web Lock,
 │  │                          useAnalysis.ts React hook, throughput.ts s/game)
@@ -187,7 +193,8 @@ Field names in camelCase. Every collection gets `createdAt`/`updatedAt` unless n
   profile: { ratings: { blitz, rapid, bullet }, avatarUrl?, country? },
   importState: "idle"|"importing"|"ready"|"failed", lastImportedAt,
   gamesCount, analysedCount,
-  summary: { ...precomputed aggregates for the dashboard... }, summaryVersion,
+  summary, summaryVersion, // the cached UNFILTERED dashboard summary (stats/summary.ts), rebuilt by the
+                          // extract and import jobs; another SUMMARY_VERSION is ignored and rebuilt
   lastViewedAt,           // used by the storage guard (LRU eviction)
   importMeta: {           // what a re-import needs to fetch only what's new
     monthEtags: { "YYYY/MM": etag },  // Chess.com month ETags; a 304 means that month is unchanged
@@ -214,7 +221,16 @@ Indexes: unique `{ platform, usernameLower }`; `{ lastViewedAt: 1 }`.
     classifications: [ "best"|"good"|"inaccuracy"|"mistake"|"blunder" ],
     accuracy?,                                      // average move accuracy of the imported player
     durationMs?, analysedAt?, error?: { code: "illegal_pgn"|"ply_mismatch", atPly? } }
-  features: { mistakes: [ { ply, kind, phase, winDrop, clockLeft?, square?, pieceLost?, fen } ] } }
+  features: {                // written by the extract job (8.3); absent until then
+    version,                 // FEATURES_VERSION: a game with another version is extracted again
+    error?,                  // the PGN didn't replay: skipped until the next version
+    division: { middle?, end? },  // plies where those phases start (Lichess's Divider)
+    mistakes: [ { ply, kind, phase, san, best?, winDrop, clockLeft?, timeTrouble?,
+                  square,     // the move's destination square
+                  pieceLost?, // "p"|"n"|"b"|"r"|"q": lost within 2 plies
+                  fen } ],    // normalized, BEFORE the move
+    moveCounts: { opening, middlegame, endgame, clock?: { over50, from25to50, from10to25, under10 } } } }
+                             // the player's moves per phase / clock bucket: per-100-moves denominators
 ```
 Indexes:
 - unique `{ playerId, sourceId }` (idempotent import). Keyed by player, not `{ platform, sourceId }`: if two players we track played each other, the game is stored once per player, because `color` and `result` are per player. With `{ platform, sourceId }` the second import would overwrite the first player's copy.
@@ -224,7 +240,7 @@ Keep only the **most recent N games per player** (env `MAX_GAMES_PER_PLAYER`, de
 
 ### jobs (the queue)
 ```
-{ _id, type: "import"|"extract"|"aggregate"|"report", key (idempotency key, e.g. "import:chesscom:hikaru"),
+{ _id, type: "import"|"extract"|"report", key (idempotency key, e.g. "import:chesscom:hikaru", "extract:<playerId>"),
   payload, status: "queued"|"running"|"done"|"failed",
   attempts, maxAttempts, runAfter, leaseUntil, workerId,
   progress: { done, total, message },
@@ -278,7 +294,7 @@ A **storage guard** job runs after imports. It reads `dbStats`, and over the thr
    - **Lichess:** plies are counted from the export's `moves` field (SAN moves separated by spaces) instead of replaying the PGN with chess.js (measured: ~8 ms a game on my laptop, ~110–160 ms on Render). Batches are stored in the background while the stream keeps flowing, so a slow DB write never trips the stream's idle timeout.
 3. Upsert each game by `{ playerId, sourceId }`: this is idempotent, so re-imports never duplicate. `analysis` is written only on insert, so a re-import never wipes evals.
 4. Set `analysis.status` to `imported` when Lichess evals came with the game, otherwise `pending`.
-5. Update `players.importState`. Enqueuing `extract` for games that already have evals waits until Stage 3, when the `extract` handler exists (until then those jobs would fail as an unknown type).
+5. Update `players.importState`. If analysed games lack features (e.g. Lichess games that came with evals), enqueue the player's `extract` job. Then rebuild the cached summary (new games and trimmed old ones change the totals and openings).
 6. Errors: on 404 the user doesn't exist (fail cleanly); on 429 back off (Lichess: 60 s); network errors retry with exponential backoff up to `maxAttempts`.
 
 ### 8.2 Browser engine analysis
@@ -287,15 +303,22 @@ A **storage guard** job runs after imports. It reads `dbStats`, and over the thr
    - **One tab at a time:** `scheduler.ts` takes the Web Lock `blunderprint:engine` (`navigator.locks`, shared by every tab of the site). A second tab shows "another Blunderprint tab is analysing" and takes over by itself when the first closes or pauses.
    - **Start:** desktop (fine pointer, ≥ 640 px) starts by itself, with Pause/Resume. Phones wait for an **"Analyse on this device"** button, because the engine drains the battery.
    - **Progress:** the bar shows "N of M analysed" and an effective **"~N s per game"** (analysing time ÷ games finished, both engines together, so it matches how fast the list fills). Ribbons fill tick by tick as plies are evaluated.
-3. It posts `POST /api/analysis/results` with per-ply evals, best moves and played moves (UCI). The server validates the counts against the stored plies, the bounds, and that the game is still claimed by this token (a reclaim changes the token, so a late result from an old tab gets 409; a repeat from the same claim gets 200). It then classifies the moves and stores the result. Enqueuing `extract` waits for Stage 3. If chess.js can't replay the PGN (or replays a different number of plies), the browser reports `illegal_pgn`/`ply_mismatch` and the game becomes `unanalysable`.
+3. It posts `POST /api/analysis/results` with per-ply evals, best moves and played moves (UCI). The server validates the counts against the stored plies, the bounds, and that the game is still claimed by this token (a reclaim changes the token, so a late result from an old tab gets 409; a repeat from the same claim gets 200). It then classifies the moves, stores the result and enqueues the player's `extract` job. If chess.js can't replay the PGN (or replays a different number of plies), the browser reports `illegal_pgn`/`ply_mismatch` and the game becomes `unanalysable`.
 4. Expired claims are claimable again, so a closed tab never loses work. Anyone viewing the player later continues the analysis. On `pagehide` the browser also sends `POST /api/analysis/release` with `navigator.sendBeacon` (a text/plain body, parsed by the route's own `express.text`) so its unfinished games go back at once.
 5. **Classification** (`chess/classify.ts`, ported from lila's `Advice.scala` and scalachess's `WinPercent`, with sources cited there): win chances `2/(1+e^(−0.00368208·cp))−1`; a drop of ≥ 0.1 / 0.2 / 0.3 is an inaccuracy / mistake / blunder; mate transitions follow lila's `MateAdvice`; ply 1 is judged against +15 cp; the engine's own best move is `best` and never judged. Imported Lichess games keep **Lichess's own judgements** (it skips moves that were the engine's best, which its export doesn't fully name). On 276 real games our formula matched all 3,212 of Lichess's judgements and added 65 extras.
 
-### 8.3 Feature extraction (job `extract`) and aggregation (job `aggregate`)
-- **Per game:**
-  - Opening: deepest match of a normalized position against `openings.epd`.
-  - Each mistake gets: phase (opening/middlegame/endgame by ply plus remaining material), clock left (time trouble when below 10% of the starting time), the square involved, any piece lost within 2 plies, and the FEN.
-- **Per player:** aggregation pipelines (`$match`, `$unwind`, `$group`, `$bucket`, `$facet`) produce the dashboard summary: score by opening and colour, mistakes per game by phase, speed, clock bucket and move number, and the square heat map. Store it in `players.summary` with a version number.
+### 8.3 Feature extraction (job `extract`) and the summary
+- **One `extract` job per player** (key `extract:<playerId>`; there is no separate `aggregate` job). Every "there may be new work" signal enqueues it: a stored engine result, an import that brought analysed games, and the summary route's backstop. The unique key means one queued-or-running job, however many signals. The handler **drains**: batches of 20 games whose `features.version` is missing or old, until none are left, yielding to the event loop every ~50 ms. At the end it rebuilds the cached summary.
+- **Per game** (`chess/features.ts`, only the imported player's moves):
+  - Phase: a port of Lichess's `Divider` (`chess/phase.ts`); it matched Lichess's own `division` on **200/200** real games.
+  - Each mistake gets: kind, phase, the move (SAN) and the better move when known, the win% drop, clock left (time trouble below 10% of the starting time), the destination square, any piece lost within 2 plies, and the normalized FEN before the move.
+  - `moveCounts`: the player's moves per phase and clock bucket, so rates are per 100 moves, not just per game (otherwise the endgame looks safe because many games never reach one).
+  - Openings: grouped by the platform's ECO code for now; matching positions against `openings.epd` comes with Stage 4.
+  - **Measured on Render** (EricRosen, 145 games in 28 s): ~302 ms a game for the first (cold) batch, then **135–220 ms a game** warm, including the Atlas write.
+- **Per player** (`stats/summary.ts`): ONE pipeline. `$match` (player + filters) → `$sort` in the index order → `$project` (no PGN or evals) → `$facet` with totals, openings by ECO, the move-count denominators, errors by phase, speed, clock bucket (a `$switch` so the edges match `clockBucket()` exactly) and move number, errors per square split by colour, and one ribbon per analysed game (classifications as one letter per ply).
+  - **Unfiltered**, it's cached in `players.summary` (with `SUMMARY_VERSION`, now 2). A rebuild only writes if no newer summary is stored, and `generatedAt` is stamped **before** the read, so a slow rebuild of older data never wins.
+  - **Filtered** (colour, speed, from/to), it runs live per request: at most 200 games.
+  - `.explain()` (saved in `docs/explain/`): both use an IXSCAN on `{ playerId, playedAt, _id }`, with no COLLSCAN and no in-memory SORT (unfiltered 200 keys / 200 docs; filtered 91 / 91).
 - Explain each pipeline stage in comments. These pipelines are prime interview material.
 
 ### 8.4 FEN normalization (used everywhere positions are compared)
@@ -368,7 +391,8 @@ Follow-up questions use the same tools, capped at 6 steps, with the same evidenc
 ```
 GET  /api/health                                   → { ok, db, queueDepth, version }
 POST /api/players/:platform/:username/import       → 202 { jobId } or 200 { upToDate: true } (idempotent: returns the running job)
-GET  /api/players/:platform/:username              → { player, activeJob } (player: profile + importState + counts + summary)
+GET  /api/players/:platform/:username              → { player, activeJob } (player: profile + importState + counts; no summary)
+GET  /api/players/:platform/:username/summary      → { summary, cached, extracting } (?color=&speed=&from=&to=)
 GET  /api/players/:platform/:username/games        → cursor pagination (?cursor=&limit=&speed=&color=&result=)
 GET  /api/games/:id                                → game + analysis + features
 POST /api/analysis/claim                           → { claimId, expiresAt, games } up to K games to analyse (leases)
@@ -387,6 +411,10 @@ Rules:
 - The SSE endpoints send a heartbeat comment every 15 s and close cleanly.
 - **CORS also applies to EventSource,** so the allowlist must include the Vercel site.
 - **POST import:** 202 `{ jobId }` starts (or rejoins) an import. 200 `{ upToDate: true }` when the last successful import is under **6 h** old and none is active (Chess.com only refreshes every 12–24 h anyway). Repeating the call is safe: while an import is queued or running, the same job comes back.
+- **GET summary:** no filters → the cached `players.summary` (built and stored on the first view of a version); any filter → computed live. Filters are strict: unknown keys are 400; `from` is inclusive and `to` exclusive, each a date or a full ISO timestamp.
+  - `extracting: true` while analysed games lack features **or** the player's extract job is queued or running (the cached summary is only rebuilt at the end of that job). The dashboard keeps refetching while it's true.
+  - **Backstop:** a GET that finds games without features enqueues the extract job, on purpose (the unique key makes repeats free).
+  - **Measured on Render** (from the browser): cached 110–117 ms, filtered (White + bullet) 128–136 ms. Render's edge serves Brotli: 46 KB of JSON → 7.1 KB on the wire, so there's no Express compression middleware (it would also buffer the SSE streams).
 - **GET player:** `{ player, activeJob }`. `player` is null while a first import is still queued (the job creates the player once the platform confirms they exist); `activeJob` lets a reloaded page reattach to the stream. 404 only when there is neither.
 - **Job SSE contract** (`GET /api/jobs/:id/stream`):
   - Events: `snapshot`, `progress`, `retrying`, `done`, `failed`. Every event's `data` is the whole public job, and its `id:` is the job's `rev` (a counter bumped on every change).
@@ -400,7 +428,11 @@ Rules:
 
 ### Pages
 - `/`: landing. A pre-analysed demo player's Blunderprint animating, plus one input: username and platform toggle.
-- `/p/[platform]/[username]`: dashboard. Import progress, then analysis progress, then the patterns dashboard, with a "Coach me" button.
+- `/p/[platform]/[username]`: dashboard. Import progress, then analysis progress, then the patterns dashboard (built in Stage 3), then the full games list (never filtered), and later a "Coach me" button.
+  - **Filters** (colour, speed, played: all time / 30 days / 90 days / 1 year) live in the URL (`?color=&speed=&range=`) and are pushed with `history.pushState`, so links can be shared and the back button steps through them. The URL keeps the preset, the API gets a `from` date.
+  - **Data:** `GET /summary`. The last answer stays on screen while a new filter loads, so the charts animate from the old values. Refetches when the engine stores a game or an import finishes, at most every 10 s, and keeps polling while `extracting`; none while the tab is hidden.
+  - **Charts:** hand-rolled SVG, stacked by kind, errors per 100 moves (default) or per game. A bar or openings row on fewer than 5 games is greyed out with "few games".
+- The game review takes `?ply=N` (clamped to the game), so the Blunderprint can link straight to a move.
 - `/p/[platform]/[username]/game/[id]`: game review. Board, eval graph, move list with classifications, and (Stage 4) a "what players at your level play here" panel. Built in Stage 2:
   - The game is fetched in the browser, so the "Waking the server up…" counter works here too. A game that isn't this player's (platform + username) shows "not found".
   - The header shows the result, opponent and the player's **avg move accuracy**.
@@ -420,6 +452,11 @@ Rules:
   - Stacked, the ribbons form a fingerprint-like texture of the player's habits.
   - Beside it sits an 8×8 **heat board** of where mistakes happen.
   - Clicking a tick opens that exact position.
+  - **As built (Stage 3):**
+    - One **canvas** (200 games × ~80 plies is ~16,000 ticks; as DOM nodes that would be slow). Rows 3 px + 1 px gap (2 + 1 on narrow screens), newest at the top. x is the ply on one scale for all rows, so a column is the same move in every game.
+    - Rows are cut at **120 plies** so one long game doesn't squash the rest. A cut row gets an end marker tinted by the worst of the player's errors past the cap. The hover/tap **loupe** draws the game's full row, and its ticks can be clicked too.
+    - Keyboard: ↑/↓ choose a game, ←/→ step through its errors (past the cap too), Enter opens.
+    - **Heat board:** the destination square of each error. One hue (brick), strength = severity-weighted count (blunder 3, mistake 2, inaccuracy 1) on a scale from 0, so only the costly squares stand out; the label still breaks it down by kind. White's games on a normal board, Black's flipped, "both" with Black's ranks mirrored so rank 1 is always the player's back rank (labels say "from your side").
   - This is the one place to go big visually.
 
 ### Animation (generous and purposeful)
@@ -484,7 +521,7 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | **0. Scaffold + deploy** | Monorepo, Express app with health route, env validation, error handler, CORS, trust proxy, Mongo connection; Next.js skeleton with the palette and type; MongoDB MCP server (read-only) | Live site shows "API ok · DB ok" | Deployed on Vercel + Render; `/api/health` live; tests pass |
 | **1. Import + queue** ✅ done 31 Oct 2026 | Job queue (leases, retries, idempotency), Chess.com + Lichess importers, SSE progress, games list with cursor pagination | Type a username, watch games stream in live | Re-import doesn't duplicate; killing the server mid-import resumes after restart; 429 handled |
 | **2. Engine + game review** ✅ done 3 Nov 2026 (5e4ec5d, a27157d, 6cba1ad) | Stockfish worker pool, claim/results API, classification, board + eval graph + move list | "Here are your blunders" on real games | Closed tab loses no work; measured seconds per game written in the README |
-| **3. Patterns dashboard** | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
+| **3. Patterns dashboard** ✅ done 3 Nov 2026 (a6ab232, 4417b71, d458f56, 54cf13f) | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
 | **4. The big dataset** | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
 | **5. Coach agent** | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
 | **6. Ask + guards** | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |

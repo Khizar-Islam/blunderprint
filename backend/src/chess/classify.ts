@@ -72,6 +72,11 @@ export function whiteWinPercent(e: Eval, evalIndex: number): number {
   return winPercentOf(toPov(e, "white", evalIndex));
 }
 
+// One side's win% (0–100). Feature extraction uses it for a mistake's winDrop.
+export function winPercentFor(e: Eval, side: Side, evalIndex: number): number {
+  return winPercentOf(toPov(e, side, evalIndex));
+}
+
 // CpAdvice thresholds on the −1…+1 win-chance scale (= 15 / 10 / 5 points of win%).
 const CP_JUDGEMENTS: [number, Judgement][] = [
   [0.3, "blunder"],

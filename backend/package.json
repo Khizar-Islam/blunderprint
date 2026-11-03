@@ -16,7 +16,9 @@
     "import:once": "tsx --env-file=.env scripts/importOnce.ts",
     "explain:games": "tsx --env-file=.env scripts/explainGames.ts",
     "backfill:classifications": "tsx --env-file=.env scripts/backfillClassifications.ts",
-    "fix:undefined-openings": "tsx --env-file=.env scripts/fixUndefinedOpenings.ts"
+    "fix:undefined-openings": "tsx --env-file=.env scripts/fixUndefinedOpenings.ts",
+    "fetch:division-fixture": "tsx --env-file=.env scripts/fetchDivisionFixture.ts",
+    "extract:features": "tsx --env-file=.env scripts/extractFeatures.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

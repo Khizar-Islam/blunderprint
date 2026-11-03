@@ -5,6 +5,8 @@ import { z } from "zod";
 import { averageAccuracy, classifyGame } from "../chess/classify.js";
 import { Game } from "../db/models/game.js";
 import { PLATFORMS, Player } from "../db/models/player.js";
+import { enqueueExtract } from "../jobs/handlers/extract.js";
+import type { Queue } from "../jobs/queue.js";
 import { logger } from "../lib/logger.js";
 import { parseOr400 } from "../lib/validate.js";
 import { HttpError } from "../middleware/errorHandler.js";
@@ -81,7 +83,10 @@ const claimable = (now: Date) => ({
   ],
 });
 
-export function analysisRouter({ claimSize = 3, leaseMs = 10 * 60_000 }: AnalysisRouterOptions = {}): Router {
+export function analysisRouter(
+  queue: Pick<Queue, "enqueue">,
+  { claimSize = 3, leaseMs = 10 * 60_000 }: AnalysisRouterOptions = {},
+): Router {
   const router = Router();
 
   router.post("/analysis/claim", async (req, res) => {
@@ -211,6 +216,17 @@ export function analysisRouter({ claimSize = 3, leaseMs = 10 * 60_000 }: Analysi
     if (result.matchedCount === 0) return recheck();
 
     await Player.updateOne({ _id: game.playerId }, { $inc: { analysedCount: 1 } });
+    // Features for the dashboard. If an extract job for this player is already queued, the
+    // queue hands that one back (unique key). If one is running, its next look usually picks
+    // this game up; the one gap is a result stored after the job's last look but before it
+    // finishes. That gap, and a failure here (which must not fail a result that is already
+    // stored), are covered by the next result's enqueue and by the summary route's backstop
+    // (Stage 3, chunk B), which enqueues when analysed games still lack features.
+    try {
+      await enqueueExtract(queue, game.playerId);
+    } catch (err) {
+      logger.warn("Could not enqueue feature extraction", { gameId: String(game._id), error: String(err) });
+    }
     res.json({ ok: true, classifications, accuracy });
   });
 

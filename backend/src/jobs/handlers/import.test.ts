@@ -1,7 +1,7 @@
 import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { Game } from "../../db/models/game.js";
-import type { JobDoc } from "../../db/models/job.js";
+import { Job, type JobDoc } from "../../db/models/job.js";
 import { Player } from "../../db/models/player.js";
 import { clearDb, startTestDb } from "../../../scripts/testDb.js";
 import { chessComGame, lichessGame, LICHESS_ANALYSIS } from "../../../scripts/fixtures.js";
@@ -9,7 +9,7 @@ import { normalizeChessComGame } from "../../importers/chesscom.js";
 import { normalizeLichessGame } from "../../importers/lichess.js";
 import type { ImportGamesInput, Importer, NormalizedGame } from "../../importers/normalize.js";
 import { FatalError } from "../errors.js";
-import type { Progress } from "../queue.js";
+import { createQueue, type Progress } from "../queue.js";
 import { createImportHandler, importJobKey } from "./import.js";
 
 let db: Awaited<ReturnType<typeof startTestDb>>;
@@ -57,7 +57,7 @@ function fakeJob(platform: "chesscom" | "lichess", username: string, checkpoint?
 
 async function run(importer: Importer, job: JobDoc, maxGames = 200) {
   const progress: Progress[] = [];
-  const handler = createImportHandler({ importers: { chesscom: importer, lichess: importer }, maxGames });
+  const handler = createImportHandler({ importers: { chesscom: importer, lichess: importer }, maxGames, queue: createQueue() });
   await handler.run({ job, signal: new AbortController().signal, reportProgress: async (p) => void progress.push(p) });
   return progress;
 }
@@ -124,6 +124,23 @@ test("Lichess games that come with evals are stored as imported", async () => {
   assert.equal((await Player.findOne().lean())!.analysedCount, 1);
 });
 
+test("games that arrive analysed (Lichess evals) start one feature-extraction job", async () => {
+  const game = normalizeLichessGame(lichessGame({ analysis: LICHESS_ANALYSIS }), "alice")!;
+  await run(fakeImporter([game]).importer, fakeJob("lichess", "alice"));
+  // A re-import while it's still queued reuses it (unique key) instead of adding a second.
+  await run(fakeImporter([game]).importer, fakeJob("lichess", "alice"));
+  const player = await Player.findOne().lean();
+  const jobs = await Job.find({ type: "extract" }).lean();
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]!.key, `extract:${String(player!._id)}`);
+  assert.deepEqual(jobs[0]!.payload, { playerId: String(player!._id) });
+});
+
+test("an import with nothing analysed starts no extraction job", async () => {
+  await run(fakeImporter(games(2)).importer, fakeJob("chesscom", "alice"));
+  assert.equal(await Job.countDocuments({ type: "extract" }), 0);
+});
+
 test("keeps only the newest maxGames games", async () => {
   await run(fakeImporter(games(5)).importer, fakeJob("chesscom", "alice"), 3);
   const kept = await Game.find().sort({ playedAt: -1 }).lean();
@@ -153,7 +170,7 @@ test("a resumed job passes its checkpoint and what earlier imports knew to the i
 
 test("onFailed leaves the player marked failed instead of stuck importing", async () => {
   await Player.create({ platform: "lichess", username: "Alice", usernameLower: "alice", importState: "importing" });
-  const handler = createImportHandler({ importers: {} as never, maxGames: 200 });
+  const handler = createImportHandler({ importers: {} as never, maxGames: 200, queue: createQueue() });
   await handler.onFailed!(fakeJob("lichess", "Alice"));
   assert.equal((await Player.findOne().lean())!.importState, "failed");
 });

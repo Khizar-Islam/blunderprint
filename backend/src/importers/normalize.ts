@@ -85,6 +85,13 @@ const RESULTS = new Set(["1-0", "0-1", "1/2-1/2", "*"]);
 // still caught there.
 // Returns null when the movetext has something that isn't a SAN move.
 export function countPliesFromText(pgn: string): number | null {
+  return sanMovesFromText(pgn)?.length ?? null;
+}
+
+// The SAN moves of a PGN's main line, in order, with check signs and annotation glyphs
+// removed ("Nf3+!?" → "Nf3"). null when the movetext has something that isn't a SAN move.
+// Feature extraction (chess/features.ts) replays these instead of parsing the PGN again.
+export function sanMovesFromText(pgn: string): string[] | null {
   const movetext = pgn
     .replace(/^\[.*\]\s*$/gm, "") // headers: [Name "value"]
     .replace(/\{[^}]*\}/g, " ") // comments, e.g. {[%clk 0:02:59.6]} (they don't nest)
@@ -97,15 +104,15 @@ export function countPliesFromText(pgn: string): number | null {
   }
   if (/[(){}]/.test(text)) return null; // unbalanced brackets
 
-  let plies = 0;
+  const moves: string[] = [];
   for (const raw of text.split(/\s+/)) {
     // Move numbers: "12." for White, "12..." for Black, sometimes glued to the move ("12.e4").
     const token = raw.replace(/^\d+\.+/, "");
     if (token === "" || RESULTS.has(token) || /^\$\d+$/.test(token)) continue; // NAGs: $1, $14
     if (!SAN.test(token)) return null;
-    plies++;
+    moves.push(token.replace(/[+#]?[!?]*$/, ""));
   }
-  return plies;
+  return moves;
 }
 
 // Lichess's speed buckets, from estimated duration = initial + 40 × increment (seconds).

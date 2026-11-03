@@ -18,6 +18,31 @@ export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
 // One engine evaluation, always from White's point of view. Exactly one of cp / mate is set.
 const evalSchema = new Schema({ cp: Number, mate: Number }, { _id: false });
 
+// One of the imported player's inaccuracies / mistakes / blunders (chess/features.ts explains
+// every field). Short field values on purpose: ~5 of these per analysed game.
+const PIECES = ["p", "n", "b", "r", "q"] as const;
+const mistakeSchema = new Schema(
+  {
+    ply: { type: Number, required: true },
+    kind: { type: String, enum: ["inaccuracy", "mistake", "blunder"], required: true },
+    phase: { type: String, enum: ["opening", "middlegame", "endgame"], required: true },
+    san: { type: String, required: true },
+    best: String,
+    winDrop: { type: Number, required: true },
+    clockLeft: Number,
+    timeTrouble: Boolean,
+    square: { type: String, required: true },
+    pieceLost: { type: String, enum: PIECES },
+    fen: { type: String, required: true },
+  },
+  { _id: false },
+);
+
+const clockCountsSchema = new Schema(
+  { over50: Number, from25to50: Number, from10to25: Number, under10: Number },
+  { _id: false },
+);
+
 const gameSchema = new Schema(
   {
     playerId: { type: Schema.Types.ObjectId, ref: "Player", required: true },
@@ -39,8 +64,8 @@ const gameSchema = new Schema(
     plies: { type: Number, required: true },
     // Seconds left on the mover's clock after each ply, when the platform records it.
     clocks: { type: [Number], default: undefined },
-    // Stage 1 stores the platform's own opening name. Stages 3–4 replace it with the
-    // deepest match against our openings collection.
+    // The platform's own opening name (Lichess API, Chess.com ECO header + ECOUrl). Stage 4
+    // replaces it with the deepest match against our openings collection.
     opening: { eco: String, name: String, ply: Number },
     analysis: {
       status: { type: String, enum: ANALYSIS_STATUSES, default: "pending" },
@@ -63,7 +88,30 @@ const gameSchema = new Schema(
       // Why a game is unanalysable: { code: "illegal_pgn" | "ply_mismatch", atPly? }.
       error: { code: String, atPly: Number },
     },
-    // features (mistakes per game) arrives with the extract job in Stage 3.
+    // Written by the extract job (jobs/handlers/extract.ts) once the game is analysed, and
+    // aggregated by the dashboard. version = FEATURES_VERSION: a game with an older version
+    // is extracted again. error = the PGN didn't replay; the game is skipped until the next
+    // version.
+    features: {
+      type: new Schema(
+        {
+          version: { type: Number, required: true },
+          error: String,
+          // Plies where the middlegame / endgame begin (chess/phase.ts, Lichess's Divider).
+          division: { middle: Number, end: Number },
+          mistakes: { type: [mistakeSchema], default: undefined },
+          // The player's moves per phase and per clock bucket: denominators for "per 100 moves".
+          moveCounts: {
+            opening: Number,
+            middlegame: Number,
+            endgame: Number,
+            clock: { type: clockCountsSchema, default: undefined },
+          },
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
   },
   { timestamps: true },
 );

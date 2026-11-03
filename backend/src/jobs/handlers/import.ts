@@ -6,7 +6,9 @@ import { Player, type Platform } from "../../db/models/player.js";
 import type { Importer, NormalizedGame } from "../../importers/normalize.js";
 import { logger } from "../../lib/logger.js";
 import { FatalError } from "../errors.js";
+import type { Queue } from "../queue.js";
 import type { JobHandler } from "../worker.js";
+import { enqueueExtract, needsExtraction } from "./extract.js";
 
 export interface ImportPayload {
   platform: Platform;
@@ -67,9 +69,12 @@ export async function trimToNewest(playerId: Types.ObjectId, maxGames: number): 
 export function createImportHandler({
   importers,
   maxGames,
+  queue,
 }: {
   importers: Record<Platform, Importer>;
   maxGames: number;
+  // To start feature extraction for games that arrived already analysed (Lichess evals).
+  queue: Pick<Queue, "enqueue">;
 }): JobHandler {
   return {
     async run({ job, signal, reportProgress }) {
@@ -147,6 +152,11 @@ export function createImportHandler({
           },
         },
       );
+      // 4. Games that came with Lichess's evals are analysed already: extract their features.
+      //    A separate job (it runs after this one), so a slow extraction never holds up the
+      //    import being reported done. Skipped when there's nothing to extract.
+      if (await Game.exists(needsExtraction(player._id))) await enqueueExtract(queue, player._id);
+
       await reportProgress({ done: gamesCount, total: gamesCount, message: `Imported ${gamesCount} games` });
     },
 

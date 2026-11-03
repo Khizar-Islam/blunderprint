@@ -58,7 +58,7 @@ export function createApp({
   app.use("/api", playersRouter({ queue }));
   app.use("/api", jobsRouter({ heartbeatMs: sseHeartbeatMs }));
   app.use("/api", gamesRouter());
-  app.use("/api", analysisRouter(analysis));
+  app.use("/api", analysisRouter(queue, analysis));
 
   // 6. Unknown /api routes → 404 JSON, then the error handler last.
   app.use("/api", apiNotFound);

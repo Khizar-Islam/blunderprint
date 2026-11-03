@@ -2,6 +2,7 @@ import type { Env } from "../config/env.js";
 import { createChessComImporter } from "../importers/chesscom.js";
 import { createLichessImporter } from "../importers/lichess.js";
 import { createPoliteClient, userAgent } from "../importers/politeFetch.js";
+import { createExtractHandler } from "./handlers/extract.js";
 import { createImportHandler } from "./handlers/import.js";
 import { createQueue } from "./queue.js";
 import type { Handlers } from "./worker.js";
@@ -19,7 +20,9 @@ export function createJobSystem(env: Pick<Env, "CONTACT_EMAIL" | "MAX_GAMES_PER_
     import: createImportHandler({
       importers: { chesscom: createChessComImporter(chesscom), lichess: createLichessImporter(lichess) },
       maxGames: env.MAX_GAMES_PER_PLAYER,
+      queue,
     }),
+    extract: createExtractHandler(),
   };
   return { queue, handlers };
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Types } from "mongoose";
 import { createApp } from "../app.js";
 import { Game } from "../db/models/game.js";
+import { Job } from "../db/models/job.js";
 import { Player } from "../db/models/player.js";
 import { createQueue } from "../jobs/queue.js";
 import { clearDb, startTestDb } from "../../scripts/testDb.js";
@@ -206,6 +207,26 @@ test("results: stores evals, classifies on the server, counts the game; a repeat
   assert.equal(again.status, 200);
   assert.deepEqual(await again.json(), { ok: true, alreadyDone: true });
   assert.equal((await Player.findById(player._id).lean())!.analysedCount, 1);
+});
+
+test("results: a stored result starts feature extraction, one queued job per player", async () => {
+  const player = await makePlayer();
+  const ids = await makeGames(player._id, 2);
+  const c = await claim();
+  for (const id of ids) assert.equal((await postJson("/analysis/results", result(c.claimId, id))).status, 200);
+  // Two results, one extract job: the second enqueue got the queued job back (unique key).
+  const jobs = await Job.find({ type: "extract" }).lean();
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]!.key, `extract:${String(player._id)}`);
+  assert.equal(jobs[0]!.status, "queued");
+});
+
+test("results: an unanalysable game starts no extraction", async () => {
+  const player = await makePlayer();
+  const [id] = await makeGames(player._id, 1);
+  const c = await claim();
+  await postJson("/analysis/results", { claimId: c.claimId, gameId: id, error: "illegal_pgn", atPly: 3 });
+  assert.equal(await Job.countDocuments({ type: "extract" }), 0);
 });
 
 test("results: anything that doesn't fit the game is a 400 and the claim stays open", async () => {

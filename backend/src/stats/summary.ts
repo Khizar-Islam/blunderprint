@@ -90,10 +90,36 @@ const CLASS_LETTER: Record<Classification, string> = { best: "b", good: "g", ina
 const OPENINGS_SHOWN = 25;
 
 // "Has features of the current version, and they're not a replay error": the games every
-// rate is computed from.
-const HAS_FEATURES = { "features.version": FEATURES_VERSION, "features.error": { $exists: false } };
+// rate is computed from. Exported for the coach's tools (agent/tools), which count the same games.
+export const HAS_FEATURES = { "features.version": FEATURES_VERSION, "features.error": { $exists: false } };
 // The same test as an expression, for counting inside a $group.
 const HAS_FEATURES_EXPR = { $and: [{ $eq: ["$features.version", FEATURES_VERSION] }, { $not: ["$features.error"] }] };
+
+// A mistake's clock bucket from `share` (clockLeft ÷ the starting time). A $switch, not
+// $bucket, so the edges match clockBucket() exactly (> 50%, > 25%, ≥ 10%, below).
+export const clockBucketSwitch = (share: unknown) => ({
+  $switch: {
+    branches: [
+      { case: { $gt: [share, 0.5] }, then: "over50" },
+      { case: { $gt: [share, 0.25] }, then: "from25to50" },
+      { case: { $gte: [share, 0.1] }, then: "from10to25" },
+    ],
+    default: "under10",
+  },
+});
+
+// clockLeft ÷ the starting time read from timeControl ("180+2" → 180).
+export const clockShare = (clockLeft: unknown, timeControl: unknown) => ({
+  $divide: [clockLeft, { $toDouble: { $arrayElemAt: [{ $split: [timeControl, "+"] }, 0] } }],
+});
+
+// A move number (1 = each side's first move) → its MOVE_BUCKETS label.
+export const moveBucketSwitch = (moveNumber: unknown) => ({
+  $switch: {
+    branches: MOVE_BUCKETS.slice(0, -1).map((b) => ({ case: { $lte: [moveNumber, b.to] }, then: b.label })),
+    default: MOVE_BUCKETS.at(-1)!.label,
+  },
+});
 
 // Counts per kind of whatever group the stage before produced ({ _id, kind, n }) →
 // { _id, inaccuracy, mistake, blunder }. Shared by every "mistakes by X" facet.
@@ -247,40 +273,19 @@ export function summaryPipeline(playerId: Types.ObjectId, filters: SummaryFilter
 
         // Errors per clock bucket and kind. The starting time is read from timeControl
         // ("180+2" → 180); daily games and games without clocks have no clockLeft and drop out
-        // at the $match. A $switch, not $bucket, so the edges match clockBucket() exactly
-        // (> 50%, > 25%, ≥ 10%, below).
+        // at the $match. clockBucketSwitch has the same edges as clockBucket().
         byClock: [
           ...unwindMistakes,
           { $match: { "m.clockLeft": { $exists: true } } },
-          {
-            $set: {
-              share: {
-                $divide: ["$m.clockLeft", { $toDouble: { $arrayElemAt: [{ $split: ["$timeControl", "+"] }, 0] } }],
-              },
-            },
-          },
-          ...countKinds({
-            $switch: {
-              branches: [
-                { case: { $gt: ["$share", 0.5] }, then: "over50" },
-                { case: { $gt: ["$share", 0.25] }, then: "from25to50" },
-                { case: { $gte: ["$share", 0.1] }, then: "from10to25" },
-              ],
-              default: "under10",
-            },
-          }),
+          { $set: { share: clockShare("$m.clockLeft", "$timeControl") } },
+          ...countKinds(clockBucketSwitch("$share")),
         ],
 
         // Errors per move-number bucket and kind (move number = ceil(ply / 2)).
         byMoveNumber: [
           ...unwindMistakes,
           { $set: { moveNumber: { $ceil: { $divide: ["$m.ply", 2] } } } },
-          ...countKinds({
-            $switch: {
-              branches: MOVE_BUCKETS.slice(0, -1).map((b) => ({ case: { $lte: ["$moveNumber", b.to] }, then: b.label })),
-              default: MOVE_BUCKETS.at(-1)!.label,
-            },
-          }),
+          ...countKinds(moveBucketSwitch("$moveNumber")),
         ],
 
         // Errors per destination square, colour and kind: the heat board. Split by colour so the
@@ -382,7 +387,8 @@ export function shapeSummary(raw: FacetResult, filters: SummaryFilters, readAt: 
       const speedMoves = row.opening + row.middlegame + row.endgame;
       return { speed: row._id, games: row.games, ...rate(speedRows.get(row._id)?.counts, speedMoves, row.games) };
     })
-    .sort((a, b) => b.games - a.games);
+    // Most games first; equal counts by name, so the order never depends on how $group came out.
+    .sort((a, b) => b.games - a.games || a.speed.localeCompare(b.speed));
 
   const clockRows = byKey(raw.byClock);
   const byClock = CLOCK_BUCKETS.map((bucket) => ({ bucket, ...rate(clockRows.get(bucket)?.counts, sum(`clock_${bucket}`), analysed) }));

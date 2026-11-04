@@ -19,7 +19,8 @@
     "fix:undefined-openings": "tsx --env-file=.env scripts/fixUndefinedOpenings.ts",
     "fetch:division-fixture": "tsx --env-file=.env scripts/fetchDivisionFixture.ts",
     "extract:features": "tsx --env-file=.env scripts/extractFeatures.ts",
-    "explain:summary": "tsx --env-file=.env scripts/explainSummary.ts"
+    "explain:summary": "tsx --env-file=.env scripts/explainSummary.ts",
+    "coach:tools": "tsx --env-file=.env scripts/coachTools.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

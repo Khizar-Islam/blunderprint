@@ -6,12 +6,18 @@ import {
   candidatesIn,
   checkProse,
   examplesIn,
-  filtersCover,
+  allowedProseMoves,
+  filtersEqual,
   labelNumbersIn,
   matchesValue,
+  MIN_DRILL_CHARS,
+  MIN_EXPLANATION_CHARS,
+  normalizeSan,
   numbersIn,
   numberWordsIn,
   proseNumbers,
+  sanMovesIn,
+  textTooShort,
   withoutUnbackedSentences,
   type ToolLog,
 } from "./verifier.js";
@@ -50,15 +56,20 @@ describe("candidatesIn: the candidates this run's get_weakness_candidates calls 
   });
 });
 
-describe("filtersCover: the evidence step must select the candidate's group", () => {
-  it("the same filters, or narrower ones, cover it", () => {
-    assert.equal(filtersCover({ phase: "endgame", kind: "blunder" }, { phase: "endgame", kind: "blunder" }), true);
-    assert.equal(filtersCover({ phase: "endgame", kind: "blunder", clockBucket: "under10" }, { phase: "endgame", kind: "blunder" }), true);
+describe("filtersEqual: the evidence step must be fetched for exactly the candidate's group", () => {
+  it("the same filters, in any order, match", () => {
+    assert.equal(filtersEqual({ phase: "endgame", kind: "blunder" }, { phase: "endgame", kind: "blunder" }), true);
+    assert.equal(filtersEqual({ kind: "blunder", phase: "endgame" }, { phase: "endgame", kind: "blunder" }), true);
   });
-  it("broader or different filters don't", () => {
-    assert.equal(filtersCover({ phase: "endgame" }, { phase: "endgame", kind: "blunder" }), false, "all endgame errors, not just blunders");
-    assert.equal(filtersCover({ phase: "middlegame", kind: "blunder" }, { phase: "endgame", kind: "blunder" }), false);
-    assert.equal(filtersCover({}, { eco: "B06" }), false);
+  it("narrower filters don't: the examples would be a different group from the statistic", () => {
+    // Run 6: the "middlegame" candidate (all errors) cited examples of middlegame inaccuracies.
+    assert.equal(filtersEqual({ phase: "middlegame", kind: "inaccuracy" }, { phase: "middlegame" }), false);
+    assert.equal(filtersEqual({ phase: "endgame", kind: "blunder", clockBucket: "under10" }, { phase: "endgame", kind: "blunder" }), false);
+  });
+  it("broader or different filters don't either", () => {
+    assert.equal(filtersEqual({ phase: "endgame" }, { phase: "endgame", kind: "blunder" }), false, "all endgame errors, not just blunders");
+    assert.equal(filtersEqual({ phase: "middlegame", kind: "blunder" }, { phase: "endgame", kind: "blunder" }), false);
+    assert.equal(filtersEqual({}, { eco: "B06" }), false);
   });
 });
 
@@ -87,6 +98,7 @@ describe("numbers in the prose", () => {
     assert.deepEqual(proseNumbers("100 games, per-100 rate"), [100], "a bare 100 is still a figure");
     assert.deepEqual(proseNumbers("After Nf3 and e4 you play Qxf7+ on f7."), []);
     assert.deepEqual(proseNumbers("Ends with 16.2."), [16.2]);
+    assert.deepEqual(proseNumbers("You castle 0-0 or 0-0-0 at move 12."), [12], "castling with zeros isn't a number");
   });
 
   // A candidate (its own figures) and the result its evidence came from.
@@ -109,7 +121,9 @@ describe("numbers in the prose", () => {
     facts: { clockLeftSeconds, clockBucket: clockLeftSeconds === null ? null : "under10" },
   });
   const pattern = (explanation: string, drill = "Practise rook endgames.") => ({ explanation, drill });
-  const allowed = (_p: unknown, moves: number[] = []) => allowedProseNumbers(candidate, step, moves.map((m) => item(m)));
+  // Numbers only (no moves named in these texts).
+  const only = (numbers: number[]) => ({ numbers, moves: [] });
+  const allowed = (_p: unknown, moves: number[] = []) => only(allowedProseNumbers(candidate, step, moves.map((m) => item(m))));
 
   it("a wrong number is caught", () => {
     const p = pattern("You make over 300 mistakes and blunders in the endgame.");
@@ -122,15 +136,15 @@ describe("numbers in the prose", () => {
     // The real run-5 drill. A 5 was somewhere in that examples result (another example's
     // field), but in none of the fields a number may come from.
     const p = pattern("Fine.", "Practice with a timer set to 5 seconds per move.");
-    assert.deepEqual(checkProse(p, allowedProseNumbers(candidate, step, [item(59, 60.3, 7)])), [{ field: "drill", value: 5 }]);
+    assert.deepEqual(checkProse(p, only(allowedProseNumbers(candidate, step, [item(59, 60.3, 7)]))), [{ field: "drill", value: 5 }]);
   });
 
   it("an evidence item's move number, win % lost and clock left (seconds) are fine; another example's aren't", () => {
     const ev = [item(59, 60.3, 7), item(47, 49.4, 12)];
     const ok = pattern("At move 59 you had 7 seconds left and the move cost 60.3 points; at move 47, 12 seconds and 49.4.");
-    assert.deepEqual(checkProse(ok, allowedProseNumbers(candidate, step, ev)), []);
+    assert.deepEqual(checkProse(ok, only(allowedProseNumbers(candidate, step, ev))), []);
     const other = pattern("With 3 seconds left at move 72 it cost 58.7.");
-    assert.deepEqual(checkProse(other, allowedProseNumbers(candidate, step, ev)), [
+    assert.deepEqual(checkProse(other, only(allowedProseNumbers(candidate, step, ev))), [
       { field: "explanation", value: 3 },
       { field: "explanation", value: 72 },
       { field: "explanation", value: 58.7 },
@@ -190,5 +204,75 @@ describe("numbers in the prose", () => {
       withoutUnbackedSentences("You panic late. With under ten percent left, you blunder. Slow down at move 59.", allowed(pattern(""), [59])),
       "You panic late. Slow down at move 59.",
     );
+  });
+});
+
+describe("move names in the prose: only the pattern's own evidence moves", () => {
+  // Run 6, pattern 1: the evidence moves were fxe5 (better Bxf7+), Kxb2 (Rf7), Bd3 (Nxd5) and
+  // a4 (Bb4); the explanation said "Kd3 on move 12" and "Rxf7+".
+  const evidence = [
+    { played: "fxe5", betterMove: "Bxf7+" },
+    { played: "Kxb2", betterMove: "Rf7" },
+    { played: "Bd3", betterMove: "Nxd5" },
+    { played: "a4", betterMove: "Bb4" },
+  ];
+  const allowed = { numbers: [12, 18], moves: allowedProseMoves(evidence) };
+  const run6 =
+    "In these positions, such as when playing fxe5 on move 18 or Kd3 on move 12, your moves miss tactical strikes like Rxf7+ or Nxd5.";
+
+  it("sanMovesIn finds SAN moves: piece moves, captures, checks, promotions, castling", () => {
+    assert.deepEqual(sanMovesIn(run6), ["fxe5", "Kd3", "Rxf7+", "Nxd5"]);
+    assert.deepEqual(sanMovesIn("Then Nbd7, Qh8#, exd5, e8=Q, bxa1=Q+, O-O and O-O-O (or 0-0)."), ["Nbd7", "Qh8#", "exd5", "e8=Q", "bxa1=Q+", "O-O", "O-O-O", "0-0"]);
+  });
+
+  it("plain squares and opening codes aren't moves", () => {
+    assert.deepEqual(sanMovesIn("Your pawn on the e4 square, the a4 push, the B06 and C50 openings, the d-file, a Q-side attack."), []);
+  });
+
+  it("the real run's Kd3 and Rxf7+ are caught; the evidence's own moves pass", () => {
+    assert.deepEqual(checkProse({ explanation: run6, drill: "Replay those positions and find the capture before you move a piece." }, allowed), [
+      { field: "explanation", move: "Kd3" },
+      { field: "explanation", move: "Rxf7+" },
+    ]);
+    assert.deepEqual(checkProse({ explanation: "You played fxe5 instead of Bxf7+, and Bd3 instead of Nxd5.", drill: "Find Rf7 and Bb4 in your games." }, allowed), []);
+  });
+
+  it("check and mate signs don't matter; castling with zeros is castling", () => {
+    assert.equal(normalizeSan("Bxf7+"), "Bxf7");
+    assert.equal(normalizeSan("Qh8#"), "Qh8");
+    assert.equal(normalizeSan("0-0-0"), "O-O-O");
+    assert.deepEqual(checkProse({ explanation: "Bxf7 was there.", drill: "Look for Bxf7# style finishes." }, allowed), []);
+    const castled = { numbers: [], moves: allowedProseMoves([{ played: "O-O", betterMove: null }]) };
+    assert.deepEqual(checkProse({ explanation: "You played 0-0 too early.", drill: "Delay O-O." }, castled), []);
+  });
+
+  it("final trim removes the sentences with unknown moves", () => {
+    assert.equal(
+      withoutUnbackedSentences(`You lose the thread in quiet positions. ${run6} Your pieces stop working together.`, allowed),
+      "You lose the thread in quiet positions. Your pieces stop working together.",
+    );
+  });
+});
+
+describe("enough text: a pattern must still say something after trimming", () => {
+  const explanation = "You rush king moves in the endgame. With little time left on your clock, the king walks into checks and forks that cost you the game.";
+  const drill = "Replay the evidence positions and name the safe king square before moving.";
+
+  it("2 sentences and 120 characters for the explanation, 60 characters for the drill", () => {
+    assert.ok(explanation.length >= MIN_EXPLANATION_CHARS && drill.length >= MIN_DRILL_CHARS);
+    assert.deepEqual(textTooShort({ explanation, drill }), []);
+  });
+
+  it("one sentence is too short, however long", () => {
+    const one = "You rush king moves in the endgame when little time is left on your clock, and the king walks into checks and forks that cost you the game.";
+    assert.ok(one.length >= MIN_EXPLANATION_CHARS);
+    assert.match(textTooShort({ explanation: one, drill })[0]!, /explanation is too short \(1 sentence, \d+ characters\): it needs at least 2 sentences and 120 characters/);
+  });
+
+  it("two short sentences are too short; so is a short drill", () => {
+    assert.deepEqual(textTooShort({ explanation: "You rush. It costs games.", drill: "Slow down." }), [
+      "the explanation is too short (2 sentences, 25 characters): it needs at least 2 sentences and 120 characters",
+      "the drill is too short (10 characters): it needs at least 60",
+    ]);
   });
 });

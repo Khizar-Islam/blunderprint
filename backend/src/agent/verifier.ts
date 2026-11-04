@@ -15,19 +15,23 @@ import { moveNumberOf, round1, uciToSan } from "./tools/format.js";
 //   2. it is DISTINCT: no two patterns where one candidate is the same group as the other or a
 //      part of it ("endgame" and "endgame with under 10% of the clock left");
 //   3. its evidence is real AND matches the candidate: it comes from a find_example_mistakes
-//      result (evidenceStep) whose filters are the candidate's exampleFilter (or narrower);
-//      every {gameId, ply} is one of that result's examples and this player's judged move; no
-//      position is evidence for two patterns; and it spans at least 2 different games;
+//      result (evidenceStep) whose filters EQUAL the candidate's exampleFilter (not narrower: the
+//      statistic and the examples must describe the same group); every {gameId, ply} is one of
+//      that result's examples and this player's judged move; no position is evidence for two
+//      patterns; and it spans at least 2 different games;
 //   4. its explanation and drill use no unbacked numbers: a number in digits must be one of the
 //      candidate's figures, its examples' match counts, or the move number, win % lost or clock
 //      left of one of its evidence items (allowedProseNumbers); a number written as a word
-//      ("ten", "twice", "half") is never allowed.
+//      ("ten", "twice", "half") is never allowed; and every move it names (Bd3, Rxf7+, exd5,
+//      O-O) is a played or better move of its own evidence;
+//   5. it has enough text to be useful: an explanation of at least 2 sentences and 120
+//      characters, a drill of at least 60 characters (checked again after trimming).
 // Each verified evidence item carries its situation (speed, phase, clock, opening) from the
 // examples result, so the page shows those facts from code, not from the model's text.
 // The model is told exactly what failed (prompts.ts repairPrompt) and gets one repair round.
-// After that: bad evidence items and sentences with unbacked numbers are removed ("trimmed");
-// a pattern with an unknown or overlapping candidate, or fewer than 2 games of evidence left,
-// is dropped.
+// After that: bad evidence items and sentences with unbacked numbers or moves are removed
+// ("trimmed"); a pattern with an unknown or overlapping candidate, fewer than 2 games of
+// evidence left, or too little text after trimming is dropped.
 
 export interface VerificationIssue {
   pattern: number; // index in the report
@@ -143,9 +147,10 @@ export function matchesValue(claimed: number, actual: number): boolean {
 // Numbers written in digits in prose: "16.2", "70%" (70), "moves 21-30" (21 and 30), "5 games".
 // Not the digits of a square or a move in notation: a digit right after a letter ("Nf3", "e4",
 // "Qxf7", "B06") isn't a number.
-// "per 100 moves" names the unit of a per100 rate; it isn't a figure, so it's skipped.
+// "per 100 moves" names the unit of a per100 rate, and "0-0" is castling written with zeros
+// (checked as a move by sanMovesIn): neither is a figure, so both are skipped.
 export function proseNumbers(text: string): number[] {
-  const withoutUnit = text.replace(/\bper[\s-]+100\b/gi, "per hundred");
+  const withoutUnit = text.replace(/\bper[\s-]+100\b/gi, "per hundred").replace(/(?<![\w-])0-0(?:-0)?(?![\w-])/g, "castles");
   return [...withoutUnit.matchAll(/(?<![A-Za-z0-9.])\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
 }
 
@@ -190,10 +195,13 @@ export const showFilter = (f: Record<string, unknown>) =>
     .map(([k, v]) => `${k}: ${String(v)}`)
     .join(", ")}}`;
 
-// Does a find_example_mistakes result's filter select the candidate's group: every condition
-// of the candidate's exampleFilter, possibly more (narrower is fine, broader or different isn't).
-export const filtersCover = (stepFilters: Record<string, unknown>, exampleFilter: ExampleFilter) =>
-  Object.entries(exampleFilter).every(([k, v]) => stepFilters[k] === v);
+// Was a find_example_mistakes result fetched for exactly the candidate's group: the same
+// conditions, no more and no fewer? Narrower isn't enough: "middlegame errors" (the statistic)
+// shown with "middlegame inaccuracies" (the examples) would describe two different groups.
+export function filtersEqual(stepFilters: Record<string, unknown>, exampleFilter: ExampleFilter): boolean {
+  const want = Object.entries(exampleFilter);
+  return Object.keys(stepFilters).length === want.length && want.every(([k, v]) => stepFilters[k] === v);
+}
 
 // ---------------------------------------------------------------------------------------------
 // Evidence step: the find_example_mistakes result the pattern's evidence must come from.
@@ -223,7 +231,36 @@ export interface ProseProblem {
   field: "explanation" | "drill";
   value?: number; // a number in digits that isn't backed
   word?: string; // a number written as a word
+  move?: string; // a chess move that isn't one of the evidence's moves
 }
+
+// What a pattern's prose may cite: numbers (allowedProseNumbers) and moves (allowedProseMoves).
+export interface ProseAllowance {
+  numbers: number[];
+  moves: string[];
+}
+
+// Chess moves written in prose, in SAN: piece moves (Bd3, Nbd7, Rxf7+, Qh8#), pawn captures
+// (exd5), promotions (e8=Q, bxa1=Q) and castling (O-O, O-O-O). A bare square ("the e4 square",
+// even when it was a pawn push) isn't treated as a move, and neither is an opening code (B06:
+// no file letter after the piece letter).
+const SAN_MOVE =
+  /(?<![A-Za-z0-9])(?:O-O(?:-O)?|0-0(?:-0)?|[KQRBN][a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?|[a-h]x[a-h][1-8](?:=[QRBN])?|[a-h][18]=[QRBN])[+#]?(?![A-Za-z0-9])/g;
+// "Rxf7+" and "Rxf7" are the same move; "0-0" is castling written with zeros.
+export const normalizeSan = (san: string) => san.replace(/[+#!?]+$/, "").replace(/0/g, "O");
+export function sanMovesIn(text: string): string[] {
+  return [...text.matchAll(SAN_MOVE)].map((m) => m[0]);
+}
+
+// The moves a pattern's prose may name: the played and better moves of its own evidence.
+export function allowedProseMoves(evidence: { played: string; betterMove: string | null }[]): string[] {
+  return evidence
+    .flatMap((e) => [e.played, e.betterMove])
+    .filter((m): m is string => !!m)
+    .map(normalizeSan);
+}
+
+const unbackedMove = (move: string, allowed: string[]) => !allowed.includes(normalizeSan(move));
 
 // The numbers a pattern's prose may use, field by field (never "any number anywhere in a
 // result": that let "5 seconds per move" through because some unrelated 5 was in the examples):
@@ -248,24 +285,49 @@ export function allowedProseNumbers(
   return [...nums.filter((n): n is number => typeof n === "number" && Number.isFinite(n)), ...labels];
 }
 
-export function checkProse(p: { explanation: string; drill: string }, allowed: number[]): ProseProblem[] {
+export function checkProse(p: { explanation: string; drill: string }, allowed: ProseAllowance): ProseProblem[] {
   const problems: ProseProblem[] = [];
   for (const field of ["explanation", "drill"] as const) {
     for (const value of proseNumbers(p[field])) {
-      if (!allowed.some((a) => matchesValue(value, a))) problems.push({ field, value });
+      if (!allowed.numbers.some((a) => matchesValue(value, a))) problems.push({ field, value });
     }
     for (const word of numberWordsIn(p[field])) problems.push({ field, word });
+    for (const move of sanMovesIn(p[field])) if (unbackedMove(move, allowed.moves)) problems.push({ field, move });
   }
   return problems;
 }
 
-// The text without the sentences that contain an unbacked number or a number word.
-export function withoutUnbackedSentences(text: string, allowed: number[]): string {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => proseNumbers(sentence).every((n) => allowed.some((a) => matchesValue(n, a))) && numberWordsIn(sentence).length === 0)
+const sentencesOf = (text: string) => text.split(/(?<=[.!?])\s+/).filter((s) => s.trim() !== "");
+
+// The text without the sentences that contain an unbacked number, a number word, or a move that
+// isn't one of the evidence's.
+export function withoutUnbackedSentences(text: string, allowed: ProseAllowance): string {
+  return sentencesOf(text)
+    .filter(
+      (sentence) =>
+        proseNumbers(sentence).every((n) => allowed.numbers.some((a) => matchesValue(n, a))) &&
+        numberWordsIn(sentence).length === 0 &&
+        sanMovesIn(sentence).every((m) => !unbackedMove(m, allowed.moves)),
+    )
     .join(" ")
     .trim();
+}
+
+// Enough text to be useful. An explanation that's one short sentence (often what's left after
+// trimming) says nothing the title doesn't, and a drill needs to be a full instruction.
+export const MIN_EXPLANATION_SENTENCES = 2;
+export const MIN_EXPLANATION_CHARS = 120;
+export const MIN_DRILL_CHARS = 60;
+export function textTooShort(p: { explanation: string; drill: string }): string[] {
+  const out: string[] = [];
+  const sentences = sentencesOf(p.explanation).length;
+  if (sentences < MIN_EXPLANATION_SENTENCES || p.explanation.length < MIN_EXPLANATION_CHARS) {
+    out.push(
+      `the explanation is too short (${sentences} sentence${sentences === 1 ? "" : "s"}, ${p.explanation.length} characters): it needs at least ${MIN_EXPLANATION_SENTENCES} sentences and ${MIN_EXPLANATION_CHARS} characters`,
+    );
+  }
+  if (p.drill.length < MIN_DRILL_CHARS) out.push(`the drill is too short (${p.drill.length} characters): it needs at least ${MIN_DRILL_CHARS}`);
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -337,9 +399,9 @@ export async function verifyReport(ctx: AgentContext, report: DraftReport, log: 
 
     // Evidence: from a result with the candidate's filters, one of its examples, not reused, real.
     let step = examplesIn(log, p.evidenceStep);
-    if (!("problem" in step) && candidate && !filtersCover(step.filters, candidate.exampleFilter)) {
+    if (!("problem" in step) && candidate && !filtersEqual(step.filters, candidate.exampleFilter)) {
       step = {
-        problem: `evidenceStep ${p.evidenceStep}'s filters ${showFilter(step.filters)} don't match candidate "${candidate.id}": call find_example_mistakes with its exampleFilter ${showFilter(candidate.exampleFilter)}`,
+        problem: `evidenceStep ${p.evidenceStep}'s filters ${showFilter(step.filters)} aren't candidate "${candidate.id}"'s exampleFilter ${showFilter(candidate.exampleFilter)}: the evidence must come from find_example_mistakes called with exactly that filter`,
       };
     }
     if ("problem" in step) problems.push(step.problem);
@@ -382,15 +444,21 @@ export async function verifyReport(ctx: AgentContext, report: DraftReport, log: 
       problems.push(`the valid evidence comes from ${distinctGames} game${distinctGames === 1 ? "" : "s"}; a recurring pattern needs at least ${MIN_GAMES}`);
     }
 
-    // Numbers in the prose.
-    const allowed = allowedProseNumbers(candidate, "problem" in step ? undefined : step, valid);
-    for (const { field, value, word } of checkProse(p, allowed)) {
+    // Numbers and moves in the prose, and enough of it.
+    const allowed: ProseAllowance = {
+      numbers: allowedProseNumbers(candidate, "problem" in step ? undefined : step, valid),
+      moves: allowedProseMoves(valid),
+    };
+    for (const { field, value, word, move } of checkProse(p, allowed)) {
       problems.push(
-        word !== undefined
-          ? `the ${field} spells out a number ("${word}"); numbers must be in digits and come from the candidate or its examples`
-          : `the ${field} mentions ${value}, which isn't one of the candidate's figures, step ${p.evidenceStep}'s match counts, or a move number, win % lost or clock time of this pattern's evidence`,
+        move !== undefined
+          ? `the ${field} names the move ${move}, which isn't a played or better move of this pattern's evidence`
+          : word !== undefined
+            ? `the ${field} spells out a number ("${word}"); numbers must be in digits and come from the candidate or its examples`
+            : `the ${field} mentions ${value}, which isn't one of the candidate's figures, step ${p.evidenceStep}'s match counts, or a move number, win % lost or clock time of this pattern's evidence`,
       );
     }
+    problems.push(...textTooShort(p));
 
     for (const problem of problems) issues.push({ pattern: index, title, problem });
     const verified: VerifiedPattern | null = candidate
@@ -429,8 +497,9 @@ export async function verifyReport(ctx: AgentContext, report: DraftReport, log: 
     } else {
       verified.explanation = withoutUnbackedSentences(p.explanation, allowed);
       verified.drill = withoutUnbackedSentences(p.drill, allowed);
-      if (!verified.explanation || !verified.drill) {
-        dropped.push({ title, reasons: [...problems, "nothing left of the text after removing unbacked numbers"] });
+      const short = textTooShort(verified);
+      if (short.length > 0) {
+        dropped.push({ title, reasons: [...problems, ...short.map((s) => `after trimming, ${s}`)] });
       } else {
         passed.push(verified);
         trimmed.push({ title, reasons: problems });

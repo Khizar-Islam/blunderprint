@@ -86,7 +86,7 @@ const examples = (req: ModelRequest, step: number) => toolResult<{ examples: { g
 function endgamePattern(req: ModelRequest, overrides: Record<string, unknown> = {}) {
   return {
     candidateId: "phase=endgame|kind=blunder",
-    explanation: "Once the queens come off you move your king to the wrong square.",
+    explanation: "Once the queens come off you move your king to the wrong square. The opposing king or rook then walks in and the ending is lost.",
     drill: "Set up the evidence positions and find the king move that keeps the opposition.",
     evidenceStep: 3,
     evidence: examples(req, 3).slice(0, 2),
@@ -96,7 +96,7 @@ function endgamePattern(req: ModelRequest, overrides: Record<string, unknown> = 
 function middlegamePattern(req: ModelRequest, overrides: Record<string, unknown> = {}) {
   return {
     candidateId: "phase=middlegame|kind=inaccuracy",
-    explanation: "In quiet middlegame positions you develop a knight to a passive square.",
+    explanation: "In quiet middlegame positions you develop a knight to a passive square. Your pieces then stop covering each other and the initiative passes to your opponent.",
     drill: "From the evidence positions, list each knight's best square before you move.",
     evidenceStep: 4,
     evidence: examples(req, 4).slice(0, 2),
@@ -293,17 +293,26 @@ describe("evidence must match its candidate, once", () => {
     const { result, requests } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [wrong(req)] }), (req) => answer({ patterns: [wrong(req)] })]);
     assert.match(
       lastUserText(requests[4]!),
-      /evidenceStep 4's filters \{phase: middlegame, kind: inaccuracy\} don't match candidate "phase=endgame\|kind=blunder": call find_example_mistakes with its exampleFilter \{phase: endgame, kind: blunder\}/,
+      /evidenceStep 4's filters \{phase: middlegame, kind: inaccuracy\} aren't candidate "phase=endgame\|kind=blunder"'s exampleFilter \{phase: endgame, kind: blunder\}: the evidence must come from find_example_mistakes called with exactly that filter/,
     );
     assert.deepEqual(result.report!.patterns, []);
     assert.equal(result.report!.dropped[0]!.title, ENDGAME_LABEL);
   });
 
-  it("examples with a NARROWER filter are fine evidence", async () => {
+  it("examples with a NARROWER filter aren't the candidate's group: caught, then dropped", async () => {
+    // Run 6: the "middlegame" candidate (all errors) with examples of middlegame inaccuracies.
+    // Here: endgame blunders (the candidate) with examples of endgame blunders under 10% clock.
     const narrow = { ...ENDGAME_BLUNDERS, clockBucket: "under10" };
-    const { result } = await run([FIRST_TURN, examplesTurn(narrow), DONE, (req) => answer({ patterns: [endgamePattern(req)] })]);
-    assert.equal(result.usage.calls, 4, "no repair needed");
-    assert.equal(result.report!.patterns.length, 1);
+    const { result, requests } = await run([
+      FIRST_TURN,
+      examplesTurn(narrow),
+      DONE,
+      (req) => answer({ patterns: [endgamePattern(req)] }),
+      (req) => answer({ patterns: [endgamePattern(req)] }),
+    ]);
+    assert.match(lastUserText(requests[4]!), /evidenceStep 3's filters \{phase: endgame, kind: blunder, clockBucket: under10\} aren't candidate "phase=endgame\|kind=blunder"'s exampleFilter/);
+    assert.deepEqual(result.report!.patterns, []);
+    assert.equal(result.report!.dropped[0]!.title, ENDGAME_LABEL);
   });
 
   it("evidenceStep must be a find_example_mistakes result", async () => {
@@ -370,19 +379,29 @@ describe("evidence must match its candidate, once", () => {
 
 describe("numbers in the prose", () => {
   it("an unbacked number is a repair issue; if it stays, its sentence is removed", async () => {
-    const wordy = (req: ModelRequest) => endgamePattern(req, { explanation: "You blunder 99 times in the endgame. You lose control once the queens come off." });
+    const wordy = (req: ModelRequest) =>
+      endgamePattern(req, {
+        explanation:
+          "You blunder 99 times in the endgame. You lose control once the queens come off. Your king then wanders into checks from the enemy rook and the drawn ending slips away.",
+      });
     const { result, requests } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [wordy(req)] }), (req) => answer({ patterns: [wordy(req)] })]);
     assert.match(lastUserText(requests[4]!), /the explanation mentions 99, which isn't one of the candidate's figures, step 3's match counts, or a move number, win % lost or clock time of this pattern's evidence/);
-    assert.equal(result.report!.patterns[0]!.explanation, "You lose control once the queens come off.");
+    assert.equal(
+      result.report!.patterns[0]!.explanation,
+      "You lose control once the queens come off. Your king then wanders into checks from the enemy rook and the drawn ending slips away.",
+    );
     assert.match(result.report!.trimmed[0]!.reasons[0]!, /mentions 99/);
   });
 
   it("a number written as a word is a repair issue too ('under ten percent')", async () => {
     const words = (req: ModelRequest) =>
-      endgamePattern(req, { explanation: "With under ten percent of your clock left, you rush. Your king goes to the wrong square." });
+      endgamePattern(req, {
+        explanation:
+          "With under ten percent of your clock left, you rush. Your king goes to the wrong square. The enemy rook then cuts it off and an ending that was clearly drawn turns into a loss.",
+      });
     const { result, requests } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [words(req)] }), (req) => answer({ patterns: [words(req)] })]);
     assert.match(lastUserText(requests[4]!), /the explanation spells out a number \("ten"\)/);
-    assert.equal(result.report!.patterns[0]!.explanation, "Your king goes to the wrong square.");
+    assert.equal(result.report!.patterns[0]!.explanation, "Your king goes to the wrong square. The enemy rook then cuts it off and an ending that was clearly drawn turns into a loss.");
   });
 
   it("the candidate's figures, its examples' numbers and its evidence's move numbers are fine", async () => {
@@ -390,13 +409,73 @@ describe("numbers in the prose", () => {
       endgamePattern(req, {
         // 6 vs 2 per 100 = the candidate; 200% = its gap; 6 blunders in 6 games = step 3's
         // counts; under 10% isn't in this candidate, so it isn't used; move 23 = ply 45.
-        explanation: "You make 6 blunders per 100 endgame moves against your usual 2, a 200% gap: 6 blunders in 6 games.",
-        drill: "Replay move 23 of those games and find the safe king move.",
+        explanation: "You make 6 blunders per 100 endgame moves against your usual 2, a 200% gap: 6 blunders in 6 games. Every such blunder hands your opponent a winning ending.",
+        drill: "Replay move 23 of those games and find the safe king move before you touch a piece.",
       });
     const { result } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [backed(req)] })]);
     assert.equal(result.usage.calls, 4, "no repair needed");
     assert.deepEqual(result.report!.trimmed, []);
     assert.match(result.report!.patterns[0]!.explanation, /200% gap/);
+  });
+});
+
+describe("move names in the prose", () => {
+  it("a move that isn't one of the evidence's is a repair issue; if it stays, its sentence is removed", async () => {
+    // The fixture's evidence moves are all Nf3 (played and better); "Kd3" and "Rxf7+" are the
+    // real run 6's made-up moves.
+    const moves = (req: ModelRequest) =>
+      endgamePattern(req, {
+        explanation:
+          "You rush in the ending, for example Kd3 instead of Rxf7+. Once the queens come off you move your king to the wrong square. The opposing king or rook then walks in and the ending is lost.",
+      });
+    const { result, requests } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [moves(req)] }), (req) => answer({ patterns: [moves(req)] })]);
+    const repair = lastUserText(requests[4]!);
+    assert.match(repair, /the explanation names the move Kd3, which isn't a played or better move of this pattern's evidence/);
+    assert.match(repair, /names the move Rxf7\+/);
+    assert.equal(
+      result.report!.patterns[0]!.explanation,
+      "Once the queens come off you move your king to the wrong square. The opposing king or rook then walks in and the ending is lost.",
+    );
+    assert.match(result.report!.trimmed[0]!.reasons.join(" "), /names the move Kd3/);
+  });
+
+  it("the evidence's own moves are fine, with or without a check sign", async () => {
+    const own = (req: ModelRequest) =>
+      endgamePattern(req, { drill: "In each evidence position, find a better plan than Nf3+ and play it out against the engine." });
+    const { result } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [own(req)] })]);
+    assert.equal(result.usage.calls, 4, "no repair needed");
+    assert.deepEqual(result.report!.trimmed, []);
+  });
+});
+
+describe("enough text", () => {
+  it("a short explanation is a repair issue; still short, the pattern is dropped", async () => {
+    const short = (req: ModelRequest) => endgamePattern(req, { explanation: "You blunder in endgames.", drill: "Play endgames." });
+    const { result, requests } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [short(req)] }), (req) => answer({ patterns: [short(req)] })]);
+    assert.match(lastUserText(requests[4]!), /the explanation is too short \(1 sentence, 24 characters\)/);
+    assert.match(lastUserText(requests[4]!), /the drill is too short \(14 characters\)/);
+    assert.deepEqual(result.report!.patterns, []);
+    assert.match(result.report!.dropped[0]!.reasons.join(" "), /after trimming, the explanation is too short/);
+  });
+
+  it("trimming that leaves one sentence drops the pattern, with the reason recorded", async () => {
+    // Run 5/6's B06 pattern: one sentence left after the unbacked one was removed.
+    const thin = (req: ModelRequest) =>
+      endgamePattern(req, { explanation: "You blunder 99 times in the endgame. Once the queens come off you move your king to the wrong square." });
+    const { result } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [thin(req)] }), (req) => answer({ patterns: [thin(req)] })]);
+    assert.deepEqual(result.report!.patterns, []);
+    assert.deepEqual(result.report!.trimmed, []);
+    const reasons = result.report!.dropped[0]!.reasons;
+    assert.match(reasons.join(" "), /mentions 99/);
+    assert.match(reasons.at(-1)!, /^after trimming, the explanation is too short \(1 sentence, 64 characters\)/);
+  });
+});
+
+describe("prompt v6", () => {
+  it("states the move, exact-filter and length rules", () => {
+    assert.match(SYSTEM_PROMPT, /Name a move .* only if it is the "played" or "betterMove" of one of THIS pattern's evidence positions/);
+    assert.match(SYSTEM_PROMPT, /called with EXACTLY that candidate's exampleFilter: no extra filters and none missing/);
+    assert.match(SYSTEM_PROMPT, /the explanation at least 2 sentences \(120 characters or more\); the drill a full instruction \(60 characters or more\)/);
   });
 });
 

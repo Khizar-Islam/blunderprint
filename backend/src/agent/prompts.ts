@@ -16,7 +16,9 @@ import type { VerificationIssue } from "./verifier.js";
 //     opening) and never claims results or trends no tool returned; numbers only from named
 //     fields (the candidate's figures, match counts, the evidence's move number, win % lost,
 //     clock left).
-export const PROMPT_VERSION = 5;
+// v6: moves named in the text must be played or better moves of the pattern's own evidence;
+//     the evidence step must use EXACTLY the candidate's exampleFilter; minimum text lengths.
+export const PROMPT_VERSION = 6;
 
 // The system prompt, with the same rules the candidate scan uses (env COACH_MIN_BASELINE_GAP,
 // COACH_MIN_CANDIDATE_GAMES, COACH_MIN_CANDIDATE_MOVES).
@@ -39,7 +41,8 @@ HOW TO WORK
 4. Then reply with one short sentence saying you're done (no report yet). You'll be asked for the report as JSON, without tools.
 
 THE REPORT
-- Each pattern: candidateId (copied exactly), evidenceStep (the "step" of the find_example_mistakes result for that candidate), 2-4 evidence items copied from that result's examples (gameId and ply exactly) from at least 2 different games, an explanation and a drill.
+- Each pattern: candidateId (copied exactly), evidenceStep (the "step" of the find_example_mistakes result called with EXACTLY that candidate's exampleFilter: no extra filters and none missing, so the examples are the same group as the statistic), 2-4 evidence items copied from that result's examples (gameId and ply exactly) from at least 2 different games, an explanation and a drill.
+- Length: the explanation at least 2 sentences (120 characters or more); the drill a full instruction (60 characters or more).
 - Never use the same position (gameId + ply) in two patterns.
 - The statistic and the title come from the candidate automatically: don't restate the label, and don't copy the value and baseline into the text.
 - If fewer than 3 distinct candidates are available, report the ones there are (possibly none) and say why in notEnoughData. Never pad.
@@ -47,6 +50,9 @@ THE REPORT
 NUMBERS IN THE TEXT
 - Prefer no numbers in the explanation and drill. If you use one, write it in digits, and it must be one of: the candidate's own figures (value, baseline, gapPct, games, moves, errors); its examples result's matchingErrors or matchingGames; or the moveNumber, winPctLost or clockLeftSeconds of one of this pattern's evidence positions. Nothing else, not even an instruction like a number of seconds or puzzles.
 - Never write numbers as words ("ten percent", "twice", "half", "one of"): they can't be checked, so they are removed.
+
+MOVES IN THE TEXT
+- Name a move (Bd3, Rxf7+, exd5, O-O) only if it is the "played" or "betterMove" of one of THIS pattern's evidence positions, copied exactly. Never name a move from memory or from another pattern's examples.
 
 ONLY WHAT THE DATA SHOWS
 - Each example carries its facts: speed, phase, clockBucket (null = no clock), clockLeftSeconds and opening. Describe only situations those facts show for this pattern's evidence: don't say "bullet", "time pressure" or "with plenty of time" unless the evidence's speed or clockBucket says so, and name an opening only if it is in the evidence or the candidate.
@@ -81,6 +87,6 @@ export function repairPrompt(issues: VerificationIssue[]): string {
     "Your report failed verification against the data:",
     ...lines,
     "",
-    "Fix ONLY these problems, using the tool results above (no more tools are available). Every candidateId must be copied exactly from the get_weakness_candidates result, and no two patterns may use candidates where one is inside the other; every evidence item must be one of the examples in the find_example_mistakes result its evidenceStep points to (called with that candidate's exampleFilter), and no position may be used by two patterns; numbers in the text must be digits from the candidate or its examples, otherwise remove them. Remove any pattern you can't back up. Then return the complete corrected JSON report.",
+    "Fix ONLY these problems, using the tool results above (no more tools are available). Every candidateId must be copied exactly from the get_weakness_candidates result, and no two patterns may use candidates where one is inside the other; every evidence item must be one of the examples in the find_example_mistakes result its evidenceStep points to (called with exactly that candidate's exampleFilter), and no position may be used by two patterns; numbers in the text must be digits from the candidate or its examples and moves only the played or better moves of the pattern's own evidence, otherwise remove them; keep the explanation at least 2 sentences and the drill a full instruction. Remove any pattern you can't back up. Then return the complete corrected JSON report.",
   ].join("\n");
 }

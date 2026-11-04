@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { strictArgs } from "./format.js";
 
-export const positionStatsArgs = z.object({
+export const positionStatsArgs = strictArgs({
   fen: z.string().min(10).max(100),
   band: z.enum(["0-1199", "1200-1599", "1600-1999", "2000+"]).optional(),
 });

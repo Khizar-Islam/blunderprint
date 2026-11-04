@@ -20,7 +20,8 @@
     "fetch:division-fixture": "tsx --env-file=.env scripts/fetchDivisionFixture.ts",
     "extract:features": "tsx --env-file=.env scripts/extractFeatures.ts",
     "explain:summary": "tsx --env-file=.env scripts/explainSummary.ts",
-    "coach:tools": "tsx --env-file=.env scripts/coachTools.ts"
+    "coach:tools": "tsx --env-file=.env scripts/coachTools.ts",
+    "coach:cli": "tsx --env-file=.env scripts/coachCli.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

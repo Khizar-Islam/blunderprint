@@ -1,18 +1,17 @@
 import { z } from "zod";
 import type { PipelineStage, Types } from "mongoose";
-import { COLORS, Game, SPEEDS, type Color, type Speed } from "../../db/models/game.js";
+import { Game, type Color, type Speed } from "../../db/models/game.js";
 import { CLOCK_BUCKETS, clockBucketSwitch, clockShare, HAS_FEATURES, MOVE_BUCKETS, moveBucketSwitch } from "../../stats/summary.js";
 import type { AgentContext } from "../context.js";
-import { cleanOpeningName, day, moveNumberOf, pieceName, round1, uciToSan } from "./format.js";
+import { cleanOpeningName, colorArg, day, moveNumberOf, pieceName, round1, setFilters, speedArg, strictArgs, uciToSan } from "./format.js";
 
 const PIECES = ["queen", "rook", "bishop", "knight", "pawn"] as const;
 const PIECE_LETTER: Record<(typeof PIECES)[number], string> = { queen: "q", rook: "r", bishop: "b", knight: "n", pawn: "p" };
 
-export const exampleArgs = z.object({
-  filters: z
-    .object({
-      color: z.enum(COLORS).optional(),
-      speed: z.enum(SPEEDS).optional(),
+export const exampleArgs = strictArgs({
+  filters: strictArgs({
+      color: colorArg,
+      speed: speedArg,
       phase: z.enum(["opening", "middlegame", "endgame"]).optional(),
       kind: z.enum(["inaccuracy", "mistake", "blunder"]).optional(),
       clockBucket: z.enum(CLOCK_BUCKETS).optional(),
@@ -21,7 +20,7 @@ export const exampleArgs = z.object({
       square: z.string().regex(/^[a-h][1-8]$/).optional(),
       eco: z.string().regex(/^[A-E]\d\d$/).optional(),
     })
-    .default({}),
+    .prefault({}),
   limit: z.number().int().min(1).max(5).default(3),
 });
 export type ExampleArgs = z.infer<typeof exampleArgs>;
@@ -94,7 +93,7 @@ export async function findExampleMistakes(ctx: AgentContext, args: ExampleArgs) 
   const [result] = await Game.aggregate<{ count: { errors: number; games: number }[]; examples: Row[] }>(pipeline);
   const count = result?.count[0] ?? { errors: 0, games: 0 };
   return {
-    filters: f,
+    filters: setFilters(f),
     matchingErrors: count.errors,
     matchingGames: count.games,
     examples: (result?.examples ?? []).map((r) => ({

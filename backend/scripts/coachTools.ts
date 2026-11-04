@@ -16,8 +16,8 @@ import { Player, type Platform } from "../src/db/models/player.js";
 const positional = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const fullArg = process.argv.find((a) => a.startsWith("--full="))?.slice("--full=".length);
 const [platform, username] = (positional[0] ?? "lichess:DrNykterstein").split(":") as [Platform, string];
-// By default the profile and the phase breakdown are printed in full.
-const full = new Set((fullArg ?? "get_player_profile,get_mistake_breakdown:phase").split(","));
+// By default the profile and the weakness candidates are printed in full.
+const full = new Set((fullArg ?? "get_player_profile,get_weakness_candidates").split(","));
 
 const env = loadEnv();
 await mongoose.connect(env.MONGODB_URI, { serverSelectionTimeoutMS: 10_000 });
@@ -28,6 +28,7 @@ const ctx: AgentContext = { playerId: player._id, platform };
 
 const calls: { label: string; name: string; args: unknown }[] = [
   { label: "get_player_profile", name: "get_player_profile", args: {} },
+  { label: "get_weakness_candidates", name: "get_weakness_candidates", args: {} },
   { label: "get_opening_breakdown", name: "get_opening_breakdown", args: {} },
   ...GROUP_BY.map((g) => ({ label: `get_mistake_breakdown:${g}`, name: "get_mistake_breakdown", args: { groupBy: g } })),
   { label: "find_example_mistakes", name: "find_example_mistakes", args: { limit: 5 } },

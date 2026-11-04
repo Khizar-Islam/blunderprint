@@ -1,12 +1,11 @@
 import { z } from "zod";
-import { COLORS, SPEEDS } from "../../db/models/game.js";
 import { computeSummary } from "../../stats/summary.js";
 import type { AgentContext } from "../context.js";
-import { cleanOpeningName } from "./format.js";
+import { cleanOpeningName, colorArg, setFilters, speedArg, strictArgs } from "./format.js";
 
-export const openingArgs = z.object({
-  color: z.enum(COLORS).optional(),
-  speed: z.enum(SPEEDS).optional(),
+export const openingArgs = strictArgs({
+  color: colorArg,
+  speed: speedArg,
   minGames: z.number().int().min(1).max(50).default(3),
 });
 export type OpeningArgs = z.infer<typeof openingArgs>;
@@ -19,7 +18,7 @@ export async function getOpeningBreakdown(ctx: AgentContext, args: OpeningArgs) 
   const summary = await computeSummary(ctx.playerId, { color: args.color, speed: args.speed });
   const eligible = summary.openings.filter((o) => o.eco && o.games >= args.minGames);
   return {
-    filters: { color: args.color ?? "both", speed: args.speed ?? "all", minGames: args.minGames },
+    filters: { ...setFilters({ color: args.color, speed: args.speed }), minGames: args.minGames },
     games: summary.totals.games,
     // Openings with fewer games than minGames are left out, and at most 12 rows are shown
     // (the pool is the dashboard's 25 most-played).

@@ -1,16 +1,14 @@
 import { z } from "zod";
-import { COLORS, Game, SPEEDS } from "../../db/models/game.js";
+import { Game } from "../../db/models/game.js";
 import { computeSummary, HAS_FEATURES, type Rate } from "../../stats/summary.js";
 import type { AgentContext } from "../context.js";
-import { pct, pieceName } from "./format.js";
+import { colorArg, pct, pieceName, setFilters, speedArg, strictArgs } from "./format.js";
 
 export const GROUP_BY = ["phase", "speed", "clockBucket", "moveNumberBucket", "pieceLost", "square"] as const;
 
-export const mistakeArgs = z.object({
+export const mistakeArgs = strictArgs({
   groupBy: z.enum(GROUP_BY),
-  filters: z
-    .object({ color: z.enum(COLORS).optional(), speed: z.enum(SPEEDS).optional() })
-    .default({}),
+  filters: strictArgs({ color: colorArg, speed: speedArg }).prefault({}),
 });
 export type MistakeArgs = z.infer<typeof mistakeArgs>;
 
@@ -20,9 +18,17 @@ const SEVERITY = { inaccuracy: 1, mistake: 2, blunder: 3 } as const;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+// Each kind per 100 of the player's moves (1 decimal); null when no moves were counted.
+export const perKindRates = (k: { inaccuracy: number; mistake: number; blunder: number }, moves: number) => ({
+  inaccuracyPer100: pct(k.inaccuracy, moves),
+  mistakePer100: pct(k.mistake, moves),
+  blunderPer100: pct(k.blunder, moves),
+});
+
 // One row of a rate breakdown, in the tool's words. per100Moves = errors per 100 of the
 // player's moves in that group (fair between groups of different sizes); perGame = errors per
-// analysed game.
+// analysed game. The per-kind rates show when one kind stands out: a phase can have an average
+// error rate overall but far more blunders.
 const rateRow = (r: Rate) => ({
   inaccuracy: r.inaccuracy,
   mistake: r.mistake,
@@ -30,6 +36,7 @@ const rateRow = (r: Rate) => ({
   total: r.total,
   playerMoves: r.moves,
   per100Moves: r.per100,
+  ...perKindRates(r, r.moves),
   perGame: r.perGame,
 });
 
@@ -40,7 +47,7 @@ export async function getMistakeBreakdown(ctx: AgentContext, args: MistakeArgs) 
   const summary = await computeSummary(ctx.playerId, { color, speed });
   const head = {
     groupBy: args.groupBy,
-    filters: { color: color ?? "both", speed: speed ?? "all" },
+    filters: setFilters({ color, speed }),
     analysedGames: summary.totals.analysed,
     playerMoves: summary.totals.moves,
   };

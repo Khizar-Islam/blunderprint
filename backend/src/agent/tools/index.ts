@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { logger } from "../../lib/logger.js";
 import type { AgentContext } from "../context.js";
+import { candidateArgs, getWeaknessCandidates } from "./candidates.js";
 import { findExampleMistakes, exampleArgs } from "./examples.js";
 import { getGameSummary, gameSummaryArgs } from "./gameSummary.js";
 import { getMistakeBreakdown, mistakeArgs } from "./mistakes.js";
@@ -40,6 +41,13 @@ export const TOOLS: ToolDef[] = [
       "The player's overview: current ratings, games and analysed games, results (W/D/L, score %) overall, by colour and by speed, average move accuracy, and error counts with errors per 100 moves and per game. Call this first.",
     args: profileArgs,
     run: (ctx) => getPlayerProfile(ctx),
+  }),
+  tool({
+    name: "get_weakness_candidates",
+    description:
+      "The player's possible weaknesses, found by code: every group (phase, clock bucket, move numbers, speed, colour, opening, phase x clock) whose error rate per 100 moves (all errors, or one kind), or for an opening errors per game or score %, is clearly worse than the player's own overall figure, on enough games and moves. Up to 12, strongest first. Each has an id, a label, value vs baseline, gapPct, the sample, parentIds (broader candidates it sits inside) and the exampleFilter to pass to find_example_mistakes. Call it right after get_player_profile.",
+    args: candidateArgs,
+    run: (ctx) => getWeaknessCandidates(ctx),
   }),
   tool({
     name: "get_opening_breakdown",
@@ -84,7 +92,21 @@ const byName = new Map(TOOLS.map((t) => [t.name, t]));
 // "$schema" and additionalProperties, which the model doesn't need; the rest is plain JSON Schema.
 function parametersOf(args: z.ZodType): Record<string, unknown> {
   const { $schema: _schema, ...schema } = z.toJSONSchema(args, { io: "input" }) as Record<string, unknown>;
-  return schema;
+  return withoutAdditionalProperties(schema) as Record<string, unknown>;
+}
+
+// The argument objects are strict (format.ts strictArgs), so zod writes additionalProperties:
+// false everywhere. It's left out of the declaration (function-declaration schemas are a subset
+// of JSON Schema, and an unsupported keyword could fail the request); runTool still rejects
+// unknown keys with a readable error.
+function withoutAdditionalProperties(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutAdditionalProperties);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([k]) => k !== "additionalProperties")
+      .map(([k, v]) => [k, withoutAdditionalProperties(v)]),
+  );
 }
 
 // The function declarations for the model: only declared tools (Interactions API shape:
@@ -96,6 +118,28 @@ export function declaredTools() {
     description: t.description,
     parameters: parametersOf(t.args),
   }));
+}
+
+// One short line about a result, for the live agent trace: what came back, not the data.
+export function summarizeResult(name: string, data: unknown): string {
+  const d = (data ?? {}) as Record<string, unknown>;
+  const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+  switch (name) {
+    case "get_player_profile":
+      return `${d.games} games, ${d.analysedGames} analysed`;
+    case "get_weakness_candidates":
+      return `${len(d.candidates)} of ${d.qualifying} candidates`;
+    case "get_opening_breakdown":
+      return `${len(d.openings)} openings`;
+    case "get_mistake_breakdown":
+      return `${len(d.rows)} rows by ${d.groupBy}`;
+    case "find_example_mistakes":
+      return `${len(d.examples)} examples of ${d.matchingErrors} errors in ${d.matchingGames} games`;
+    case "get_game_summary":
+      return d.found ? `${d.result}, ${len(d.keyMoments)} key moments` : "game not found";
+    default:
+      return `${JSON.stringify(data).length} chars`;
+  }
 }
 
 // Results above this are a bug in a tool (they should stay ≤ ~2k tokens ≈ 8,000 characters);

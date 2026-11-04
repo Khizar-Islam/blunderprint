@@ -172,7 +172,7 @@ describe("get_player_profile", () => {
         { speed: "bullet", games: 1, scorePct: 0, analysedGames: 1, errorsPer100Moves: 13.3 },
       ],
       accuracyPct: { all: 70, white: 80, black: 60 },
-      errors: { inaccuracy: 1, mistake: 1, blunder: 2, total: 4, playerMoves: 20, per100Moves: 20, perGame: 2 },
+      errors: { inaccuracy: 1, mistake: 1, blunder: 2, total: 4, playerMoves: 20, per100Moves: 20, inaccuracyPer100: 5, mistakePer100: 5, blunderPer100: 10, perGame: 2 },
     });
   });
 });
@@ -193,7 +193,7 @@ describe("get_opening_breakdown", () => {
   it("the default minGames (3) leaves out openings with fewer games", async () => {
     const o = await getOpeningBreakdown(ctx, openingArgs.parse({}));
     assert.deepEqual(o.openings, []);
-    assert.deepEqual(o.filters, { color: "both", speed: "all", minGames: 3 });
+    assert.deepEqual(o.filters, { minGames: 3 }, "unset filters aren't echoed as placeholders");
   });
   it("colour filter", async () => {
     const o = await getOpeningBreakdown(ctx, openingArgs.parse({ color: "black", minGames: 1 }));
@@ -218,6 +218,19 @@ describe("get_mistake_breakdown", () => {
       ],
     );
   });
+  it("per-kind rates per 100 moves in every row with moves", async () => {
+    const b = (await breakdown({ groupBy: "phase" })) as { rows: { phase: string; inaccuracyPer100: number; mistakePer100: number; blunderPer100: number }[] };
+    // Opening: 1 inaccuracy + 1 mistake in 8 moves; endgame: 1 blunder in 5 moves.
+    assert.deepEqual(
+      b.rows.map(({ phase, inaccuracyPer100, mistakePer100, blunderPer100 }) => [phase, inaccuracyPer100, mistakePer100, blunderPer100]),
+      [
+        ["opening", 12.5, 12.5, 0],
+        ["middlegame", 0, 0, 14.3],
+        ["endgame", 0, 0, 20],
+      ],
+    );
+  });
+
   it("clockBucket: the dashboard's edges", async () => {
     const b = (await breakdown({ groupBy: "clockBucket" })) as { rows: { clockBucket: string; total: number; playerMoves: number }[] };
     assert.deepEqual(
@@ -255,7 +268,7 @@ describe("get_mistake_breakdown", () => {
     ]);
     const white = await breakdown({ groupBy: "phase", filters: { color: "white" } });
     assert.equal(white.analysedGames, 1);
-    assert.deepEqual(white.filters, { color: "white", speed: "all" });
+    assert.deepEqual(white.filters, { color: "white" });
   });
   it("moveNumberBucket", async () => {
     const b = (await breakdown({ groupBy: "moveNumberBucket" })) as { rows: { moveNumbers: string; total: number }[] };
@@ -379,10 +392,11 @@ describe("get_position_stats (stub until Stage 4)", () => {
 describe("the registry", () => {
   before(seed);
 
-  it("declares the 5 tools to the model; get_position_stats stays hidden", () => {
+  it("declares the 6 tools to the model; get_position_stats stays hidden", () => {
     const tools = declaredTools();
     assert.deepEqual(tools.map((t) => t.name), [
       "get_player_profile",
+      "get_weakness_candidates",
       "get_opening_breakdown",
       "get_mistake_breakdown",
       "find_example_mistakes",
@@ -392,9 +406,10 @@ describe("the registry", () => {
       assert.equal(t.type, "function");
       assert.equal(t.parameters.type, "object");
       assert.equal("$schema" in t.parameters, false);
+      assert.doesNotMatch(JSON.stringify(t.parameters), /additionalProperties/, `${t.name}: strictness is enforced by the server, not declared`);
       assert.doesNotMatch(JSON.stringify(t.parameters), /player|username/i, `${t.name} takes no player argument`);
     }
-    const groupBy = (tools[2]!.parameters as { properties: { groupBy: { enum: string[] } } }).properties.groupBy;
+    const groupBy = (tools[3]!.parameters as { properties: { groupBy: { enum: string[] } } }).properties.groupBy;
     assert.deepEqual(groupBy.enum, [...GROUP_BY]);
   });
 
@@ -404,10 +419,44 @@ describe("the registry", () => {
     assert.ok(r.ok && r.chars === JSON.stringify(r.data).length);
   });
 
-  it("a player id passed by the model is ignored: the player always comes from the server", async () => {
+  it("'both' and 'all' are accepted as 'no filter', and never echoed back", async () => {
+    const b = await runTool(ctx, "get_mistake_breakdown", { groupBy: "phase", filters: { color: "both", speed: "all" } });
+    assert.ok(b.ok);
+    assert.deepEqual((b.data as { filters: object }).filters, {});
+    assert.equal((b.data as { analysedGames: number }).analysedGames, 2, "both colours, all speeds");
+    const o = await runTool(ctx, "get_opening_breakdown", { color: "both", speed: "all", minGames: 1 });
+    assert.ok(o.ok);
+    assert.deepEqual((o.data as { filters: object }).filters, { minGames: 1 });
+    const e = await runTool(ctx, "find_example_mistakes", { filters: { color: "both", kind: "blunder" } });
+    assert.ok(e.ok);
+    assert.deepEqual((e.data as { filters: object }).filters, { kind: "blunder" });
+    assert.equal((e.data as { matchingErrors: number }).matchingErrors, 2);
+    // The model is told it may send them.
+    const schema = JSON.stringify(declaredTools().find((t) => t.name === "get_mistake_breakdown")!.parameters);
+    assert.match(schema, /"white","black","both"/);
+    assert.match(schema, /"daily","all"/);
+  });
+
+  it("a player id passed by the model is refused: the player always comes from the server", async () => {
     const r = await runTool(ctx, "get_player_profile", { playerId: String(bobCtx.playerId), username: "bob" });
-    assert.ok(r.ok);
-    assert.equal((r.data as { games: number }).games, 3, "still alice's 3 games");
+    assert.deepEqual(r, { ok: false, error: 'Invalid arguments. arguments: unknown key "playerId", "username" (allowed: none)' });
+  });
+
+  it("unknown keys are a readable error, never silently ignored", async () => {
+    // The real run that motivated this: phase isn't a get_mistake_breakdown filter, and it used
+    // to be dropped without a word, so all-phase numbers came back as if they were the endgame's.
+    assert.deepEqual(await runTool(ctx, "get_mistake_breakdown", { groupBy: "clockBucket", filters: { phase: "endgame" } }), {
+      ok: false,
+      error: 'Invalid arguments. filters: unknown key "phase" (allowed: color, speed)',
+    });
+    assert.deepEqual(await runTool(ctx, "get_opening_breakdown", { minGames: 3, filters: { color: "white" } }), {
+      ok: false,
+      error: 'Invalid arguments. arguments: unknown key "filters" (allowed: color, speed, minGames)',
+    });
+    const ex = await runTool(ctx, "find_example_mistakes", { filters: { phase: "endgame", ply: 40 }, limit: 5 });
+    assert.equal(!ex.ok && ex.error, 'Invalid arguments. filters: unknown key "ply" (allowed: color, speed, phase, kind, clockBucket, moveNumberBucket, pieceLost, square, eco)');
+    const game = await runTool(ctx, "get_game_summary", { gameId: "0123456789abcdef01234567", ply: 3 });
+    assert.equal(!game.ok && game.error, 'Invalid arguments. arguments: unknown key "ply" (allowed: gameId)');
   });
 
   it("an unknown or hidden tool is a readable error, not a throw", async () => {
@@ -448,6 +497,7 @@ describe("prompt injection: text from outside stays out of tool results", () => 
   it("no tool result contains an opponent name, free-text termination or injected markup", async () => {
     const calls: [string, unknown][] = [
       ["get_player_profile", {}],
+      ["get_weakness_candidates", {}],
       ["get_opening_breakdown", { minGames: 1 }],
       ...GROUP_BY.map((g) => ["get_mistake_breakdown", { groupBy: g }] as [string, unknown]),
       ["find_example_mistakes", { limit: 5 }],
@@ -547,6 +597,7 @@ describe("result size: every tool stays under ~2k tokens on a 200-game player", 
   it(`every call ≤ ${MAX_RESULT_CHARS} characters`, async () => {
     const calls: [string, unknown][] = [
       ["get_player_profile", {}],
+      ["get_weakness_candidates", {}],
       ["get_opening_breakdown", { minGames: 1 }],
       ...GROUP_BY.map((g) => ["get_mistake_breakdown", { groupBy: g }] as [string, unknown]),
       ["find_example_mistakes", { limit: 5 }],
@@ -560,6 +611,6 @@ describe("result size: every tool stays under ~2k tokens on a 200-game player", 
   });
 
   it("the registry's tool list is complete", () => {
-    assert.equal(TOOLS.length, 6);
+    assert.equal(TOOLS.length, 7);
   });
 });

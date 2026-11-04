@@ -49,6 +49,27 @@ const envSchema = z.object({
   GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
   AI_ENABLED: z.stringbool().default(true),
   AI_DAILY_CALL_BUDGET: z.coerce.number().int().nonnegative().default(400),
+  // The model's free-tier limits, from the AI Studio rate-limit page (project "blunderprint",
+  // checked 4 Nov 2026: Gemini 3.5 Flash-Lite = 15 RPM, 250K TPM, 500 RPD). Google no longer
+  // publishes them in the docs, so they live here, not in code. The pacer (agent/pacer.ts)
+  // keeps every model call in the process under RPM and TPM; RPD is what AI_DAILY_CALL_BUDGET
+  // must stay under.
+  GEMINI_RPM: z.coerce.number().int().positive().default(15),
+  GEMINI_TPM: z.coerce.number().int().positive().default(250_000),
+  GEMINI_RPD: z.coerce.number().int().positive().default(500),
+  // One coach run's limits (agent/loop.ts). Model calls: the investigation and the final
+  // answer; the repair round may add COACH_MAX_REPAIR_CALLS more.
+  COACH_MAX_MODEL_CALLS: z.coerce.number().int().min(2).max(20).default(10),
+  COACH_MAX_REPAIR_CALLS: z.coerce.number().int().min(0).max(4).default(2),
+  COACH_MAX_TOKENS: z.coerce.number().int().positive().default(120_000),
+  COACH_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  COACH_RUN_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  // What counts as a weakness (agent/tools/candidates.ts): at least this much worse than the
+  // player's own overall figure for the same measure (relative: 0.15 = 15%), on at least this
+  // many games and, for rates per 100 moves, this many of the player's moves.
+  COACH_MIN_BASELINE_GAP: z.coerce.number().min(0).max(1).default(0.15),
+  COACH_MIN_CANDIDATE_GAMES: z.coerce.number().int().min(2).default(5),
+  COACH_MIN_CANDIDATE_MOVES: z.coerce.number().int().min(1).default(100),
   // Goes in the User-Agent of every Chess.com / Lichess request, so they can reach us
   // instead of blocking us. Required: the importers must not run without it.
   CONTACT_EMAIL: z.email(),
@@ -82,6 +103,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     // Only names and rule messages: never echo values, which may be secrets.
     const problems = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     throw new Error(`Invalid environment:\n  ${problems.join("\n  ")}`);
+  }
+  // Our own daily budget must leave headroom under Google's: past RPD every call is a 429.
+  if (parsed.data.AI_DAILY_CALL_BUDGET > parsed.data.GEMINI_RPD) {
+    logger.warn("AI_DAILY_CALL_BUDGET is above GEMINI_RPD: the coach will hit Google's daily limit first", {
+      budget: parsed.data.AI_DAILY_CALL_BUDGET,
+      rpd: parsed.data.GEMINI_RPD,
+    });
   }
   return {
     ...parsed.data,

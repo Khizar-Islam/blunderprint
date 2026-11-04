@@ -1,11 +1,11 @@
-import { z } from "zod";
 import { Game, type Color, type Speed } from "../../db/models/game.js";
 import { Player } from "../../db/models/player.js";
 import { computeSummary } from "../../stats/summary.js";
 import type { AgentContext } from "../context.js";
-import { day, pct, round1 } from "./format.js";
+import { day, pct, round1, strictArgs } from "./format.js";
+import { perKindRates } from "./mistakes.js";
 
-export const profileArgs = z.object({});
+export const profileArgs = strictArgs({});
 
 interface ResultRow {
   _id: { speed: Speed; color: Color; result: "win" | "draw" | "loss" };
@@ -98,6 +98,7 @@ export async function getPlayerProfile(ctx: AgentContext) {
       total: m.total,
       playerMoves: summary.totals.moves,
       per100Moves: pct(m.total, summary.totals.moves),
+      ...perKindRates(m, summary.totals.moves),
       perGame: summary.totals.analysed > 0 ? Math.round((m.total / summary.totals.analysed) * 100) / 100 : null,
     },
   };

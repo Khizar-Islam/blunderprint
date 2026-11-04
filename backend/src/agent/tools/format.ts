@@ -1,4 +1,35 @@
 import { Chess } from "chess.js";
+import { z } from "zod";
+import { COLORS, SPEEDS } from "../../db/models/game.js";
+
+// Colour and speed filters for tool arguments. "both" / "all" are accepted and mean "no
+// filter": a model naturally writes them (the first real run sent color: "both"), and rejecting
+// them only wastes a tool step. Results never echo them back: an unset filter is left out.
+export const colorArg = z
+  .enum([...COLORS, "both"])
+  .optional()
+  .transform((v) => (v === "both" ? undefined : v));
+export const speedArg = z
+  .enum([...SPEEDS, "all"])
+  .optional()
+  .transform((v) => (v === "all" ? undefined : v));
+
+// An argument object that rejects keys it doesn't know. zod's default is to drop them silently,
+// which let a real run's get_mistake_breakdown({ filters: { phase: "endgame" } }) return
+// all-phase numbers the model then labelled "endgame". Now the model gets a readable error it
+// can correct: unknown key "phase" (allowed: color, speed).
+export function strictArgs<S extends z.ZodRawShape>(shape: S) {
+  return z.strictObject(shape, {
+    error: (issue) =>
+      issue.code === "unrecognized_keys"
+        ? `unknown key ${issue.keys.map((k) => `"${k}"`).join(", ")} (allowed: ${Object.keys(shape).join(", ") || "none"})`
+        : undefined,
+  });
+}
+
+// The filters that are actually set, for echoing in a result.
+export const setFilters = <T extends Record<string, unknown>>(filters: T): Partial<T> =>
+  Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== undefined)) as Partial<T>;
 
 // Shared formatting for coach tool results. Two jobs:
 //

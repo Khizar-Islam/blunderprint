@@ -2,9 +2,9 @@ import { z } from "zod";
 import { FEATURES_VERSION } from "../../chess/features.js";
 import { Game } from "../../db/models/game.js";
 import type { AgentContext } from "../context.js";
-import { cleanOpeningName, cleanTermination, day, moveNumberOf, pieceName, round1, uciToSan } from "./format.js";
+import { cleanOpeningName, cleanTermination, day, moveNumberOf, pieceName, round1, strictArgs, uciToSan } from "./format.js";
 
-export const gameSummaryArgs = z.object({ gameId: z.string().regex(/^[0-9a-f]{24}$/i, "gameId must be a 24-character id") });
+export const gameSummaryArgs = strictArgs({ gameId: z.string().regex(/^[0-9a-f]{24}$/i, "gameId must be a 24-character id") });
 export type GameSummaryArgs = z.infer<typeof gameSummaryArgs>;
 
 const KEY_MOMENTS = 3;

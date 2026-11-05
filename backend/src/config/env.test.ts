@@ -96,3 +96,12 @@ test("loadEnv: the coach defaults, and the scripted model only outside productio
   assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "scripted", RENDER: "true" }), /local development only/);
   assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "claude" }), /COACH_MODEL/);
 });
+
+test("loadEnv: the fallback model and the per-run request ceiling", () => {
+  const env = loadEnv(BASE);
+  assert.equal(env.GEMINI_FALLBACK_MODEL, "gemini-3.1-flash-lite");
+  assert.equal(env.COACH_MAX_REQUESTS, 16);
+  assert.equal(loadEnv({ ...BASE, GEMINI_FALLBACK_MODEL: "none" }).GEMINI_FALLBACK_MODEL, "none");
+  // The ceiling must cover every logical call once (10 + 2).
+  assert.throws(() => loadEnv({ ...BASE, COACH_MAX_REQUESTS: "11" }), /COACH_MAX_REQUESTS: must be at least/);
+});

@@ -270,7 +270,8 @@ reports: { playerId, analysedGamesHash, promptVersion, model, runId, outcome: "p
            patterns: [ verified pattern + per evidence: fen, played/betterMove (SAN) + playedUci/betterUci,
                        color, moveNumber, kind, winPctLost, facts { speed, phase, clockBucket,
                        clockLeftSeconds, opening } ],
-           analysedGames, usage, durationMs, dropped, trimmed (logs/README only, never sent) }
+           answeredBy (the fallback, if the run switched), analysedGames, usage, durationMs,
+           dropped, trimmed (logs/README only, never sent) }
 agentRuns: { playerId, kind: "report", jobId, status: "queued"|"running"|"done"|"failed", rev, attempt,
              model, promptVersion, analysedGamesHash, steps: [ TraceStep ] (≤ 60), usage, reportId?,
              error?: { code, message } (always the friendly pair), startedAt, finishedAt }
@@ -378,7 +379,9 @@ All tools take the player from the server context, never from the model, so the 
 2. **Two phases** (only stable features; tools + structured output in one request is Preview and timed out in the first real run):
    - **Investigate:** tools only. Run the tool calls, append the results (each carries its step number), repeat until the model is done.
    - **Answer:** one call with structured output and no tools; one format retry if the JSON can't be read.
-   - Hard limits: **10 model calls** (`COACH_MAX_MODEL_CALLS`, two kept back for the answer) + **2 repair calls**, 120K tokens, **60 s per call**, **300 s per run**. A 429 waits (Google's delay when given); a timeout / 5xx / network error gets one more try. Every request counts.
+   - Hard limits: **10 model calls** (`COACH_MAX_MODEL_CALLS`, two kept back for the answer) + **2 repair calls**, 120K tokens, **60 s per call**, **300 s per run**. These count logical calls; every real request, retries included, counts against **`COACH_MAX_REQUESTS` (16) per run**, and the investigation stops early rather than use the last 4 (the answer call + its retries), so a stormy investigation can't starve the answer.
+   - Retries: a 429 waits (Google's delay when given, up to 3 times). **Overloaded** (503 "high demand", or a 5xx saying UNAVAILABLE/overloaded): up to **3 retries** waiting ~2 s, 6 s, 15 s (±20% jitter); after **2 in a row** on one call the rest of the run switches to **`GEMINI_FALLBACK_MODEL`** (`gemini-3.1-flash-lite`: Stable, function calling + structured outputs; shuts down 7 May 2027). A timeout / network / other 5xx gets one more try. Every request counts in the daily budget, and every model error is logged with its phase (investigate / answer / repair).
+   - Why: on 5 Nov 2026 both live runs on Render failed on Google's 503 "currently experiencing high demand" (the answer call failed twice in a row). A probe of the answer-shaped request (full schema, no tools) completed in 1.9 s, so the schema wasn't the cause (`npm run coach:probe`).
    - **Rate limit:** one process-wide pacer (`agent/pacer.ts`): calls ≥ 60 000 / `GEMINI_RPM` ms apart (4 s at 15 RPM) and under `GEMINI_TPM` in any 60 s.
 3. The answer's schema: `patterns: [ { candidateId, explanation, evidenceStep, evidence: [ { gameId, ply } ], drill } ]`. The model writes **no number and no title**: the verifier copies the statistic, baseline, direction and label from the candidate ("7.9 vs your 3.1").
 4. **Verifier (code, not AI):**
@@ -387,7 +390,7 @@ All tools take the player from the server context, never from the model, so the 
    - Prose: digits only from named fields (candidate figures, matching counts, each evidence item's move number / win% lost / clock, bucket bounds); no number words; SAN moves only the pattern's own played/better moves; explanation ≥ 2 sentences and 120 characters, drill ≥ 60.
    - On failure, **one repair round** that tells the model what failed. Then whatever still fails is trimmed (bad evidence, if ≥ 2 games remain; unbacked sentences) or the pattern is dropped.
 5. Stream every step to the UI over SSE: the kind (model / tool / verify / repair / retry), a short label, a short detail and the time taken. That's the live "agent trace".
-6. **Cache** reports by `(playerId, analysedGamesHash, PROMPT_VERSION, model)`. If nothing changed, POST returns the cached report instantly with no AI calls.
+6. **Cache** reports by `(playerId, analysedGamesHash, PROMPT_VERSION, model)`, where `model` is the one asked for; a report written by the fallback records it in `answeredBy`. If nothing changed, POST returns the cached report instantly with no AI calls.
 
 ### The report job (`jobs/handlers/report.ts`)
 - Key `report:<model>:<playerId>`: asking twice returns the same run. `maxAttempts` 2.
@@ -404,7 +407,7 @@ Follow-up questions use the same tools, capped at 6 steps, with the same evidenc
 ### Guards
 - Per-IP limits (hashed IP, Stage 6): e.g. 5 imports/hour, 3 reports/day, 20 questions/day.
 - Global daily AI call budget (`AI_DAILY_CALL_BUDGET`, default 400, under the 500/day free limit, Pacific-time days) and a kill switch (`AI_ENABLED=false`) that shows a friendly message (built in Stage 5, `agent/budget.ts`):
-  - Checked before a run starts (POST refuses below one worst-case run: `COACH_MAX_MODEL_CALLS + COACH_MAX_REPAIR_CALLS` = 12 calls) AND before every model request, retries included (`guardedModel`).
+  - Checked before a run starts (POST refuses below one worst-case run: `COACH_MAX_REQUESTS` = 16 requests) AND before every model request, retries and fallback included (`guardedModel`).
   - One atomic `findOneAndUpdate` with upsert per request: `{ _id: day, count < budget } → $inc 1`. A duplicate-key error (11000) is retried **once**: at the start of a day two first inserts can race, and only a second miss really means the budget is used up.
 - Free-tier note: on the free tier Google may use prompts to improve its models. That's fine here, because all the data is public games.
 - When the budget runs out, show cached reports and an honest message. Never show a raw error.
@@ -430,7 +433,7 @@ POST /api/players/:platform/:username/ask          → { runId } (Stage 6)
 GET  /api/jobs/:id/stream                          → SSE: job progress
 GET  /api/runs/:id/stream                          → SSE: agent steps, then the final result
 ```
-- **POST report** checks, in order: no player → 404 `player_not_found`; a run already going → 202 the same `runId`; a report for exactly this data → 200 cached (no AI call, even with AI off); fewer than `COACH_MIN_ANALYSED_GAMES` (20) → 409 `not_enough_games`; AI off or no model → 503 `ai_disabled`; budget under one worst-case run → 429 `ai_budget_exhausted` + `Retry-After` (seconds to Pacific midnight); else 202 `{ runId }`. Error bodies are `{ error, code }`.
+- **POST report** checks, in order: no player → 404 `player_not_found`; a run already going → 202 the same `runId`; a report for exactly this data → 200 cached (no AI call, even with AI off); fewer than `COACH_MIN_ANALYSED_GAMES` (20) → 409 `not_enough_games`; AI off or no model → 503 `ai_disabled`; budget under one worst-case run (16 requests) → 429 `ai_budget_exhausted` + `Retry-After` (seconds to Pacific midnight); else 202 `{ runId }`. Error bodies are `{ error, code }`.
 - **Run SSE contract** (`GET /api/runs/:id/stream`): the same as the job stream (subscribe → snapshot → only newer revs, `retry: 3000`, 15 s heartbeat, ends after `done`/`failed`, a reconnect starts with a snapshot). Events: `snapshot`, `status`, `done`, `failed` carry the whole public run (`done` and a finished snapshot include the report); `step` carries only `{ step }`.
 
 Rules:
@@ -527,11 +530,12 @@ Render's free API sleeps after 15 minutes. The first request can take up to abou
 MONGODB_URI=            # Atlas connection string (app user, readWrite on the app DB only)
 GEMINI_API_KEY=
 GEMINI_MODEL=           # gemini-3.5-flash-lite (dev + free demo); gemini-3.8-flash from Stage 8
+GEMINI_FALLBACK_MODEL=  # gemini-3.1-flash-lite by default ("none" = off): used after 2 overloaded responses in a row
 AI_ENABLED=true
 AI_DAILY_CALL_BUDGET=400
 GEMINI_RPM=15 GEMINI_TPM=250000 GEMINI_RPD=500   # the free-tier limits from AI Studio (pacer + warning)
 COACH_MODEL=gemini      # "scripted" = the fake coach for local development (refused in production)
-COACH_MAX_MODEL_CALLS=10 COACH_MAX_REPAIR_CALLS=2 COACH_MAX_TOKENS=120000
+COACH_MAX_MODEL_CALLS=10 COACH_MAX_REPAIR_CALLS=2 COACH_MAX_REQUESTS=16 COACH_MAX_TOKENS=120000
 COACH_CALL_TIMEOUT_MS=60000 COACH_RUN_TIMEOUT_MS=300000
 COACH_MIN_BASELINE_GAP=0.15 COACH_MIN_CANDIDATE_GAMES=5 COACH_MIN_CANDIDATE_MOVES=100
 COACH_MIN_ANALYSED_GAMES=20

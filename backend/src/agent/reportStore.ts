@@ -54,7 +54,10 @@ export interface SaveReportInput {
   analysedGamesHash: string;
   analysedGames: number;
   promptVersion: number;
+  // The requested model (part of the cache key).
   model: string;
+  // The model that actually wrote the answer: the fallback if the run switched.
+  answeredBy: string;
   runId: Types.ObjectId;
   report: AgentReport;
   usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
@@ -77,6 +80,7 @@ export async function saveReport(input: SaveReportInput): Promise<ReportDoc> {
     {
       $set: {
         runId: input.runId,
+        answeredBy: input.answeredBy,
         outcome: patterns.length ? "patterns" : "none",
         patterns,
         analysedGames: input.analysedGames,
@@ -97,6 +101,8 @@ export interface PublicReport {
   id: string;
   generatedAt: string;
   model: string;
+  // Usually the same as model; the fallback's id when the run had to switch.
+  answeredBy: string;
   promptVersion: number;
   analysedGames: number;
   patterns: StoredPattern[];
@@ -109,6 +115,7 @@ interface ReportLike {
   createdAt?: Date;
   updatedAt?: Date;
   model: string;
+  answeredBy?: string | null;
   promptVersion: number;
   analysedGames: number;
   patterns?: unknown[];
@@ -122,6 +129,7 @@ export function toPublicReport(doc: ReportDoc | ReportLike): PublicReport {
     // updatedAt: a report re-saved under the same key is as new as its last save.
     generatedAt: (d.updatedAt ?? d.createdAt ?? new Date()).toISOString(),
     model: d.model,
+    answeredBy: d.answeredBy ?? d.model,
     promptVersion: d.promptVersion,
     analysedGames: d.analysedGames,
     patterns,

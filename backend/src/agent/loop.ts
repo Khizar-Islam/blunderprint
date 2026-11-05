@@ -1,3 +1,4 @@
+import { logger } from "../lib/logger.js";
 import { sleep as realSleep, type Sleep } from "../lib/sleep.js";
 import { BudgetRefused } from "./budget.js";
 import type { AgentContext } from "./context.js";
@@ -26,15 +27,29 @@ import { verifyReport, type DroppedPattern, type ToolLog, type VerifiedPattern }
 // Limits: maxCalls model calls for 1-2 (two of them kept back for the answer), maxRepairCalls
 // more for 3, a total token budget, a per-call timeout (in the model) and a deadline for the
 // whole run. Every model call waits for the process-wide pacer first (pacer.ts).
+//
+// maxCalls / maxRepairCalls count LOGICAL calls (one model turn); its retries don't use them up.
+// Every real request (retries included) counts against maxRequests, a hard ceiling per run, and
+// the investigation must leave ANSWER_RESERVE_REQUESTS of it for the answer (one call and its
+// retries), so a stormy investigation can't starve the answer.
+//
+// Overload (Google's 503 "high demand"): up to 3 retries with backoff (~2 s, 6 s, 15 s, jitter).
+// After 2 overloaded responses in a row on one call, the rest of the run switches to the
+// fallback model, if there is one.
 
 export interface AgentLimits {
   maxCalls: number;
   maxRepairCalls: number;
   maxTokens: number;
   runTimeoutMs: number;
+  // Every request of the run, retries included (COACH_MAX_REQUESTS).
+  maxRequests: number;
 }
 
-export type TraceKind = "model" | "tool" | "verify" | "repair" | "retry";
+export type TraceKind = "model" | "tool" | "verify" | "repair" | "retry" | "switch";
+
+// Which part of the run a model call belongs to (logged with every model error).
+export type RunPhase = "investigate" | "answer" | "repair";
 
 // One line of the live "agent trace" the coach page shows.
 export interface TraceStep {
@@ -66,6 +81,8 @@ export interface AgentError {
   modelErrorKind?: ModelErrorKind;
   // An error that wasn't one of ours (a bug or a DB failure).
   unexpected?: boolean;
+  // Where in the run it stopped.
+  phase?: RunPhase;
 }
 
 export interface AgentReport {
@@ -82,34 +99,50 @@ export interface AgentResult {
   usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
   durationMs: number;
   trace: TraceStep[];
+  // The model that wrote the report the run ended with (the fallback, if the run switched).
+  answerModel?: string;
 }
 
 export interface RunAgentOptions {
   ctx: AgentContext;
   model: Model;
+  // Used for the rest of the run after the main model is overloaded twice in a row.
+  fallback?: Model;
   pacer: Pacer;
   limits: AgentLimits;
   signal?: AbortSignal;
   onStep?: (step: TraceStep) => void;
   now?: () => number;
   sleep?: Sleep;
+  // For the backoff jitter (tests pass a fixed one).
+  random?: () => number;
 }
+
+// Internal: the investigation reached the requests kept back for the answer.
+class InvestigationCut extends Error {}
 
 class StopRun extends Error {
   constructor(
     readonly code: StopCode,
     message: string,
-    readonly extra: { modelErrorKind?: ModelErrorKind; unexpected?: boolean } = {},
+    readonly extra: { modelErrorKind?: ModelErrorKind; unexpected?: boolean; phase?: RunPhase } = {},
   ) {
     super(message);
   }
 }
 
-// Retries inside one logical call: 429s wait (Google's delay when it gives one), a timeout or a
-// server/network error gets one more try. Each retry is a real request and counts as a call.
+// Retries inside one logical call: 429s wait (Google's delay when it gives one); an overloaded
+// model gets up to 3 more tries with a growing wait; a timeout, network or other server error
+// gets one more try. Each retry is a real request: it counts against maxRequests and the budget.
 const MAX_RATE_LIMIT_RETRIES = 3;
+const MAX_OVERLOAD_RETRIES = 3;
+const OVERLOAD_BACKOFF_MS = [2_000, 6_000, 15_000];
+// Overloaded responses in a row (on one logical call) before switching to the fallback model.
+const SWITCH_AFTER_OVERLOADS = 2;
 const MAX_TRANSIENT_RETRIES = 1;
 const BACKOFF_BASE_MS = 5_000;
+// Requests the investigation must leave for the answer: the call plus its overload retries.
+export const ANSWER_RESERVE_REQUESTS = 1 + MAX_OVERLOAD_RETRIES;
 // Room for the answer when estimating whether the next call fits the token budget.
 const OUTPUT_RESERVE_TOKENS = 2_000;
 
@@ -125,9 +158,13 @@ export function summarizeArgs(args: unknown): string {
 }
 
 export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
-  const { ctx, model, pacer, limits, onStep } = opts;
+  const { ctx, pacer, limits, onStep, fallback } = opts;
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realSleep;
+  const random = opts.random ?? Math.random;
+  // The model in use: the main one, or the fallback after an overload switch.
+  let model = opts.model;
+  let answerModel: string | undefined;
   const started = now();
   const deadline = started + limits.runTimeoutMs;
   const outer = opts.signal ?? new AbortController().signal;
@@ -154,25 +191,33 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
   const estimateTokens = (withTools: boolean) =>
     Math.ceil((SYSTEM_PROMPT.length + JSON.stringify(input).length + (withTools ? JSON.stringify(tools).length : 0)) / 4) + OUTPUT_RESERVE_TOKENS;
 
-  // One logical model call, with its retries. Investigation calls offer the tools; answer calls
-  // ask for the report schema instead. `budget` is the phase's call allowance.
-  async function callModel(phase: "investigate" | "answer", budget: { used: number; max: number }): Promise<ModelResponse> {
+  // One logical model call, with its retries. Investigation calls offer the tools; answer and
+  // repair calls ask for the report schema instead. `budget` is the phase's allowance of logical
+  // calls (retries don't use it); every request counts against limits.maxRequests.
+  async function callModel(phase: RunPhase, budget: { used: number; max: number }): Promise<ModelResponse> {
     const withTools = phase === "investigate";
     let rateLimited = 0;
+    let overloaded = 0;
+    let overloadStreak = 0;
     let transient = 0;
+    let first = true;
     for (;;) {
       checkAborted();
-      if (budget.used >= budget.max) throw new StopRun("call_limit", `Used all ${budget.max} model calls for this part of the run.`);
+      if (first && budget.used >= budget.max) throw new StopRun("call_limit", `Used all ${budget.max} model calls for this part of the run.`, { phase });
+      if (usage.calls >= limits.maxRequests) throw new StopRun("call_limit", `Used all ${limits.maxRequests} requests of the run.`, { phase });
+      // The investigation leaves the last requests for the answer.
+      if (withTools && limits.maxRequests - usage.calls <= ANSWER_RESERVE_REQUESTS) throw new InvestigationCut();
       const estimate = estimateTokens(withTools);
       if (usage.totalTokens + estimate > limits.maxTokens) {
-        throw new StopRun("token_limit", `The next call would pass the ${limits.maxTokens}-token budget.`);
+        throw new StopRun("token_limit", `The next call would pass the ${limits.maxTokens}-token budget.`, { phase });
       }
 
       const slot = await pacer.acquire(estimate, outer).catch((err) => {
-        throw outer.aborted ? new StopRun("aborted", "The run was stopped.") : err;
+        throw outer.aborted ? new StopRun("aborted", "The run was stopped.", { phase }) : err;
       });
       checkAborted();
-      budget.used++;
+      if (first) budget.used++;
+      first = false;
       usage.calls++;
       const t0 = now();
       // The run's deadline also cuts a call short; the model adds its own per-call timeout.
@@ -198,18 +243,47 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
         });
         return res;
       } catch (err) {
-        if (outer.aborted) throw new StopRun("aborted", "The run was stopped.");
-        if (err instanceof BudgetRefused) throw new StopRun(err.code, err.message);
+        if (outer.aborted) throw new StopRun("aborted", "The run was stopped.", { phase });
+        if (err instanceof BudgetRefused) throw new StopRun(err.code, err.message, { phase });
         if (!(err instanceof ModelError)) {
-          if (now() > deadline) throw new StopRun("time_limit", `The run passed its ${Math.round(limits.runTimeoutMs / 1000)} s limit.`);
+          if (now() > deadline) throw new StopRun("time_limit", `The run passed its ${Math.round(limits.runTimeoutMs / 1000)} s limit.`, { phase });
           throw err;
         }
+        logger.warn("Coach model error", {
+          phase,
+          model: model.name,
+          kind: err.kind,
+          status: err.details.status,
+          request: usage.calls,
+          error: err.message,
+        });
+        overloadStreak = err.kind === "overloaded" ? overloadStreak + 1 : 0;
+
         if (err.kind === "rate_limited" && rateLimited < MAX_RATE_LIMIT_RETRIES) {
           rateLimited++;
           const wait = err.details.retryAfterMs ?? BACKOFF_BASE_MS * 2 ** (rateLimited - 1);
-          if (now() + wait > deadline) throw new StopRun("time_limit", `Rate limited, and the wait (${Math.round(wait / 1000)} s) would pass the run's limit.`);
+          if (now() + wait > deadline) throw new StopRun("time_limit", `Rate limited, and the wait (${Math.round(wait / 1000)} s) would pass the run's limit.`, { phase });
           pacer.backoff(wait);
           emit({ kind: "retry", label: model.name, detail: `rate limited: waiting ${Math.round(wait / 1000)} s`, ms: now() - t0 });
+          continue;
+        }
+        if (err.kind === "overloaded" && overloaded < MAX_OVERLOAD_RETRIES) {
+          overloaded++;
+          // Two overloaded answers in a row: this model is struggling. The rest of the run uses
+          // the fallback, which can be tried at once (it's a different model's capacity).
+          if (fallback && model !== fallback && overloadStreak >= SWITCH_AFTER_OVERLOADS) {
+            const from = model.name;
+            model = fallback;
+            overloadStreak = 0;
+            emit({ kind: "switch", label: model.name, detail: `switched to ${model.name}: ${from} overloaded twice in a row`, ms: now() - t0 });
+            logger.warn("Coach switched to the fallback model", { phase, from, to: model.name });
+            continue;
+          }
+          const base = OVERLOAD_BACKOFF_MS[overloaded - 1]!;
+          const wait = Math.round(base * (0.8 + 0.4 * random()));
+          if (now() + wait > deadline) throw new StopRun("time_limit", `Overloaded, and the wait (${Math.round(wait / 1000)} s) would pass the run's limit.`, { phase });
+          emit({ kind: "retry", label: model.name, detail: `model overloaded: waiting ${Math.round(wait / 1000)} s`, ms: now() - t0 });
+          await sleep(wait, outer).catch(() => undefined);
           continue;
         }
         if ((err.kind === "timeout" || err.kind === "server" || err.kind === "network") && transient < MAX_TRANSIENT_RETRIES) {
@@ -218,7 +292,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
           await sleep(1_000, outer).catch(() => undefined);
           continue;
         }
-        throw new StopRun("model_error", err.message, { modelErrorKind: err.kind });
+        throw new StopRun("model_error", err.message, { modelErrorKind: err.kind, phase });
       }
     }
   }
@@ -255,7 +329,17 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     for (;;) {
       if (budget.max - budget.used <= reserve) return;
       if (usage.totalTokens + 2 * estimateTokens(true) > limits.maxTokens) return;
-      const res = await callModel("investigate", budget);
+      let res: ModelResponse;
+      try {
+        res = await callModel("investigate", budget);
+      } catch (err) {
+        // Out of requests for investigating: answer with what has been found so far.
+        if (err instanceof InvestigationCut) {
+          emit({ kind: "model", label: model.name, detail: "stopped investigating: the rest of the requests are kept for the answer", ms: 0 });
+          return;
+        }
+        throw err;
+      }
       input.push(...res.steps);
       if (functionCallsOf(res.steps).length === 0) return;
       await runToolCalls(res);
@@ -264,18 +348,21 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
 
   // Phase 2: `prompt`, then one answer call for the JSON report. If it can't be read and the
   // budget allows, one more call asking for just the JSON.
-  async function answerWithReport(budget: { used: number; max: number }, prompt: string): Promise<DraftReport | null> {
+  async function answerWithReport(budget: { used: number; max: number }, prompt: string, phase: "answer" | "repair"): Promise<DraftReport | null> {
     input.push(userInput(prompt));
-    let res = await callModel("answer", budget);
+    let res = await callModel(phase, budget);
     input.push(...res.steps);
     let parsed = parseReport(textOf(res.steps));
     if (!parsed.ok && budget.max - budget.used >= 1) {
       input.push(userInput(FORMAT_RETRY_PROMPT(parsed.error)));
-      res = await callModel("answer", budget);
+      res = await callModel(phase, budget);
       input.push(...res.steps);
       parsed = parseReport(textOf(res.steps));
     }
-    if (parsed.ok) return parsed.report;
+    if (parsed.ok) {
+      answerModel = model.name;
+      return parsed.report;
+    }
     emit({ kind: "model", label: model.name, detail: `no usable report: ${parsed.error}`, ms: 0 });
     return null;
   }
@@ -284,8 +371,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     const mainBudget = { used: 0, max: limits.maxCalls };
     // Two calls kept back: the answer, and one format retry if it's needed.
     await investigate(mainBudget, 2);
-    const draft = await answerWithReport(mainBudget, FINAL_PROMPT);
-    if (!draft) throw new StopRun("no_answer", "The model didn't produce a usable report.");
+    const draft = await answerWithReport(mainBudget, FINAL_PROMPT, "answer");
+    if (!draft) throw new StopRun("no_answer", "The model didn't produce a usable report.", { phase: "answer" });
 
     // Verify; one repair round if anything failed.
     let t0 = now();
@@ -302,13 +389,15 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     let finalDraft = draft;
     if (first.issues.length > 0 && limits.maxRepairCalls > 0) {
       emit({ kind: "repair", label: "repair round", detail: first.issues.map((i) => `#${i.pattern + 1}: ${i.problem}`).join("; ").slice(0, 300), ms: 0 });
-      const repaired = await answerWithReport({ used: 0, max: limits.maxRepairCalls }, repairPrompt(first.issues)).catch((err) => {
+      const firstAnswerModel = answerModel;
+      const repaired = await answerWithReport({ used: 0, max: limits.maxRepairCalls }, repairPrompt(first.issues), "repair").catch((err) => {
         // A repair that runs out of tokens keeps the first draft: the final verification
         // below still removes whatever fails.
         if (err instanceof StopRun && (err.code === "call_limit" || err.code === "token_limit")) return null;
         throw err;
       });
       if (repaired) finalDraft = repaired;
+      else answerModel = firstAnswerModel;
     }
 
     t0 = now();
@@ -333,6 +422,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
       usage,
       durationMs: now() - started,
       trace,
+      ...(answerModel ? { answerModel } : {}),
     };
   } catch (err) {
     const stop =

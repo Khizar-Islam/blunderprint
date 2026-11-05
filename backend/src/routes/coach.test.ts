@@ -59,6 +59,8 @@ const ENV = {
   COACH_MODEL: "gemini" as const,
   COACH_MAX_MODEL_CALLS: 10,
   COACH_MAX_REPAIR_CALLS: 2,
+  COACH_MAX_REQUESTS: 16,
+  GEMINI_FALLBACK_MODEL: "none",
   COACH_MAX_TOKENS: 120_000,
   COACH_CALL_TIMEOUT_MS: 10_000,
   COACH_RUN_TIMEOUT_MS: 20_000,
@@ -91,8 +93,9 @@ async function setup({
   model,
   worker = true,
   handler,
-}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; handler?: ReportHandlerOptions } = {}): Promise<Setup> {
-  const coach = createCoachRuntime({ ...ENV, ...env }, { model: model ?? createScriptedModel({ delayMs: 20 }) });
+  fallback,
+}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; handler?: ReportHandlerOptions; fallback?: Model } = {}): Promise<Setup> {
+  const coach = createCoachRuntime({ ...ENV, ...env }, { model: model ?? createScriptedModel({ delayMs: 20 }), ...(fallback ? { fallback } : {}) });
   const queue = createQueue();
   const server = await startTestServer(
     createApp({ corsOrigins: [], trustProxyHops: 0, getDbStatus: () => true, queue, version: "test", coach, sseHeartbeatMs: 1_000 }),
@@ -294,9 +297,9 @@ describe("the guards and errors", () => {
     assert.match(body.report.noPatternsMessage, /No weakness clearly stood out/);
   });
 
-  it("budget under one worst-case run (12 calls): 429 with Retry-After, nothing started", async () => {
+  it("budget under one worst-case run (COACH_MAX_REQUESTS, 16): 429 with Retry-After, nothing started", async () => {
     const s = await setup({ worker: false });
-    await Usage.create({ _id: today(), count: 400 - 11, expiresAt: new Date(Date.now() + 86_400_000) });
+    await Usage.create({ _id: today(), count: 400 - 15, expiresAt: new Date(Date.now() + 86_400_000) });
     const res = await post(reportUrl(s));
     assert.equal(res.status, 429);
     const retryAfter = Number(res.headers.get("retry-after"));
@@ -315,11 +318,11 @@ describe("the guards and errors", () => {
       name: scripted.name,
       async call(req) {
         // After the 2nd request, someone else uses up the rest of today's budget.
-        if (++calls === 2) await Usage.updateOne({ _id: today() }, { $set: { count: 12 } });
+        if (++calls === 2) await Usage.updateOne({ _id: today() }, { $set: { count: 16 } });
         return scripted.call(req);
       },
     };
-    const s = await setup({ env: { AI_DAILY_CALL_BUDGET: 12 }, model });
+    const s = await setup({ env: { AI_DAILY_CALL_BUDGET: 16 }, model });
     const { runId } = await (await post(reportUrl(s))).json() as any;
     const events = await streamAll(s, runId);
     const last = events.at(-1)!;
@@ -471,6 +474,35 @@ describe("the guards and errors", () => {
     assert.deepEqual([job!.status, job!.attempts, job!.error!.code], ["failed", 1, "internal"]);
     assert.equal(counter.calls, 4);
     assert.equal(await Report.countDocuments(), 0);
+  });
+
+  it("overloaded twice → fallback: every request counts in the budget, the report records who answered", async () => {
+    const { ModelError } = await import("../agent/model.js");
+    let mainCalls = 0;
+    const main: Model = {
+      name: "main-model",
+      async call() {
+        mainCalls++;
+        throw new ModelError("overloaded", "Gemini 503 UNAVAILABLE: high demand", { status: 503 });
+      },
+    };
+    const scripted = createScriptedModel({ delayMs: 0 });
+    let fallbackCalls = 0;
+    const fallback: Model = { name: "fallback-model", call: (req) => (fallbackCalls++, scripted.call(req)) };
+    const s = await setup({ model: main, fallback });
+    const { runId } = await (await post(reportUrl(s))).json() as any;
+    const events = await streamAll(s, runId, 20_000);
+    const last = events.at(-1)!;
+    assert.equal(last.event, "done");
+    const run = last.data as { usage: { calls: number }; steps: { kind: string; detail: string }[]; report: { model: string; answeredBy: string } };
+    assert.equal(mainCalls, 2);
+    assert.equal(run.usage.calls, mainCalls + fallbackCalls);
+    assert.equal((await Usage.findById(today()).lean())!.count, mainCalls + fallbackCalls, "the budget counted every request");
+    assert.ok(run.steps.some((st) => st.kind === "switch" && st.detail.startsWith("switched to fallback-model")));
+    // Cached under the model that was asked for; the answer's author recorded beside it.
+    assert.equal(run.report.model, "main-model");
+    assert.equal(run.report.answeredBy, "fallback-model");
+    assert.equal((await Report.findOne().lean())!.model, "main-model");
   });
 
   it("a job the reaper gives up on fails its run with coach_interrupted", async () => {

@@ -6,7 +6,8 @@ import { clearDb, startTestDb } from "../../scripts/testDb.js";
 import { Game } from "../db/models/game.js";
 import { Player } from "../db/models/player.js";
 import type { AgentContext } from "./context.js";
-import { runAgent, summarizeArgs, type AgentLimits } from "./loop.js";
+import { friendlyFromAgent } from "./friendly.js";
+import { ANSWER_RESERVE_REQUESTS, runAgent, summarizeArgs, type AgentLimits } from "./loop.js";
 import { ModelError, type ModelRequest } from "./model.js";
 import { createPacer } from "./pacer.js";
 import { buildSystemPrompt, SYSTEM_PROMPT } from "./prompts.js";
@@ -44,7 +45,7 @@ async function seed() {
   for (const g of games) ids[g.sourceId] = String(g._id);
 }
 
-const LIMITS: AgentLimits = { maxCalls: 10, maxRepairCalls: 2, maxTokens: 120_000, runTimeoutMs: 180_000 };
+const LIMITS: AgentLimits = { maxCalls: 10, maxRepairCalls: 2, maxTokens: 120_000, runTimeoutMs: 180_000, maxRequests: 16 };
 
 // A fake clock shared by the loop and the pacer: sleeping moves time forward instantly.
 function clock() {
@@ -59,12 +60,30 @@ function clock() {
 
 async function run(
   turns: Turn[],
-  { limits = LIMITS, signal, c = clock(), context = ctx }: { limits?: Partial<AgentLimits>; signal?: AbortSignal; c?: ReturnType<typeof clock>; context?: AgentContext } = {},
+  {
+    limits = LIMITS,
+    signal,
+    c = clock(),
+    context = ctx,
+    fallback,
+  }: { limits?: Partial<AgentLimits>; signal?: AbortSignal; c?: ReturnType<typeof clock>; context?: AgentContext; fallback?: Turn[] } = {},
 ) {
   const { model, requests } = scriptedModel(turns);
+  const second = fallback ? scriptedModel(fallback, "fallback-model") : undefined;
   const pacer = createPacer({ rpm: 15, tpm: 250_000, now: c.now, sleep: c.sleep });
-  const result = await runAgent({ ctx: context, model, pacer, limits: { ...LIMITS, ...limits }, signal, now: c.now, sleep: c.sleep });
-  return { result, requests, clock: c };
+  const result = await runAgent({
+    ctx: context,
+    model,
+    ...(second ? { fallback: second.model } : {}),
+    pacer,
+    limits: { ...LIMITS, ...limits },
+    signal,
+    now: c.now,
+    sleep: c.sleep,
+    // No jitter: waits are exactly 2 s, 6 s, 15 s.
+    random: () => 0.5,
+  });
+  return { result, requests, fallbackRequests: second?.requests ?? [], clock: c };
 }
 
 const ENDGAME_BLUNDERS = { phase: "endgame", kind: "blunder" };
@@ -637,8 +656,83 @@ describe("model errors", () => {
 
   it("a bad request isn't retried", async () => {
     const { result } = await run([new ModelError("bad_request", "Gemini 400 INVALID_ARGUMENT: bad schema")]);
-    assert.deepEqual(result.error, { code: "model_error", message: "Gemini 400 INVALID_ARGUMENT: bad schema", modelErrorKind: "bad_request" });
+    assert.deepEqual(result.error, { code: "model_error", message: "Gemini 400 INVALID_ARGUMENT: bad schema", modelErrorKind: "bad_request", phase: "investigate" });
     assert.equal(result.usage.calls, 1);
+  });
+});
+
+describe("model overload (503)", () => {
+  const overloaded = () => new ModelError("overloaded", "Gemini 503 UNAVAILABLE: This model is currently experiencing high demand.", { status: 503 });
+  const goodRun = (): Turn[] => [...INVESTIGATE, DONE, (req) => answer({ patterns: [endgamePattern(req)] })];
+
+  it("503 twice, then success on the same model (no fallback): waits ~2 s and ~6 s", async () => {
+    const c = clock();
+    const { result } = await run([overloaded(), overloaded(), ...goodRun()], { c });
+    assert.equal(result.status, "done", JSON.stringify(result.error));
+    assert.equal(result.usage.calls, 6, "both 503s were real requests");
+    assert.deepEqual(
+      result.trace.filter((s) => s.kind === "retry").map((s) => s.detail),
+      ["model overloaded: waiting 2 s", "model overloaded: waiting 6 s"],
+    );
+    assert.ok(c.slept() >= 8_000);
+    assert.equal(result.answerModel, "fake-model");
+  });
+
+  it("503 twice in a row → the rest of the run uses the fallback, and the trace says so", async () => {
+    const { result, requests, fallbackRequests } = await run([overloaded(), overloaded()], { fallback: goodRun() });
+    assert.equal(result.status, "done", JSON.stringify(result.error));
+    assert.equal(requests.length, 2);
+    assert.equal(fallbackRequests.length, 4, "the fallback did the whole run from there");
+    const sw = result.trace.find((s) => s.kind === "switch")!;
+    assert.equal(sw.label, "fallback-model");
+    assert.equal(sw.detail, "switched to fallback-model: fake-model overloaded twice in a row");
+    // One wait (after the first 503); the switch itself goes at once.
+    assert.deepEqual(result.trace.filter((s) => s.kind === "retry").map((s) => s.detail), ["model overloaded: waiting 2 s"]);
+    assert.equal(result.answerModel, "fallback-model");
+    assert.ok(result.trace.filter((s) => s.kind === "model").every((s) => s.label === "fallback-model"));
+    assert.equal(result.usage.calls, 6);
+  });
+
+  it("503 everywhere on the answer: 3 retries (switching once), then ai_unavailable, under the request ceiling", async () => {
+    const { result, requests, fallbackRequests } = await run([...INVESTIGATE, DONE, overloaded(), overloaded()], {
+      fallback: [overloaded(), overloaded(), overloaded()],
+    });
+    assert.equal(result.status, "failed");
+    assert.equal(result.error!.code, "model_error");
+    assert.equal(result.error!.modelErrorKind, "overloaded");
+    assert.equal(result.error!.phase, "answer");
+    assert.equal(friendlyFromAgent(result.error).code, "ai_unavailable");
+    // 3 investigation calls + the answer call + 3 retries.
+    assert.equal(requests.length, 5);
+    assert.equal(fallbackRequests.length, 2);
+    assert.equal(result.usage.calls, 7);
+    assert.ok(result.usage.calls <= LIMITS.maxRequests);
+  });
+
+  it("a stormy investigation stops early so the answer keeps its requests; the ceiling is never passed", async () => {
+    // Ceiling 7: the first call, then two 503s on the next investigation call. Only 4 requests
+    // are left, which is the answer's reserve, so the investigation ends there. The answer then
+    // needs all 4 (three 503s and a success), past the 2 logical calls kept for it.
+    const limits = { maxRequests: 7 };
+    assert.equal(ANSWER_RESERVE_REQUESTS, 4);
+    const { result } = await run([FIRST_TURN, overloaded(), overloaded(), overloaded(), overloaded(), overloaded(), answer({ patterns: [] })], { limits });
+    assert.equal(result.status, "done", JSON.stringify(result.error));
+    assert.equal(result.usage.calls, 7);
+    assert.ok(result.trace.some((s) => s.detail === "stopped investigating: the rest of the requests are kept for the answer"));
+
+    // One request fewer: the investigation is cut a request earlier, the answer still gets its 4
+    // (all overloaded here), and the run ends at 6 requests, never past the ceiling.
+    const tight = await run([FIRST_TURN, overloaded(), overloaded(), overloaded(), overloaded(), overloaded(), answer({ patterns: [] })], { limits: { maxRequests: 6 } });
+    assert.equal(tight.result.status, "failed");
+    assert.equal(tight.result.usage.calls, 6);
+    assert.equal(tight.result.error!.modelErrorKind, "overloaded");
+    assert.equal(tight.result.error!.phase, "answer");
+  });
+
+  it("timeouts and network errors still get just one more try", async () => {
+    const { result } = await run([new ModelError("timeout", "timed out"), new ModelError("timeout", "timed out")]);
+    assert.equal(result.error!.modelErrorKind, "timeout");
+    assert.equal(result.usage.calls, 2);
   });
 });
 

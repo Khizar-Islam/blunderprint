@@ -40,6 +40,16 @@ export function retryAfterMs(body: ApiErrorBody | undefined, header: string | nu
 const describe = (status: number, body: ApiErrorBody | undefined) =>
   `Gemini ${status}${body?.error?.status ? ` ${body.error.status}` : ""}: ${(body?.error?.message ?? "no message").slice(0, 200)}`;
 
+// The model is overloaded rather than broken: a 503 (seen live: "This model is currently
+// experiencing high demand"), or another 5xx whose status/message says so. These are worth a few
+// spaced-out retries and then another model; other 5xx get the usual single retry.
+export function isOverloaded(status: number, body: ApiErrorBody | undefined): boolean {
+  if (status === 503) return true;
+  if (status < 500) return false;
+  const text = `${body?.error?.status ?? ""} ${body?.error?.message ?? ""}`;
+  return /UNAVAILABLE|overload|high demand/i.test(text);
+}
+
 export function createGeminiModel({ apiKey, model, timeoutMs, fetch = globalThis.fetch }: GeminiOptions): Model {
   return {
     name: model,
@@ -86,6 +96,7 @@ export function createGeminiModel({ apiKey, model, timeoutMs, fetch = globalThis
           throw new ModelError("rate_limited", message, { status: 429, retryAfterMs: retryAfterMs(errBody, res.headers.get("retry-after")) });
         }
         if (res.status === 401 || res.status === 403) throw new ModelError("auth", message, { status: res.status });
+        if (isOverloaded(res.status, errBody)) throw new ModelError("overloaded", message, { status: res.status });
         if (res.status >= 500) throw new ModelError("server", message, { status: res.status });
         throw new ModelError("bad_request", message, { status: res.status });
       }

@@ -77,6 +77,7 @@ export function friendlyFromAgent(error: AgentError | undefined, vars: FriendlyV
       switch (error.modelErrorKind) {
         case "rate_limited":
           return friendly("ai_busy");
+        case "overloaded":
         case "timeout":
         case "server":
         case "network":

@@ -13,6 +13,8 @@ import { createScriptedModel } from "./scriptedModel.js";
 // it whether a report may start.
 export interface CoachRuntime {
   model: Model;
+  // The rest of a run uses this after the main model is overloaded twice in a row.
+  fallback?: Model;
   modelName: string;
   // AI_ENABLED and a usable model (the real one needs GEMINI_API_KEY).
   available: boolean;
@@ -22,7 +24,8 @@ export interface CoachRuntime {
   rules: WeaknessRules;
   // POST /report: below this many analysed games → 409 not_enough_games.
   minAnalysed: number;
-  // The most requests one run can make: the budget must have this many left to start one.
+  // The most requests one run can make (COACH_MAX_REQUESTS): the budget must have this many
+  // left to start one.
   worstCaseCalls: number;
 }
 
@@ -32,11 +35,13 @@ type CoachEnv = Pick<
   | "AI_DAILY_CALL_BUDGET"
   | "GEMINI_API_KEY"
   | "GEMINI_MODEL"
+  | "GEMINI_FALLBACK_MODEL"
   | "GEMINI_RPM"
   | "GEMINI_TPM"
   | "COACH_MODEL"
   | "COACH_MAX_MODEL_CALLS"
   | "COACH_MAX_REPAIR_CALLS"
+  | "COACH_MAX_REQUESTS"
   | "COACH_MAX_TOKENS"
   | "COACH_CALL_TIMEOUT_MS"
   | "COACH_RUN_TIMEOUT_MS"
@@ -47,7 +52,10 @@ type CoachEnv = Pick<
 >;
 
 // The model can be passed in (tests); otherwise it comes from COACH_MODEL.
-export function createCoachRuntime(env: CoachEnv, { model: given, budget: givenBudget, pacer: givenPacer }: { model?: Model; budget?: AiBudget; pacer?: Pacer } = {}): CoachRuntime {
+export function createCoachRuntime(
+  env: CoachEnv,
+  { model: given, fallback: givenFallback, budget: givenBudget, pacer: givenPacer }: { model?: Model; fallback?: Model; budget?: AiBudget; pacer?: Pacer } = {},
+): CoachRuntime {
   const scripted = env.COACH_MODEL === "scripted";
   const hasModel = !!given || scripted || !!env.GEMINI_API_KEY;
   const base: Model =
@@ -59,8 +67,16 @@ export function createCoachRuntime(env: CoachEnv, { model: given, budget: givenB
   // The scripted model counts against its own scope, so local runs never use the real budget.
   const budget =
     givenBudget ?? createAiBudget({ enabled: available, dailyCalls: env.AI_DAILY_CALL_BUDGET, scope: scripted && !given ? "dev:scripted" : "global:ai" });
+  // The fallback (real Gemini only): the same pacer and budget, so every request still counts.
+  const fallbackId = env.GEMINI_FALLBACK_MODEL;
+  const fallback: Model | undefined =
+    givenFallback ??
+    (!given && !scripted && env.GEMINI_API_KEY && fallbackId && fallbackId !== "none" && fallbackId !== env.GEMINI_MODEL
+      ? createGeminiModel({ apiKey: env.GEMINI_API_KEY, model: fallbackId, timeoutMs: env.COACH_CALL_TIMEOUT_MS })
+      : undefined);
   return {
     model: guardedModel(base, budget),
+    ...(fallback ? { fallback: guardedModel(fallback, budget) } : {}),
     modelName: base.name,
     available,
     budget,
@@ -70,6 +86,7 @@ export function createCoachRuntime(env: CoachEnv, { model: given, budget: givenB
       maxRepairCalls: env.COACH_MAX_REPAIR_CALLS,
       maxTokens: env.COACH_MAX_TOKENS,
       runTimeoutMs: env.COACH_RUN_TIMEOUT_MS,
+      maxRequests: env.COACH_MAX_REQUESTS,
     },
     rules: {
       ...DEFAULT_RULES,
@@ -78,6 +95,6 @@ export function createCoachRuntime(env: CoachEnv, { model: given, budget: givenB
       minMoves: env.COACH_MIN_CANDIDATE_MOVES,
     },
     minAnalysed: env.COACH_MIN_ANALYSED_GAMES,
-    worstCaseCalls: env.COACH_MAX_MODEL_CALLS + env.COACH_MAX_REPAIR_CALLS,
+    worstCaseCalls: env.COACH_MAX_REQUESTS,
   };
 }

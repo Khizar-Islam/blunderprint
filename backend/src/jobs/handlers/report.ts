@@ -113,6 +113,7 @@ export function createReportHandler(
       const result = await runAgent({
         ctx: { playerId: player._id, platform: player.platform, rules: coach.rules },
         model: coach.model,
+        ...(coach.fallback ? { fallback: coach.fallback } : {}),
         pacer: coach.pacer,
         limits: coach.limits,
         signal,
@@ -143,6 +144,7 @@ export function createReportHandler(
           analysedGames: basis.analysed,
           promptVersion: PROMPT_VERSION,
           model: coach.modelName,
+          answeredBy: result.answerModel ?? coach.modelName,
           runId,
           report: result.report,
           usage: result.usage,
@@ -177,6 +179,7 @@ export function createReportHandler(
         logger.info("Coach report saved", {
           ...log,
           reportId: String(saved._id),
+          answeredBy: result.answerModel,
           patterns: result.report.patterns.length,
           dropped: result.report.dropped.length,
           trimmed: result.report.trimmed.length,
@@ -192,6 +195,7 @@ export function createReportHandler(
       logger.warn("Coach run failed", {
         ...log,
         code: result.error?.code,
+        phase: result.error?.phase,
         modelErrorKind: result.error?.modelErrorKind,
         unexpected: result.error?.unexpected,
         error: result.error?.message,

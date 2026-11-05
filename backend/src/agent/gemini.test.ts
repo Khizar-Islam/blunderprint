@@ -101,12 +101,18 @@ describe("gemini client", () => {
     assert.equal(retryAfterMs({ error: { details: [{ "@type": "x", retryDelay: "soon" }] } }, null), undefined);
   });
 
-  it("401/403 auth, 400 bad request, 5xx server", async () => {
+  it("401/403 auth, 400 bad request, 5xx server or overloaded", async () => {
     assert.equal((await failure(() => jsonResponse(errorBody(403, "PERMISSION_DENIED", "API key not valid"), { status: 403 }))).kind, "auth");
     const bad = await failure(() => jsonResponse(errorBody(400, "INVALID_ARGUMENT", "Unknown field 'schema'"), { status: 400 }));
     assert.equal(bad.kind, "bad_request");
     assert.equal(bad.message, "Gemini 400 INVALID_ARGUMENT: Unknown field 'schema'");
-    assert.equal((await failure(() => new Response("upstream sad", { status: 503 }))).kind, "server");
+    // 503 is always "overloaded" (seen live: "high demand"); another 5xx only when it says so.
+    assert.equal((await failure(() => new Response("upstream sad", { status: 503 }))).kind, "overloaded");
+    const busy = await failure(() => jsonResponse(errorBody(503, "UNAVAILABLE", "This model is currently experiencing high demand."), { status: 503 }));
+    assert.equal(busy.kind, "overloaded");
+    assert.equal(busy.details.status, 503);
+    assert.equal((await failure(() => new Response("oops", { status: 500 }))).kind, "server");
+    assert.equal((await failure(() => jsonResponse(errorBody(500, "UNAVAILABLE", "The service is overloaded"), { status: 500 }))).kind, "overloaded");
   });
 
   it("a network failure and a 200 without a status", async () => {

@@ -25,6 +25,7 @@ const limits = {
   maxRepairCalls: env.COACH_MAX_REPAIR_CALLS,
   maxTokens: env.COACH_MAX_TOKENS,
   runTimeoutMs: env.COACH_RUN_TIMEOUT_MS,
+  maxRequests: env.COACH_MAX_REQUESTS,
 };
 // What counts as a weakness (get_weakness_candidates), from env.
 const rules = { minGap: env.COACH_MIN_BASELINE_GAP, minGames: env.COACH_MIN_CANDIDATE_GAMES, minMoves: env.COACH_MIN_CANDIDATE_MOVES };

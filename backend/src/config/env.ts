@@ -47,6 +47,11 @@ const envSchema = z.object({
   // Optional until Stage 5 (the coach agent), so the API can boot without them.
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
+  // Used for the rest of a coach run after GEMINI_MODEL is overloaded twice in a row (503).
+  // gemini-3.1-flash-lite: Stable, function calling + structured outputs supported (model page,
+  // aistudio.google.com/docs, checked 5 Nov 2026); shuts down 7 May 2027 (deprecations page).
+  // "none" turns the fallback off.
+  GEMINI_FALLBACK_MODEL: z.string().default("gemini-3.1-flash-lite"),
   AI_ENABLED: z.stringbool().default(true),
   AI_DAILY_CALL_BUDGET: z.coerce.number().int().nonnegative().default(400),
   // The model's free-tier limits, from the AI Studio rate-limit page (project "blunderprint",
@@ -61,6 +66,9 @@ const envSchema = z.object({
   // answer; the repair round may add COACH_MAX_REPAIR_CALLS more.
   COACH_MAX_MODEL_CALLS: z.coerce.number().int().min(2).max(20).default(10),
   COACH_MAX_REPAIR_CALLS: z.coerce.number().int().min(0).max(4).default(2),
+  // A hard ceiling on one run's requests, retries included. Also what a run must have left in
+  // the daily budget to start (POST /report).
+  COACH_MAX_REQUESTS: z.coerce.number().int().min(4).max(40).default(16),
   COACH_MAX_TOKENS: z.coerce.number().int().positive().default(120_000),
   COACH_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   COACH_RUN_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
@@ -108,6 +116,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     // Only names and rule messages: never echo values, which may be secrets.
     const problems = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     throw new Error(`Invalid environment:\n  ${problems.join("\n  ")}`);
+  }
+  // The ceiling must at least allow every logical call once.
+  if (parsed.data.COACH_MAX_REQUESTS < parsed.data.COACH_MAX_MODEL_CALLS + parsed.data.COACH_MAX_REPAIR_CALLS) {
+    throw new Error("Invalid environment:\n  COACH_MAX_REQUESTS: must be at least COACH_MAX_MODEL_CALLS + COACH_MAX_REPAIR_CALLS");
   }
   // The scripted model fakes the coach: it must never answer real visitors.
   if (parsed.data.COACH_MODEL === "scripted" && (parsed.data.NODE_ENV === "production" || cleaned.RENDER === "true")) {

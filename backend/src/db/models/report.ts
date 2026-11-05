@@ -14,6 +14,9 @@ const reportSchema = new Schema(
     analysedGamesHash: { type: String, required: true },
     promptVersion: { type: Number, required: true },
     model: { type: String, required: true },
+    // The model that wrote the answer, when the run switched to the fallback (not in the key:
+    // the cache is about what was asked for).
+    answeredBy: String,
     runId: { type: Schema.Types.ObjectId, required: true },
     // "none": the run worked, but no pattern survived the verifier.
     outcome: { type: String, enum: ["patterns", "none"], required: true },

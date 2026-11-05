@@ -58,9 +58,11 @@ export interface Model {
 
 // Why a call failed, in the terms the loop decides on:
 //   rate_limited → wait (retryAfterMs when Google said how long) and try again
+//   overloaded → the model is overloaded (503 "high demand"): up to 3 tries with a growing wait,
+//                then the fallback model
 //   timeout / server / network → one more try
 //   bad_request / auth → stop: trying again won't help
-export type ModelErrorKind = "rate_limited" | "timeout" | "server" | "network" | "bad_request" | "auth";
+export type ModelErrorKind = "rate_limited" | "overloaded" | "timeout" | "server" | "network" | "bad_request" | "auth";
 
 export class ModelError extends Error {
   constructor(

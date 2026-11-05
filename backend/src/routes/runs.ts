@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { friendly } from "../agent/friendly.js";
-import { toPublicReport } from "../agent/reportStore.js";
+import { publicReportOf } from "../agent/reportStore.js";
 import { runEvents, toPublicRun, type RunEvent } from "../agent/runs.js";
 import { AgentRun } from "../db/models/agentRun.js";
 import { Report } from "../db/models/report.js";
@@ -48,7 +48,7 @@ export function runsRouter({ heartbeatMs }: { heartbeatMs?: number } = {}): Rout
       // A finished run's snapshot carries its report, if it's still the kept one.
       if (run?.status === "done" && run.reportId) {
         const doc = await Report.findById(run.reportId);
-        report = doc ? toPublicReport(doc) : null;
+        report = doc ? await publicReportOf(doc) : null;
       }
     } catch (err) {
       unsubscribe();

@@ -55,3 +55,30 @@ body {
     transform: scale(0.95);
   }
 }
+
+/* The one solid button (the coach's "Coach me" / "See your coach report"): ink on bone, a
+   lighter ink on hover, a slight shrink on press. Disabled: faded, no hover. */
+@utility btn-solid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: 0.25rem;
+  background-color: var(--color-ink);
+  color: var(--color-bone);
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  transition:
+    background-color 150ms,
+    transform 100ms;
+  &:hover {
+    background-color: var(--color-graphite);
+  }
+  &:active {
+    transform: scale(0.97);
+  }
+  &:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+}

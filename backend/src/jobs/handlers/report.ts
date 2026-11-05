@@ -4,7 +4,7 @@ import type { CoachRuntime } from "../../agent/coach.js";
 import { friendly, friendlyFromAgent } from "../../agent/friendly.js";
 import { runAgent } from "../../agent/loop.js";
 import { PROMPT_VERSION } from "../../agent/prompts.js";
-import { saveReport, toPublicReport } from "../../agent/reportStore.js";
+import { publicReportOf, saveReport, toPublicReport } from "../../agent/reportStore.js";
 import { createStepWriter, runStore } from "../../agent/runs.js";
 import { AgentRun } from "../../db/models/agentRun.js";
 import type { JobDoc } from "../../db/models/job.js";
@@ -104,7 +104,7 @@ export function createReportHandler(
         model: coach.modelName,
       });
       if (cached) {
-        await runStore.done(runId, { reportId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 } }, toPublicReport(cached));
+        await runStore.done(runId, { reportId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 } }, await publicReportOf(cached));
         logger.info("Coach run served from cache", log);
         return;
       }

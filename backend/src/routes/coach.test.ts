@@ -57,6 +57,7 @@ const ENV = {
   GEMINI_RPM: 600_000,
   GEMINI_TPM: 1_000_000_000,
   COACH_MODEL: "gemini" as const,
+  COACH_SCRIPTED_SCENARIO: "ok" as const,
   COACH_MAX_MODEL_CALLS: 10,
   COACH_MAX_REPAIR_CALLS: 2,
   COACH_MAX_REQUESTS: 16,
@@ -158,6 +159,8 @@ describe("the coach chain", () => {
     assert.deepEqual(before, {
       report: null,
       stale: false,
+      staleReason: null,
+      newGames: 0,
       eligibility: { analysed: 10, needed: 10, ok: true },
       activeRun: null,
       ai: { enabled: true, budgetLeft: 400, canStart: true },
@@ -186,6 +189,7 @@ describe("the coach chain", () => {
       report: { id: string; patterns: { title: string; stat: { value: number; baseline: number }; evidence: Record<string, unknown>[] }[] };
     };
     assert.equal(run.status, "done");
+    assert.equal((run.report as unknown as { runId: string }).runId, runId);
     assert.equal(run.usage.calls, counter.calls);
     assert.ok(run.report.patterns.length >= 1);
     const p = run.report.patterns[0]!;
@@ -196,6 +200,10 @@ describe("the coach chain", () => {
     assert.equal(e.played, "Nf3");
     assert.equal(e.playedUci, "g1f3");
     assert.equal(e.color, "white");
+    // The game's move ribbon for the fingerprint lens: one letter per ply, the blunder at its ply.
+    const ribbon = e.ribbon as string;
+    assert.equal(ribbon.length, 60);
+    assert.equal(ribbon[(e.ply as number) - 1], { blunder: "x", mistake: "m", inaccuracy: "i" }[e.kind as string]);
     assert.ok(e.facts && typeof e.moveNumber === "number" && typeof e.gameId === "string");
     // Internal lists stay internal.
     assert.ok(!("dropped" in run.report) && !("trimmed" in run.report) && !("notEnoughData" in run.report));
@@ -250,6 +258,8 @@ describe("the coach chain", () => {
     await Game.insertMany([coachGame({ playerId: aliceId, sourceId: "g11", day: 11, mistakes: [{ ply: 45, kind: "blunder", winDrop: 40 }] })]);
     const stale = await (await fetch(reportUrl(s))).json() as any;
     assert.equal(stale.stale, true);
+    assert.equal(stale.staleReason, "new_games");
+    assert.equal(stale.newGames, 1);
     assert.equal(stale.eligibility.analysed, 11);
 
     const res = await post(reportUrl(s));
@@ -503,6 +513,55 @@ describe("the guards and errors", () => {
     assert.equal(run.report.model, "main-model");
     assert.equal(run.report.answeredBy, "fallback-model");
     assert.equal((await Report.findOne().lean())!.model, "main-model");
+  });
+
+  it("a report saved before the lens existed gets its ribbons filled on read, saved back, no AI call", async () => {
+    const { model, counter } = counting(createScriptedModel({ delayMs: 0 }));
+    const s = await setup({ model });
+    const { runId } = await (await post(reportUrl(s))).json() as any;
+    await streamAll(s, runId);
+    const callsAfterRun = counter.calls;
+
+    // Make it look like a pre-chunk-D report: no `ribbon` on any evidence.
+    const stored = (await Report.findOne({ playerId: aliceId }).lean())!;
+    const stripped = (stored.patterns as { evidence: Record<string, unknown>[] }[]).map((p) => ({
+      ...p,
+      evidence: p.evidence.map(({ ribbon: _ribbon, ...rest }) => rest),
+    }));
+    await Report.updateOne({ _id: stored._id }, { $set: { patterns: stripped } }, { timestamps: false });
+    const before = (await Report.findById(stored._id).lean())!;
+    assert.ok((before.patterns as { evidence: { ribbon?: string }[] }[]).every((p) => p.evidence.every((e) => e.ribbon === undefined)));
+
+    const get = await (await fetch(reportUrl(s))).json() as any;
+    const evidence = get.report.patterns.flatMap((p: { evidence: { ribbon: string; ply: number }[] }) => p.evidence);
+    assert.ok(evidence.length > 0);
+    for (const e of evidence) {
+      assert.equal(typeof e.ribbon, "string");
+      assert.equal(e.ribbon.length, 60);
+    }
+    // Saved back, without moving the report's date.
+    const after = (await Report.findById(stored._id).lean())!;
+    assert.ok((after.patterns as { evidence: { ribbon?: string }[] }[]).every((p) => p.evidence.every((e) => typeof e.ribbon === "string")));
+    assert.equal(after.updatedAt!.toISOString(), before.updatedAt!.toISOString());
+    assert.equal(counter.calls, callsAfterRun, "no AI call");
+    assert.equal(get.stale, false, "still the same report, not stale");
+
+    // The next read finds them stored and writes nothing.
+    const writes = mock.method(Report, "updateOne");
+    try {
+      await fetch(reportUrl(s));
+      assert.equal(writes.mock.callCount(), 0);
+    } finally {
+      writes.mock.restore();
+    }
+  });
+
+  it("a report from an older prompt version is stale with staleReason new_version", async () => {
+    const s = await setup({ worker: false });
+    const { hash } = await analysedBasis(aliceId);
+    await Report.create({ playerId: aliceId, analysedGamesHash: hash, promptVersion: PROMPT_VERSION - 1, model: s.coach.modelName, runId: new Types.ObjectId(), outcome: "none", analysedGames: 10 });
+    const get = await (await fetch(reportUrl(s))).json() as any;
+    assert.deepEqual([get.stale, get.staleReason, get.newGames], [true, "new_version", 0]);
   });
 
   it("a job the reaper gives up on fails its run with coach_interrupted", async () => {

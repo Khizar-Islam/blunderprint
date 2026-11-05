@@ -4,7 +4,7 @@ import { analysedBasis } from "../agent/basis.js";
 import type { CoachRuntime } from "../agent/coach.js";
 import { friendly, type FriendlyCode, type FriendlyVars } from "../agent/friendly.js";
 import { PROMPT_VERSION } from "../agent/prompts.js";
-import { toPublicReport } from "../agent/reportStore.js";
+import { publicReportOf } from "../agent/reportStore.js";
 import { AgentRun } from "../db/models/agentRun.js";
 import { ACTIVE_JOB_STATUSES, Job } from "../db/models/job.js";
 import { Player, type Platform } from "../db/models/player.js";
@@ -75,12 +75,18 @@ export function coachRouter({ queue, coach }: CoachRouterOptions): Router {
       activeRun(player._id),
       coach.available ? coach.budget.remaining() : Promise.resolve(0),
     ]);
-    const stale =
-      !!latest && (latest.analysedGamesHash !== basis.hash || latest.promptVersion !== PROMPT_VERSION || latest.model !== coach.modelName);
+    // Why it's stale, so the page can say it truthfully: a newer prompt or model ("an updated
+    // coach is available"), or the analysed games changed ("7 new games since").
+    const newVersion = !!latest && (latest.promptVersion !== PROMPT_VERSION || latest.model !== coach.modelName);
+    const newData = !!latest && latest.analysedGamesHash !== basis.hash;
+    const stale = newVersion || newData;
 
     res.json({
-      report: latest ? toPublicReport(latest) : null,
+      report: latest ? await publicReportOf(latest) : null,
       stale,
+      staleReason: newVersion ? "new_version" : newData ? "new_games" : null,
+      // Analysed games added since the report (0 when games only changed, e.g. old ones trimmed).
+      newGames: latest && newData ? Math.max(0, basis.analysed - latest.analysedGames) : 0,
       eligibility: { analysed: basis.analysed, needed: coach.minAnalysed, ok: basis.analysed >= coach.minAnalysed },
       activeRun: active,
       ai: { enabled: coach.available, budgetLeft, canStart: coach.available && budgetLeft >= coach.worstCaseCalls },
@@ -101,7 +107,7 @@ export function coachRouter({ queue, coach }: CoachRouterOptions): Router {
     const basis = await analysedBasis(player._id);
     const cached = await Report.findOne(cacheKey(player._id, basis.hash));
     if (cached) {
-      res.status(200).json({ report: toPublicReport(cached), cached: true });
+      res.status(200).json({ report: await publicReportOf(cached), cached: true });
       return;
     }
 

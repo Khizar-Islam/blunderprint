@@ -1,5 +1,5 @@
 import { sleep } from "../lib/sleep.js";
-import type { Model, ModelRequest, ModelResponse, Step } from "./model.js";
+import { ModelError, type Model, type ModelRequest, type ModelResponse, type Step } from "./model.js";
 import { isWithin, type Candidate } from "./tools/candidates.js";
 
 // COACH_MODEL=scripted: a stand-in for Gemini for LOCAL DEVELOPMENT ONLY (env.ts refuses it in
@@ -112,13 +112,39 @@ function answer(request: ModelRequest): ModelResponse {
   return respond(request, [text(JSON.stringify(report))], "completed");
 }
 
-// delayMs: a pause per call, so the live trace ticks in like a real run's.
-export function createScriptedModel({ delayMs = 600 }: { delayMs?: number } = {}): Model {
+export type ScriptedScenario = "ok" | "overload-switch" | "fail-overloaded" | "slow";
+export const SCRIPTED_FALLBACK_NAME = "scripted-fallback";
+
+const overloaded = () => new ModelError("overloaded", "Scripted 503 UNAVAILABLE: This model is currently experiencing high demand.", { status: 503 });
+
+// delayMs: a pause per call, so the live trace ticks in like a real run's. failFirst: that many
+// requests answer 503 first; Infinity = every request.
+export function createScriptedModel({ delayMs = 600, name = SCRIPTED_MODEL_NAME, failFirst = 0 }: { delayMs?: number; name?: string; failFirst?: number } = {}): Model {
+  let requests = 0;
   return {
-    name: SCRIPTED_MODEL_NAME,
+    name,
     async call(request) {
       if (delayMs > 0) await sleep(delayMs, request.signal);
+      if (requests++ < failFirst) throw overloaded();
       return request.tools?.length ? investigate(request) : answer(request);
     },
   };
+}
+
+// The main model and the fallback for a COACH_SCRIPTED_SCENARIO (agent/coach.ts). A new pair per
+// process: "overload-switch" fails the first two requests of the PROCESS, then the run switches.
+export function scriptedPair(scenario: ScriptedScenario): { model: Model; fallback?: Model } {
+  switch (scenario) {
+    case "overload-switch":
+      return { model: createScriptedModel({ failFirst: 2, delayMs: 400 }), fallback: createScriptedModel({ name: SCRIPTED_FALLBACK_NAME, delayMs: 1_500 }) };
+    case "fail-overloaded":
+      return {
+        model: createScriptedModel({ failFirst: Infinity, delayMs: 300 }),
+        fallback: createScriptedModel({ name: SCRIPTED_FALLBACK_NAME, failFirst: Infinity, delayMs: 300 }),
+      };
+    case "slow":
+      return { model: createScriptedModel({ delayMs: 2_500 }) };
+    default:
+      return { model: createScriptedModel() };
+  }
 }

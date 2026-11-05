@@ -83,6 +83,12 @@ const envSchema = z.object({
   // "gemini" (the real model) or "scripted" (agent/scriptedModel.ts: no AI calls, for local
   // development only; refused below when running in production).
   COACH_MODEL: z.enum(["gemini", "scripted"]).default("gemini"),
+  // What the scripted model plays (local development only, like COACH_MODEL=scripted):
+  //   ok              a normal run
+  //   overload-switch two 503s, then the run switches to a scripted fallback (slower calls)
+  //   fail-overloaded every request is a 503: the run fails with ai_unavailable
+  //   slow            a normal run with ~2.5 s per call, to watch the trace
+  COACH_SCRIPTED_SCENARIO: z.enum(["ok", "overload-switch", "fail-overloaded", "slow"]).default("ok"),
   // Goes in the User-Agent of every Chess.com / Lichess request, so they can reach us
   // instead of blocking us. Required: the importers must not run without it.
   CONTACT_EMAIL: z.email(),
@@ -122,8 +128,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error("Invalid environment:\n  COACH_MAX_REQUESTS: must be at least COACH_MAX_MODEL_CALLS + COACH_MAX_REPAIR_CALLS");
   }
   // The scripted model fakes the coach: it must never answer real visitors.
-  if (parsed.data.COACH_MODEL === "scripted" && (parsed.data.NODE_ENV === "production" || cleaned.RENDER === "true")) {
+  const production = parsed.data.NODE_ENV === "production" || cleaned.RENDER === "true";
+  if (parsed.data.COACH_MODEL === "scripted" && production) {
     throw new Error('Invalid environment:\n  COACH_MODEL: "scripted" is for local development only');
+  }
+  if (parsed.data.COACH_SCRIPTED_SCENARIO !== "ok" && production) {
+    throw new Error("Invalid environment:\n  COACH_SCRIPTED_SCENARIO: is for local development only");
   }
   // Our own daily budget must leave headroom under Google's: past RPD every call is a 429.
   if (parsed.data.AI_DAILY_CALL_BUDGET > parsed.data.GEMINI_RPD) {

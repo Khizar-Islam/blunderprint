@@ -86,7 +86,8 @@ export interface Summary {
   ribbons: { gameId: string; playedAt: string; color: Color; result: string; speed: Speed; classes: string }[];
 }
 
-const CLASS_LETTER: Record<Classification, string> = { best: "b", good: "g", inaccuracy: "i", mistake: "m", blunder: "x" };
+// Also used for the evidence games' ribbons in coach reports (agent/reportStore.ts).
+export const CLASS_LETTER: Record<Classification, string> = { best: "b", good: "g", inaccuracy: "i", mistake: "m", blunder: "x" };
 const OPENINGS_SHOWN = 25;
 
 // "Has features of the current version, and they're not a replay error": the games every

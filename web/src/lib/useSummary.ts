@@ -17,12 +17,12 @@ import { refetchDelay } from "./refetch";
 // State only changes once a request settles (after the await), never at the start: setting state
 // synchronously in an effect would render twice for nothing.
 
-const subscribeVisibility = (onChange: () => void) => {
+export const subscribeVisibility = (onChange: () => void) => {
   document.addEventListener("visibilitychange", onChange);
   return () => document.removeEventListener("visibilitychange", onChange);
 };
-const isHidden = () => document.hidden;
-const neverHidden = () => false;
+export const isHidden = () => document.hidden;
+export const neverHidden = () => false;
 
 interface Answer {
   response: SummaryResponse;

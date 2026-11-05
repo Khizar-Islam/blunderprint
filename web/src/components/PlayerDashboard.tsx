@@ -17,6 +17,8 @@ import { relativeTime } from "@/lib/format";
 import { useJobStream, type JobEventType } from "@/lib/useJobStream";
 import { useWakingRequest } from "@/lib/useWakingRequest";
 import { useAnalysis } from "@/engine/useAnalysis";
+import { useCoachInfo } from "@/lib/useCoachInfo";
+import { CoachButton } from "./coach/CoachButton";
 import { AnalysisBar } from "./AnalysisBar";
 import { GamesList } from "./GamesList";
 import { ImportProgress } from "./ImportProgress";
@@ -155,6 +157,8 @@ function Dashboard({ platform, username }: Props) {
   // every new page of games kicks the scheduler, so an idle one claims the new games.
   const analysis = useAnalysis(platform, username, player != null);
   const { kick } = analysis;
+  // The coach button (GET /report) follows the same pulse as the patterns.
+  const coachInfo = useCoachInfo(platform, username, player != null, analysis.doneThisSession + importsDone);
   useEffect(() => {
     if (games.length > 0) kick();
   }, [games, kick]);
@@ -238,6 +242,8 @@ function Dashboard({ platform, username }: Props) {
       {player && games.length > 0 && (
         <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
       )}
+
+      {player && games.length > 0 && <CoachButton info={coachInfo} platform={platform} username={username} />}
 
       {/* Patterns refetch when the engine stores a game or an import finishes (the pulse), at most
           every 10 s. Suspense: the section reads the URL's filters (useSearchParams). */}

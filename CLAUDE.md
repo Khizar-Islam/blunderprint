@@ -140,13 +140,17 @@ blunderprint/
 │  │                          /dev/engine: engine timing lab used for the Stage 2 measurements, dev only (404 in production))
 │  ├─ src/lib/               (api.ts, useJobStream.ts, useWakingRequest.ts, format.ts,
 │  │                          ribbon.ts, timeline.ts replay + SAN, winPercent.ts graph + accuracy,
-│  │                          filters.ts URL ⇄ filters, useSummary.ts + refetch.ts, plyParam.ts)
+│  │                          filters.ts URL ⇄ filters, useSummary.ts + refetch.ts, plyParam.ts,
+│  │                          coach.ts button state + stat/facts text, runStream.ts + useRunStream.ts,
+│  │                          useCoachInfo.ts)
 │  ├─ src/components/        (PlayerSearch, PlayerDashboard, ImportProgress, GamesList, HealthStatus,
 │  │                          MotionProvider, AnalysisBar;
 │  │                          review/: GameReview, Board, EvalGraph, MoveList, BetterMove, classes;
 │  │                          patterns/: PatternsDashboard, Filters, Blunderprint (canvas) + geometry.ts,
 │  │                          HeatBoard + heat.ts, OpeningsTable, charts/ (StackedBars, AnimatedNumber,
-│  │                          scale.ts, sample.ts); later AgentTrace, PatternCard)
+│  │                          scale.ts, sample.ts);
+│  │                          coach/: CoachButton, CoachPage, AgentTrace, PatternCard, StatLine,
+│  │                          EvidenceBoard, FingerprintLens + lens.ts)
 │  ├─ src/engine/            (stockfish.ts worker wrapper, uci.ts parsing, analyseGame.ts,
 │  │                          replay.ts, scheduler.ts claim/analyse/post + Web Lock,
 │  │                          useAnalysis.ts React hook, throughput.ts s/game)
@@ -278,6 +282,7 @@ agentRuns: { playerId, kind: "report", jobId, status: "queued"|"running"|"done"|
 ```
 - `analysedGamesHash` (`agent/basis.ts`): SHA-1 of `FEATURES_VERSION` + the sorted ids of the player's analysed games with current features. Taken when a run **starts**, so games analysed during a run make the report stale instead of mislabelled.
 - `reports` indexes: unique `{ playerId, analysedGamesHash, promptVersion, model }` (the cache key; the model is part of it) and `{ playerId, model, createdAt: -1 }` (latest report). Only the **newest report per player and model** is kept: older ones are deleted after the new one is saved. Per model, so a local scripted run never deletes a real report.
+- Each evidence item also stores its game's move `ribbon` (the coach page's fingerprint lens). Reports saved before that (Stage 5 chunk D) get their ribbons filled on first read: one query, saved back without touching `updatedAt`, no AI call (`withRibbons`).
 - `agentRuns`: TTL index on `createdAt`, 14 days.
 
 ### usage (limits and AI budget)
@@ -427,7 +432,7 @@ POST /api/analysis/claim                           → { claimId, expiresAt, gam
 POST /api/analysis/results                         → evals for one claimed game (validated, idempotent)
 POST /api/analysis/release                         → hand unfinished claimed games back (sendBeacon, text/plain)
 GET  /api/positions/stats?fen=&band=               → positionStats lookup
-GET  /api/players/:platform/:username/report       → { report, stale, eligibility: { analysed, needed, ok }, activeRun, ai: { enabled, budgetLeft, canStart } }
+GET  /api/players/:platform/:username/report       → { report, stale, staleReason ("new_games"|"new_version"|null), newGames, eligibility: { analysed, needed, ok }, activeRun, ai: { enabled, budgetLeft, canStart } }
 POST /api/players/:platform/:username/report       → 202 { runId } / 200 { report, cached: true } / 404 / 409 / 503 / 429 (see below)
 POST /api/players/:platform/:username/ask          → { runId } (Stage 6)
 GET  /api/jobs/:id/stream                          → SSE: job progress
@@ -470,7 +475,12 @@ Rules:
   - The eval graph draws itself; clicking or dragging across it jumps to that move. The move list scrolls to the current move. Keys: ←/→, Home/End.
   - On an inaccuracy/mistake/blunder: "Nxe5?? was a blunder. Better was Nf3" plus a **Show** control. Show switches the board to the position **before** the move, with a teal arrow for the better move and a muted rust arrow for the move played (not on the position after, where the piece may have moved or been taken). Show works by click (toggles until clicked again or the move changes), press-and-hold (only while held), or holding B.
   - If the game isn't analysed yet, the page analyses it first (see 8.2, `prefer` + one engine).
-- `/p/[platform]/[username]/coach`: the agent trace and the report.
+- `/p/[platform]/[username]/coach`: the agent trace and the report. **As built (Stage 5 chunk D):**
+  - **Dashboard button** (`CoachButton`, from GET /report on the patterns' pulse): locked with a live "12 / 20" counter and a 20-step rule; **Coach me** (the only place a first run starts: POST, then the page); "The coach is working → watch it live"; **See your coach report** (with "7 new games since" or "an updated coach is available"); honest notes when the AI is off or resting until midnight Pacific.
+  - **The page never starts a run by itself** (a reload or shared link can't spend calls); Refresh (stale report) and Try again (failed run) are clicks. GET /report renders at once ("based on N games · date", and "written by <fallback>" when the run switched), with the waking-server counter.
+  - **Live trace** (`AgentTrace`): a scoresheet (numbered mono lines, time column), lines type in, retries muted, the `switch` step in amber; reattaches after a reload (activeRun → SSE snapshot). When finished (or failed) it folds into "Investigated in 47 s · 9 requests · 3 patterns verified"; an older report's trace opens on demand ("How this report was made", one request; expired after 14 days).
+  - **Pattern card**: label, the **fingerprint lens** (the evidence games' Blunderprint ribbons, evidence moves ringed; hover links row ⇄ board), the big "16.2 vs your 11.9" with two comparison bars and the sample, the explanation, the drill as an "Exercise", and 2-4 **evidence boards**: fade in at the position before the mistake → the played piece slides along a muted rust arrow and holds ~0.6 s → slides back → a teal arrow draws the better move; the facts from code under each board and a link to `/game/[id]?ply=N`. Arrows are our own SVG overlay (react-chessboard's arrows can't animate).
+  - Reduced motion: the final state at once (position + both arrows, full lens, final numbers, whole trace lines).
 
 ### Design direction (no "AI slop")
 - **Avoid:** purple-to-blue gradients, glowing borders, glassmorphism, blurred orbs, icon-in-circle feature blocks. Also don't copy Chess.com's green or Lichess's brown boards.
@@ -535,6 +545,7 @@ AI_ENABLED=true
 AI_DAILY_CALL_BUDGET=400
 GEMINI_RPM=15 GEMINI_TPM=250000 GEMINI_RPD=500   # the free-tier limits from AI Studio (pacer + warning)
 COACH_MODEL=gemini      # "scripted" = the fake coach for local development (refused in production)
+COACH_SCRIPTED_SCENARIO=ok  # dev only: ok | overload-switch | fail-overloaded | slow (refused in production)
 COACH_MAX_MODEL_CALLS=10 COACH_MAX_REPAIR_CALLS=2 COACH_MAX_REQUESTS=16 COACH_MAX_TOKENS=120000
 COACH_CALL_TIMEOUT_MS=60000 COACH_RUN_TIMEOUT_MS=300000
 COACH_MIN_BASELINE_GAP=0.15 COACH_MIN_CANDIDATE_GAMES=5 COACH_MIN_CANDIDATE_MOVES=100

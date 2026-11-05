@@ -95,6 +95,9 @@ test("loadEnv: the coach defaults, and the scripted model only outside productio
   assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "scripted", NODE_ENV: "production" }), /COACH_MODEL: "scripted" is for local development only/);
   assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "scripted", RENDER: "true" }), /local development only/);
   assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "claude" }), /COACH_MODEL/);
+  assert.equal(loadEnv({ ...BASE, COACH_MODEL: "scripted", COACH_SCRIPTED_SCENARIO: "overload-switch" }).COACH_SCRIPTED_SCENARIO, "overload-switch");
+  assert.throws(() => loadEnv({ ...BASE, COACH_SCRIPTED_SCENARIO: "slow", RENDER: "true" }), /COACH_SCRIPTED_SCENARIO: is for local development only/);
+  assert.throws(() => loadEnv({ ...BASE, COACH_SCRIPTED_SCENARIO: "chaos" }), /COACH_SCRIPTED_SCENARIO/);
 });
 
 test("loadEnv: the fallback model and the per-run request ceiling", () => {

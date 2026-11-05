@@ -56,7 +56,12 @@ export function coachGame(o: CoachGameOptions) {
     plies,
     ...(clocks ? { clocks } : {}),
     opening: { eco: o.eco ?? "C50", name: o.openingName ?? "Italian Game" },
-    analysis: { status: "done", accuracy: 80 },
+    // Classifications agree with the mistakes (the coach report stores them as the lens ribbon).
+    analysis: {
+      status: "done",
+      accuracy: 80,
+      classifications: Array.from({ length: plies }, (_, i) => o.mistakes.find((m) => m.ply === i + 1)?.kind ?? "good"),
+    },
     features: {
       version: FEATURES_VERSION,
       division,

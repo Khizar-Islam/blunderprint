@@ -5,7 +5,7 @@ import { createGeminiModel } from "./gemini.js";
 import type { AgentLimits } from "./loop.js";
 import type { Model } from "./model.js";
 import { createPacer, type Pacer } from "./pacer.js";
-import { createScriptedModel } from "./scriptedModel.js";
+import { scriptedPair } from "./scriptedModel.js";
 
 // Everything the coach needs at runtime, built once per process from env: the model (with the
 // budget guard in front of it), the ONE shared pacer, the limits, the weakness rules and the
@@ -39,6 +39,7 @@ type CoachEnv = Pick<
   | "GEMINI_RPM"
   | "GEMINI_TPM"
   | "COACH_MODEL"
+  | "COACH_SCRIPTED_SCENARIO"
   | "COACH_MAX_MODEL_CALLS"
   | "COACH_MAX_REPAIR_CALLS"
   | "COACH_MAX_REQUESTS"
@@ -58,11 +59,11 @@ export function createCoachRuntime(
 ): CoachRuntime {
   const scripted = env.COACH_MODEL === "scripted";
   const hasModel = !!given || scripted || !!env.GEMINI_API_KEY;
+  const pair = !given && scripted ? scriptedPair(env.COACH_SCRIPTED_SCENARIO ?? "ok") : null;
   const base: Model =
     given ??
-    (scripted
-      ? createScriptedModel()
-      : createGeminiModel({ apiKey: env.GEMINI_API_KEY ?? "", model: env.GEMINI_MODEL, timeoutMs: env.COACH_CALL_TIMEOUT_MS }));
+    pair?.model ??
+    createGeminiModel({ apiKey: env.GEMINI_API_KEY ?? "", model: env.GEMINI_MODEL, timeoutMs: env.COACH_CALL_TIMEOUT_MS });
   const available = env.AI_ENABLED && hasModel;
   // The scripted model counts against its own scope, so local runs never use the real budget.
   const budget =
@@ -71,6 +72,7 @@ export function createCoachRuntime(
   const fallbackId = env.GEMINI_FALLBACK_MODEL;
   const fallback: Model | undefined =
     givenFallback ??
+    pair?.fallback ??
     (!given && !scripted && env.GEMINI_API_KEY && fallbackId && fallbackId !== "none" && fallbackId !== env.GEMINI_MODEL
       ? createGeminiModel({ apiKey: env.GEMINI_API_KEY, model: fallbackId, timeoutMs: env.COACH_CALL_TIMEOUT_MS })
       : undefined);

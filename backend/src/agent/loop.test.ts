@@ -637,7 +637,7 @@ describe("model errors", () => {
 
   it("a bad request isn't retried", async () => {
     const { result } = await run([new ModelError("bad_request", "Gemini 400 INVALID_ARGUMENT: bad schema")]);
-    assert.deepEqual(result.error, { code: "model_error", message: "Gemini 400 INVALID_ARGUMENT: bad schema" });
+    assert.deepEqual(result.error, { code: "model_error", message: "Gemini 400 INVALID_ARGUMENT: bad schema", modelErrorKind: "bad_request" });
     assert.equal(result.usage.calls, 1);
   });
 });

@@ -86,3 +86,13 @@ test("loadEnv parses booleans, numbers and extra CORS origins", () => {
   ]);
   assert.equal(env.isRender, true);
 });
+
+test("loadEnv: the coach defaults, and the scripted model only outside production", () => {
+  const env = loadEnv(BASE);
+  assert.equal(env.COACH_MODEL, "gemini");
+  assert.equal(env.COACH_MIN_ANALYSED_GAMES, 20);
+  assert.equal(loadEnv({ ...BASE, COACH_MODEL: "scripted" }).COACH_MODEL, "scripted");
+  assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "scripted", NODE_ENV: "production" }), /COACH_MODEL: "scripted" is for local development only/);
+  assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "scripted", RENDER: "true" }), /local development only/);
+  assert.throws(() => loadEnv({ ...BASE, COACH_MODEL: "claude" }), /COACH_MODEL/);
+});

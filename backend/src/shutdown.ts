@@ -5,8 +5,8 @@ import { closeAllSse } from "./lib/sse.js";
 
 export interface ShutdownDeps {
   server: Server;
-  // A getter: the worker only exists once the DB is connected, which may be after a signal.
-  getWorker: () => Worker | null;
+  // A getter: the workers only exist once the DB is connected, which may be after a signal.
+  getWorkers: () => Worker[];
   disconnect: () => Promise<void>;
   forceExitMs?: number;
   // How long in-flight requests get to finish before their connections are cut.
@@ -19,7 +19,7 @@ export interface ShutdownDeps {
 // (render.com/docs/deploys); Ctrl+C sends SIGINT locally. We give ourselves 10 s by default.
 export function createShutdown({
   server,
-  getWorker,
+  getWorkers,
   disconnect,
   forceExitMs = 10_000,
   drainMs = 2_000,
@@ -41,10 +41,11 @@ export function createShutdown({
     // 1. Stop accepting new connections. close() only calls back once every open connection
     //    has ended, so we wait for it last, after the SSE streams are closed by hand.
     const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
-    // 2. Stop the worker: it aborts the running job and releases it back to the queue (attempt
-    //    refunded), so the next process picks it up at once instead of waiting out the lease.
-    //    This happens before the streams close, so viewers still get the "retrying" event.
-    await getWorker()?.stop();
+    // 2. Stop the workers (both lanes, in parallel): each aborts its running job and releases it
+    //    back to the queue (attempt refunded), so the next process picks it up at once instead
+    //    of waiting out the lease. This happens before the streams close, so viewers still get
+    //    the "retrying" event (and a coach run's "queued" status).
+    await Promise.all(getWorkers().map((w) => w.stop()));
     // 3. End the SSE streams. EventSource reconnects after 3 s, which on Render reaches the
     //    new instance, and its first message is a fresh snapshot.
     const sseClosed = closeAllSse();

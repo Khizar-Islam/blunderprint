@@ -43,7 +43,7 @@ test("shutdown releases the running job before closing SSE, so viewers see 'retr
   let disconnected = false;
   const shutdown = createShutdown({
     server,
-    getWorker: () => worker,
+    getWorkers: () => [worker],
     // The test DB stays up for the assertions below; just record that we got this far.
     disconnect: async () => void (disconnected = true),
     exit: (code) => void exits.push(code),
@@ -77,7 +77,7 @@ test("a request that never finishes can't hold the shutdown: its connection is c
 
   const exits: number[] = [];
   const t0 = Date.now();
-  await createShutdown({ server, getWorker: () => null, disconnect: async () => {}, drainMs: 100, exit: (c) => void exits.push(c) })(
+  await createShutdown({ server, getWorkers: () => [], disconnect: async () => {}, drainMs: 100, exit: (c) => void exits.push(c) })(
     "SIGTERM",
   );
   const ms = Date.now() - t0;

@@ -64,7 +64,7 @@ There is a **separate companion document**, `blunderprint-chat-companion.md`, fo
   ├─ REST routes + SSE routes
   ├─ Job worker loop (same process): import → extract → aggregate → report
   ├─ Importers: Chess.com PubAPI, Lichess API (serial, polite, retrying)
-  ├─ Coach agent: Gemini function calling ↔ tools (read-only Mongo queries)
+  ├─ Coach agent: Gemini (Interactions API) ↔ tools (read-only Mongo queries), own worker lane
   └─ Guards: rate limits (per IP), AI budget, storage guard, error handler
             │
             ▼
@@ -94,7 +94,7 @@ There is a **separate companion document**, `blunderprint-chat-companion.md`, fo
 | Backend | Node.js 22 LTS, Express, TypeScript (`tsx` for dev), `zod` for validation | Node 22.13+ is also needed by the MongoDB MCP server. |
 | TypeScript | **Pinned to 6.0.3** (exact version) in both `backend/` and `web/` | Not TS 7 for now: TS 7 is the new native (Go) compiler, and tools that use the TypeScript JS API, like Next's build-time type check, may not support it yet. |
 | Database | MongoDB Atlas M0 (free, 512 MB), **Mongoose** | Mongoose because MERN job ads expect it. Use `Model.aggregate()` for pipelines and `bulkWrite` for imports. |
-| AI | Google Gemini via `@google/genai` | Model from env `GEMINI_MODEL`. **Dev and the free demo use `gemini-3.5-flash-lite`:** on the free tier it gets 500 requests/day (15 RPM, 250K TPM), while `gemini-3.8-flash` gets only 20/day. Switch to `gemini-3.8-flash` at Stage 8 with the paid credit. Both were listed as stable on 30 Oct 2026. **Before Stage 5, verify that `gemini-3.5-flash-lite` supports function calling and structured output.** |
+| AI | Google Gemini, **Interactions API** (`POST /v1beta/interactions`, `store: false`) called with plain `fetch` (`agent/gemini.ts`), not the `@google/genai` SDK: the SDK's automatic continuation can send several billed requests per call, its errors lose Google's retry delay, and it retries on its own | Model from env `GEMINI_MODEL`. **Dev and the free demo use `gemini-3.5-flash-lite`:** on the free tier it gets 500 requests/day (15 RPM, 250K TPM; checked in AI Studio 4 Nov 2026), while `gemini-3.8-flash` gets only 20/day. Switch to `gemini-3.8-flash` at Stage 8 with the paid credit. Function calling and structured output verified for `gemini-3.5-flash-lite` on 4 Nov 2026 (tools + structured output in one request is Preview only, so the loop uses two phases, §10). |
 | Tests | `node:test` (same style as Footnote), `mongodb-memory-server` for queue/DB tests | mongodb-memory-server works on my Windows machine (verified in Stage 1), with the MongoDB binary pinned to 8.0.34 in `backend/package.json` (`config.mongodbMemoryServer`). |
 | Hosting | Vercel (web), Render free web service (API) | The API sleeps after 15 minutes idle, so the UI must handle the wake-up (section 10). |
 | Dev tooling | Official MongoDB MCP server in **read-only** mode | Lets you inspect collections and explain plans safely. Setup is in the companion doc. |
@@ -120,15 +120,19 @@ blunderprint/
 │  │  ├─ chess/              (fen.ts normalize, classify.ts win%, phase.ts Lichess Divider port,
 │  │  │                       features.ts per-game features; openings.ts in Stage 4)
 │  │  ├─ stats/summary.ts    (the dashboard's one $facet pipeline + response shape, SUMMARY_VERSION)
-│  │  ├─ agent/              (tools/*.ts, loop.ts, verifier.ts, prompts.ts, schema.ts)
-│  │  ├─ routes/             (players, games, jobs (SSE stream), analysis, summary, positions, coach, health)
+│  │  ├─ agent/              (tools/*.ts incl. candidates.ts, loop.ts, verifier.ts, prompts.ts, schema.ts,
+│  │  │                       model.ts + gemini.ts + scriptedModel.ts (dev), pacer.ts, context.ts,
+│  │  │                       coach.ts runtime, budget.ts kill switch + daily budget, friendly.ts error codes,
+│  │  │                       basis.ts analysedGamesHash, reportStore.ts, runs.ts run store + event bus)
+│  │  ├─ routes/             (players, games, jobs (SSE stream), analysis, summary, positions,
+│  │  │                       coach (GET/POST report), runs (SSE stream), health)
 │  │  ├─ middleware/         (requestId.ts, errorHandler.ts, rateLimit.ts, budget.ts)
 │  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
 │  │                          validate.ts zod → 400, sleep.ts, version.ts, explain.ts explain summaries)
 │  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
 │  │                          importOnce, explainGames, explainSummary, extractFeatures (backfill),
-│  │                          fetchDivisionFixture; one-off fixes: backfillClassifications,
-│  │                          fixUndefinedOpenings)
+│  │                          fetchDivisionFixture; coach: coachTools, coachCli, coachFixture, fakeModel;
+│  │                          one-off fixes: backfillClassifications, fixUndefinedOpenings)
 │  └─ .env.example
 ├─ docs/explain/             (saved .explain() output for the README)
 ├─ web/
@@ -240,7 +244,8 @@ Keep only the **most recent N games per player** (env `MAX_GAMES_PER_PLAYER`, de
 
 ### jobs (the queue)
 ```
-{ _id, type: "import"|"extract"|"report", key (idempotency key, e.g. "import:chesscom:hikaru", "extract:<playerId>"),
+{ _id, type: "import"|"extract"|"report", key (idempotency key, e.g. "import:chesscom:hikaru", "extract:<playerId>",
+                                                "report:<model>:<playerId>"),
   payload, status: "queued"|"running"|"done"|"failed",
   attempts, maxAttempts, runAfter, leaseUntil, workerId,
   progress: { done, total, message },
@@ -261,14 +266,21 @@ Indexes: `{ status: 1, runAfter: 1 }`; unique partial index on `key` where statu
 
 ### reports and agentRuns
 ```
-reports: { playerId, analysedGamesHash, promptVersion, model, patterns: [...], createdAt }
-agentRuns: { playerId, kind: "report"|"ask", steps: [ { tool, args, resultSummary, ms } ],
-             tokensIn, tokensOut, status, error? }
+reports: { playerId, analysedGamesHash, promptVersion, model, runId, outcome: "patterns"|"none",
+           patterns: [ verified pattern + per evidence: fen, played/betterMove (SAN) + playedUci/betterUci,
+                       color, moveNumber, kind, winPctLost, facts { speed, phase, clockBucket,
+                       clockLeftSeconds, opening } ],
+           analysedGames, usage, durationMs, dropped, trimmed (logs/README only, never sent) }
+agentRuns: { playerId, kind: "report", jobId, status: "queued"|"running"|"done"|"failed", rev, attempt,
+             model, promptVersion, analysedGamesHash, steps: [ TraceStep ] (≤ 60), usage, reportId?,
+             error?: { code, message } (always the friendly pair), startedAt, finishedAt }
 ```
-`reports` index: `{ playerId, analysedGamesHash, promptVersion }`, used as the cache key. Index `agentRuns` on `createdAt` with a TTL (e.g. 14 days) to keep storage bounded.
+- `analysedGamesHash` (`agent/basis.ts`): SHA-1 of `FEATURES_VERSION` + the sorted ids of the player's analysed games with current features. Taken when a run **starts**, so games analysed during a run make the report stale instead of mislabelled.
+- `reports` indexes: unique `{ playerId, analysedGamesHash, promptVersion, model }` (the cache key; the model is part of it) and `{ playerId, model, createdAt: -1 }` (latest report). Only the **newest report per player and model** is kept: older ones are deleted after the new one is saved. Per model, so a local scripted run never deletes a real report.
+- `agentRuns`: TTL index on `createdAt`, 14 days.
 
 ### usage (limits and AI budget)
-`{ _id: "<scope>|<yyyy-mm-dd>", count }`. Scopes: `ip:<hash>` (hash the IP, don't store it raw) and `global:ai`. TTL index so old days disappear.
+`{ _id: "<scope>|<yyyy-mm-dd>", count, expiresAt }`. The date is a **Pacific-time** day (Google's daily quota resets at midnight Pacific). Scopes: `global:ai` (real model calls), `dev:scripted` (the local scripted model, so dev runs never use the real budget), and `ip:<hash>` in Stage 6 (hash the IP, don't store it raw). TTL index on `expiresAt` (3 days after the day ends).
 
 ### Storage budget (enforced, not hoped for)
 
@@ -351,36 +363,49 @@ The script must be **resumable and idempotent**. Track the processed shards in a
 
 | Tool | Purpose |
 |---|---|
-| `get_player_profile()` | Ratings, games analysed, speeds, colour split, overall accuracy |
+| `get_player_profile()` | Ratings, games analysed, results by colour and speed, accuracy, errors per 100 moves and per game (overall and per kind) |
+| `get_weakness_candidates()` | **Code finds the weaknesses:** every group (phase, clock bucket, move numbers, speed, colour, opening, phase × clock) at least `COACH_MIN_BASELINE_GAP` worse than the player's own figure, on ≥ `COACH_MIN_CANDIDATE_GAMES` games / ≥ `COACH_MIN_CANDIDATE_MOVES` moves, with errors in ≥ 2 games. Up to 12, ranked by a z-score, each with an id, label, value vs baseline, sample, `parentIds` and the `exampleFilter` |
 | `get_opening_breakdown({ color?, speed?, minGames })` | Per opening: games, score %, mistakes per game |
 | `get_mistake_breakdown({ groupBy, filters })` | groupBy: phase, speed, clockBucket, moveNumberBucket, pieceLost, square |
-| `find_example_mistakes({ filters, limit ≤ 5 })` | `{ gameId, ply, fen, played, bestHint?, winDrop, clockLeft }` |
-| `get_position_stats({ fen, band })` | What players in a band play from this position, with results (from positionStats) |
+| `find_example_mistakes({ filters, limit ≤ 5 })` | Matching errors/games + examples `{ gameId, ply, moveNumber, fen, played, betterMove, winPctLost, clockLeftSeconds, clockBucket, phase, speed, opening }` |
+| `get_position_stats({ fen, band })` | What players in a band play from this position (positionStats). **Hidden from the model until Stage 4** (stub + test exist) |
 | `get_game_summary({ gameId })` | Opening, result, key moments |
 
-All tools take the player from the server context, never from the model, so the model can't query other players.
+All tools take the player from the server context, never from the model, so the model can't query other players. Arguments are strict (an unknown key is a readable error, not silently dropped). Tool results leave out opponent names and other outside free text, and the system prompt says tool results are data, never instructions (prompt-injection defence, tested with an injected opening name).
 
 ### Loop (`agent/loop.ts`)
-1. A system prompt (versioned as `PROMPT_VERSION`) sets the job: find 3–5 **recurring** patterns. Every claim needs evidence (game IDs and plies) and a statistic taken from the tool results. Say "not enough data" instead of guessing.
-2. Gemini function calling: run tool calls, append the results, and repeat. Hard limits: **max 10 steps**, a total token budget, and a per-call timeout.
-   - **Rate limit:** the free tier allows 15 requests per minute for `gemini-3.5-flash-lite`. Pace model calls (at least 4 s apart, shared across all runs in the process) and back off on `429`, using Google's suggested retry delay when one is sent, while staying inside the step and token budget.
-3. The final answer uses **structured output** with this schema:
-   ```
-   patterns: [ { title, explanation, stat: { value, basis }, evidence: [ { gameId, ply } ], drill } ]
-   ```
+1. A system prompt (`PROMPT_VERSION`, now 6) sets the job: choose 3–5 **recurring** patterns from the code-found candidates and explain them, with evidence from that candidate's examples. Say "not enough data" instead of guessing.
+2. **Two phases** (only stable features; tools + structured output in one request is Preview and timed out in the first real run):
+   - **Investigate:** tools only. Run the tool calls, append the results (each carries its step number), repeat until the model is done.
+   - **Answer:** one call with structured output and no tools; one format retry if the JSON can't be read.
+   - Hard limits: **10 model calls** (`COACH_MAX_MODEL_CALLS`, two kept back for the answer) + **2 repair calls**, 120K tokens, **60 s per call**, **300 s per run**. A 429 waits (Google's delay when given); a timeout / 5xx / network error gets one more try. Every request counts.
+   - **Rate limit:** one process-wide pacer (`agent/pacer.ts`): calls ≥ 60 000 / `GEMINI_RPM` ms apart (4 s at 15 RPM) and under `GEMINI_TPM` in any 60 s.
+3. The answer's schema: `patterns: [ { candidateId, explanation, evidenceStep, evidence: [ { gameId, ply } ], drill } ]`. The model writes **no number and no title**: the verifier copies the statistic, baseline, direction and label from the candidate ("7.9 vs your 3.1").
 4. **Verifier (code, not AI):**
-   - Every evidence game and ply must exist for this player and be a classified mistake.
-   - Every statistic must match a number that actually appeared in a tool result.
-   - On failure, run **one repair round** that tells the model what failed. If it still fails, drop that pattern and note it.
-5. Stream every step to the UI over SSE: the tool name, a short args summary, a short result summary and the time taken. That's the live "agent trace".
-6. **Cache** reports by `(playerId, analysedGamesHash, PROMPT_VERSION)`. If nothing changed, return the cached report instantly with no AI calls.
+   - The candidate must have come back from `get_weakness_candidates` in this run.
+   - `evidenceStep` must be a `find_example_mistakes` step whose filters EQUAL the candidate's `exampleFilter`; every evidence item must be one of its examples, from ≥ 2 distinct games; no position in two patterns; no two patterns whose groups overlap.
+   - Prose: digits only from named fields (candidate figures, matching counts, each evidence item's move number / win% lost / clock, bucket bounds); no number words; SAN moves only the pattern's own played/better moves; explanation ≥ 2 sentences and 120 characters, drill ≥ 60.
+   - On failure, **one repair round** that tells the model what failed. Then whatever still fails is trimmed (bad evidence, if ≥ 2 games remain; unbacked sentences) or the pattern is dropped.
+5. Stream every step to the UI over SSE: the kind (model / tool / verify / repair / retry), a short label, a short detail and the time taken. That's the live "agent trace".
+6. **Cache** reports by `(playerId, analysedGamesHash, PROMPT_VERSION, model)`. If nothing changed, POST returns the cached report instantly with no AI calls.
+
+### The report job (`jobs/handlers/report.ts`)
+- Key `report:<model>:<playerId>`: asking twice returns the same run. `maxAttempts` 2.
+- Runs on its **own worker lane** (a second worker that only claims `report` jobs for this process's model), so a report spending a minute on the AI never holds up imports. One report at a time: the pacer is shared anyway.
+- A failed run (time limit, model error, no answer) is final, never retried: a retry would spend the calls again. Only errors outside the run (the DB) retry.
+- Shutdown mid-run: the run goes back to `queued`, the job is released (attempt refunded), and the next process starts the run **from scratch** (the conversation lived in memory; the calls already made are lost). A hard kill: the reaper requeues; out of attempts → `coach_interrupted`.
+
+### Friendly errors (`agent/friendly.ts`)
+Every failure a visitor can see is a fixed `{ code, message }`; the real error only goes to the logs. Codes: `player_not_found`, `not_enough_games`, `ai_disabled`, `ai_budget_exhausted`, `ai_busy` (429s), `ai_unavailable` (timeout / 5xx / network), `coach_timeout`, `coach_too_long` (token/call limit), `coach_no_answer`, `coach_interrupted`, `coach_config` (400/auth: our side), `run_not_found`, `internal`. A run with no surviving pattern shows a fixed "no weakness clearly stood out" message; the model's own `notEnoughData` text is only logged.
 
 ### "Ask the coach" (Stage 6)
 Follow-up questions use the same tools, capped at 6 steps, with the same evidence rules.
 
 ### Guards
-- Per-IP limits (hashed IP): e.g. 5 imports/hour, 3 reports/day, 20 questions/day.
-- Global daily AI call budget (`AI_DAILY_CALL_BUDGET`, default 400, under the 500/day free limit) and a kill switch (`AI_ENABLED=false`) that shows a friendly message.
+- Per-IP limits (hashed IP, Stage 6): e.g. 5 imports/hour, 3 reports/day, 20 questions/day.
+- Global daily AI call budget (`AI_DAILY_CALL_BUDGET`, default 400, under the 500/day free limit, Pacific-time days) and a kill switch (`AI_ENABLED=false`) that shows a friendly message (built in Stage 5, `agent/budget.ts`):
+  - Checked before a run starts (POST refuses below one worst-case run: `COACH_MAX_MODEL_CALLS + COACH_MAX_REPAIR_CALLS` = 12 calls) AND before every model request, retries included (`guardedModel`).
+  - One atomic `findOneAndUpdate` with upsert per request: `{ _id: day, count < budget } → $inc 1`. A duplicate-key error (11000) is retried **once**: at the start of a day two first inserts can race, and only a second miss really means the budget is used up.
 - Free-tier note: on the free tier Google may use prompts to improve its models. That's fine here, because all the data is public games.
 - When the budget runs out, show cached reports and an honest message. Never show a raw error.
 
@@ -399,11 +424,14 @@ POST /api/analysis/claim                           → { claimId, expiresAt, gam
 POST /api/analysis/results                         → evals for one claimed game (validated, idempotent)
 POST /api/analysis/release                         → hand unfinished claimed games back (sendBeacon, text/plain)
 GET  /api/positions/stats?fen=&band=               → positionStats lookup
-POST /api/players/:platform/:username/report       → { runId } or { cached report }
-POST /api/players/:platform/:username/ask          → { runId }
+GET  /api/players/:platform/:username/report       → { report, stale, eligibility: { analysed, needed, ok }, activeRun, ai: { enabled, budgetLeft, canStart } }
+POST /api/players/:platform/:username/report       → 202 { runId } / 200 { report, cached: true } / 404 / 409 / 503 / 429 (see below)
+POST /api/players/:platform/:username/ask          → { runId } (Stage 6)
 GET  /api/jobs/:id/stream                          → SSE: job progress
 GET  /api/runs/:id/stream                          → SSE: agent steps, then the final result
 ```
+- **POST report** checks, in order: no player → 404 `player_not_found`; a run already going → 202 the same `runId`; a report for exactly this data → 200 cached (no AI call, even with AI off); fewer than `COACH_MIN_ANALYSED_GAMES` (20) → 409 `not_enough_games`; AI off or no model → 503 `ai_disabled`; budget under one worst-case run → 429 `ai_budget_exhausted` + `Retry-After` (seconds to Pacific midnight); else 202 `{ runId }`. Error bodies are `{ error, code }`.
+- **Run SSE contract** (`GET /api/runs/:id/stream`): the same as the job stream (subscribe → snapshot → only newer revs, `retry: 3000`, 15 s heartbeat, ends after `done`/`failed`, a reconnect starts with a snapshot). Events: `snapshot`, `status`, `done`, `failed` carry the whole public run (`done` and a finished snapshot include the report); `step` carries only `{ step }`.
 
 Rules:
 - Validate every input with zod.
@@ -483,7 +511,7 @@ Render's free API sleeps after 15 minutes. The first request can take up to abou
 - **Engine results are untrusted input:** validate their shape and bounds. The worst a faked result can do is mislabel one player's own games.
 - **Graceful shutdown** (`src/shutdown.ts`; SIGTERM on a Render redeploy, Ctrl+C locally), in this order:
   1. Stop accepting new connections (`server.close()`).
-  2. Stop the worker: it aborts the running job, gives the handler **3 s** to wind down, then **releases** the job back to the queue with its attempt refunded, so the next process picks it up at once instead of waiting out the lease.
+  2. Stop the workers (both lanes, in parallel): each aborts its running job, gives the handler **3 s** to wind down, then **releases** the job back to the queue with its attempt refunded, so the next process picks it up at once instead of waiting out the lease. A coach run goes back to `queued` and restarts from scratch.
   3. Close the SSE streams (after step 2, so viewers still get the `retrying` event). EventSource reconnects to the new instance and gets a fresh snapshot.
   4. Give in-flight requests **2 s** to drain, then cut the remaining connections.
   5. Disconnect from MongoDB (last, because the release needs it).
@@ -501,6 +529,12 @@ GEMINI_API_KEY=
 GEMINI_MODEL=           # gemini-3.5-flash-lite (dev + free demo); gemini-3.8-flash from Stage 8
 AI_ENABLED=true
 AI_DAILY_CALL_BUDGET=400
+GEMINI_RPM=15 GEMINI_TPM=250000 GEMINI_RPD=500   # the free-tier limits from AI Studio (pacer + warning)
+COACH_MODEL=gemini      # "scripted" = the fake coach for local development (refused in production)
+COACH_MAX_MODEL_CALLS=10 COACH_MAX_REPAIR_CALLS=2 COACH_MAX_TOKENS=120000
+COACH_CALL_TIMEOUT_MS=60000 COACH_RUN_TIMEOUT_MS=300000
+COACH_MIN_BASELINE_GAP=0.15 COACH_MIN_CANDIDATE_GAMES=5 COACH_MIN_CANDIDATE_MOVES=100
+COACH_MIN_ANALYSED_GAMES=20
 CORS_ORIGINS=           # optional extra origins
 TRUST_PROXY_HOPS=       # 3 on Render, unset locally
 CONTACT_EMAIL=          # used in the User-Agent for Chess.com/Lichess
@@ -522,8 +556,8 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | **1. Import + queue** ✅ done 31 Oct 2026 | Job queue (leases, retries, idempotency), Chess.com + Lichess importers, SSE progress, games list with cursor pagination | Type a username, watch games stream in live | Re-import doesn't duplicate; killing the server mid-import resumes after restart; 429 handled |
 | **2. Engine + game review** ✅ done 3 Nov 2026 (5e4ec5d, a27157d, 6cba1ad) | Stockfish worker pool, claim/results API, classification, board + eval graph + move list | "Here are your blunders" on real games | Closed tab loses no work; measured seconds per game written in the README |
 | **3. Patterns dashboard** ✅ done 3 Nov 2026 (a6ab232, 4417b71, d458f56, 54cf13f) | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
-| **4. The big dataset** | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
-| **5. Coach agent** | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
+| **4. The big dataset** ⏸ deferred until after Stage 5 (4 Nov 2026: not enough free disk space for the parquet shards) | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
+| **5. Coach agent** 🔧 in progress (tools d2c510c; loop + verifier 3af51cb, a0e7f4f; API chunk C; coach page chunk D) | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
 | **6. Ask + guards** | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
 | **7. Landing + animation pass** | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
 | **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences: final check of the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), **verify the licence of react-chessboard's piece set**, and **decide the repo's own licence** | Portfolio-ready | Everything in section 16 has a fallback in place |
@@ -549,7 +583,8 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 
 ## 17. Known gotchas
 
-- **Gemini model names** get deprecated faster than published dates suggest. `gemini-3.5-flash` was retired on 8 Oct 2026. Keep the model in env and verify it before Stage 5. Don't confuse the retired `gemini-3.5-flash` with `gemini-3.5-flash-lite` (current; no shutdown date announced as of 30 Oct 2026). `gemini-3.1-flash-lite` shuts down on 7 May 2027.
+- **Gemini model names** get deprecated faster than published dates suggest. `gemini-3.5-flash` was retired on 8 Oct 2026. Keep the model in env and verify it before Stage 5. Don't confuse the retired `gemini-3.5-flash` with `gemini-3.5-flash-lite` (current; no shutdown date announced as of 30 Oct 2026). `gemini-3.1-flash-lite` shuts down on 7 May 2027. Google's Gemini docs moved to aistudio.google.com/docs (the old ai.google.dev/gemini-api/docs pages redirect), and the free-tier limits are no longer published there: read them in AI Studio.
+- **Local dev and the shared Atlas DB:** a local API with `COACH_MODEL=scripted` writes reports under model `scripted` and counts its budget under `dev:scripted`, and its coach lane only claims `scripted` report jobs, so it never touches the live coach's reports, budget or jobs.
 - Next 16: check node_modules/next/dist/docs/ for version-matched API docs before using Next APIs.
 - **Stockfish:** use the *lite single-threaded* build. The multi-threaded builds need `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers, which would also break other things on the page. Serve `.wasm` with the `application/wasm` MIME type, from `web/public/engine/`.
 - **react-chessboard arrows are SVG attributes,** so arrow colours must be hex (e.g. `#3E7C74`), not CSS variables: `var(--…)` doesn't work in an SVG attribute.

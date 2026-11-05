@@ -1,6 +1,7 @@
 import { sleep as realSleep, type Sleep } from "../lib/sleep.js";
+import { BudgetRefused } from "./budget.js";
 import type { AgentContext } from "./context.js";
-import { functionCallsOf, ModelError, textOf, userInput, type Model, type ModelResponse, type Step } from "./model.js";
+import { functionCallsOf, ModelError, textOf, userInput, type Model, type ModelErrorKind, type ModelResponse, type Step } from "./model.js";
 import type { Pacer } from "./pacer.js";
 import { buildSystemPrompt, FINAL_PROMPT, FORMAT_RETRY_PROMPT, repairPrompt, TASK_PROMPT } from "./prompts.js";
 import { parseReport, REPORT_JSON_SCHEMA, type DraftReport } from "./schema.js";
@@ -45,7 +46,27 @@ export interface TraceStep {
   tokens?: number;
 }
 
-export type StopCode = "time_limit" | "token_limit" | "call_limit" | "model_error" | "no_answer" | "aborted";
+export type StopCode =
+  | "time_limit"
+  | "token_limit"
+  | "call_limit"
+  | "model_error"
+  | "no_answer"
+  | "aborted"
+  // The AI guards (budget.ts) refused a request: the kill switch, or today's budget is used up.
+  | "ai_disabled"
+  | "ai_budget_exhausted";
+
+// How a run failed. `message` is for the logs only: it can carry an upstream or unexpected
+// error's text. Visitors only ever see agent/friendly.ts's message for the code.
+export interface AgentError {
+  code: StopCode;
+  message: string;
+  // For model_error: what kind of failure (busy, down, our request was rejected...).
+  modelErrorKind?: ModelErrorKind;
+  // An error that wasn't one of ours (a bug or a DB failure).
+  unexpected?: boolean;
+}
 
 export interface AgentReport {
   patterns: VerifiedPattern[];
@@ -57,7 +78,7 @@ export interface AgentReport {
 export interface AgentResult {
   status: "done" | "failed";
   report?: AgentReport;
-  error?: { code: StopCode; message: string };
+  error?: AgentError;
   usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
   durationMs: number;
   trace: TraceStep[];
@@ -78,6 +99,7 @@ class StopRun extends Error {
   constructor(
     readonly code: StopCode,
     message: string,
+    readonly extra: { modelErrorKind?: ModelErrorKind; unexpected?: boolean } = {},
   ) {
     super(message);
   }
@@ -177,6 +199,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
         return res;
       } catch (err) {
         if (outer.aborted) throw new StopRun("aborted", "The run was stopped.");
+        if (err instanceof BudgetRefused) throw new StopRun(err.code, err.message);
         if (!(err instanceof ModelError)) {
           if (now() > deadline) throw new StopRun("time_limit", `The run passed its ${Math.round(limits.runTimeoutMs / 1000)} s limit.`);
           throw err;
@@ -195,7 +218,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
           await sleep(1_000, outer).catch(() => undefined);
           continue;
         }
-        throw new StopRun("model_error", err.message);
+        throw new StopRun("model_error", err.message, { modelErrorKind: err.kind });
       }
     }
   }
@@ -312,7 +335,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
       trace,
     };
   } catch (err) {
-    const stop = err instanceof StopRun ? err : new StopRun("model_error", `Unexpected error: ${String((err as Error)?.message ?? err).slice(0, 200)}`);
-    return { status: "failed", error: { code: stop.code, message: stop.message }, usage, durationMs: now() - started, trace };
+    const stop =
+      err instanceof StopRun ? err : new StopRun("model_error", `Unexpected error: ${String((err as Error)?.message ?? err).slice(0, 200)}`, { unexpected: true });
+    return { status: "failed", error: { code: stop.code, message: stop.message, ...stop.extra }, usage, durationMs: now() - started, trace };
   }
 }

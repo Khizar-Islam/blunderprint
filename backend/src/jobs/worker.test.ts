@@ -181,3 +181,45 @@ test("a job type with no handler fails instead of looping", async () => {
   const failed = await waitForJob(job._id, (j) => j.status === "failed");
   assert.equal(failed.error?.code, "unknown_job_type");
 });
+
+test("two lanes: a long report never holds up an import, and each worker takes only its own jobs", async () => {
+  const queue = createQueue();
+  const reportRunning = deferred();
+  const releaseReport = deferred();
+  const ran: string[] = [];
+  const handlers = {
+    report: {
+      async run() {
+        ran.push("report");
+        reportRunning.resolve();
+        await releaseReport.promise;
+      },
+    },
+    import: {
+      async run() {
+        ran.push("import");
+      },
+    },
+  } satisfies Record<string, JobHandler>;
+  // The report is queued first: a single worker would take it and the import would wait.
+  const report = await queue.enqueue({ type: "report", key: "report:m:p1", payload: { model: "m" } });
+  const other = await queue.enqueue({ type: "report", key: "report:other:p1", payload: { model: "other" } });
+  const imp = await queue.enqueue(input);
+
+  const main = startWorker({ queue, handlers, pollMs: 10, claimFilter: { type: { $in: ["import", "extract"] } } });
+  worker = startWorker({ queue, handlers, pollMs: 10, claimFilter: { type: "report", "payload.model": "m" } });
+  try {
+    await reportRunning.promise;
+    await waitForJob(imp.job._id, (j) => j.status === "done");
+    assert.equal((await Job.findById(report.job._id).lean())!.status, "running");
+    releaseReport.resolve();
+    await waitForJob(report.job._id, (j) => j.status === "done");
+    // Another model's report is left for its own process.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal((await Job.findById(other.job._id).lean())!.status, "queued");
+    assert.deepEqual(ran.sort(), ["import", "report"]);
+  } finally {
+    releaseReport.resolve();
+    await main.stop();
+  }
+});

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { JobDoc, JobType } from "../db/models/job.js";
+import type { QueryFilter } from "mongoose";
+import type { JobDoc, JobFields, JobType } from "../db/models/job.js";
 import { logger } from "../lib/logger.js";
 import { sleep as realSleep, type Sleep } from "../lib/sleep.js";
 import { FatalError, RetryableError } from "./errors.js";
@@ -25,6 +26,9 @@ export interface WorkerOptions {
   queue: Queue;
   handlers: Handlers;
   workerId?: string;
+  // The worker's lane: which jobs it takes (all of them when absent). server.ts runs two
+  // workers: imports and extracts in one lane, coach reports in the other.
+  claimFilter?: QueryFilter<JobFields>;
   leaseMs?: number;
   pollMs?: number;
   reapEveryMs?: number;
@@ -48,11 +52,14 @@ class ShuttingDown extends Error {
 }
 
 // The job worker runs inside the API process (Render has no free background workers).
-// One job at a time: the importers are serial per site anyway, and the free instance is small.
+// One job at a time per worker: the importers are serial per site anyway, and the free instance
+// is small. A coach report spends most of its ~20-100 s waiting on the AI, so it gets its own
+// worker (lane) and never holds up imports.
 export function startWorker({
   queue,
   handlers,
   workerId = `worker-${randomUUID().slice(0, 8)}`,
+  claimFilter = {},
   leaseMs = 60_000,
   pollMs = 1_000,
   reapEveryMs = 15_000,
@@ -170,7 +177,7 @@ export function startWorker({
           lastReapAt = now();
           await reap();
         }
-        const job = await queue.claimNext(workerId, leaseMs);
+        const job = await queue.claimNext(workerId, leaseMs, claimFilter);
         if (job) {
           await runJob(job);
           continue; // there may be more work: look again right away

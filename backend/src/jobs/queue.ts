@@ -79,10 +79,11 @@ export function createQueue({
     throw new Error(`Could not enqueue job ${input.key}`);
   }
 
-  // Atomically take the oldest due job and lease it to this worker.
-  async function claimNext(workerId: string, leaseMs: number): Promise<JobDoc | null> {
+  // Atomically take the oldest due job and lease it to this worker. `only` narrows what this
+  // worker takes (its lane: e.g. { type: { $in: ["report"] } }).
+  async function claimNext(workerId: string, leaseMs: number, only: QueryFilter<JobFields> = {}): Promise<JobDoc | null> {
     return change(
-      { status: "queued", runAfter: { $lte: now() } },
+      { ...only, status: "queued", runAfter: { $lte: now() } },
       { $set: { status: "running", workerId, leaseUntil: later(leaseMs) }, $inc: { attempts: 1 } },
       "progress",
       { runAfter: 1 },

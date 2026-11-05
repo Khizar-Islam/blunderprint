@@ -70,6 +70,11 @@ const envSchema = z.object({
   COACH_MIN_BASELINE_GAP: z.coerce.number().min(0).max(1).default(0.15),
   COACH_MIN_CANDIDATE_GAMES: z.coerce.number().int().min(2).default(5),
   COACH_MIN_CANDIDATE_MOVES: z.coerce.number().int().min(1).default(100),
+  // A report needs this many analysed games (with features) before it can start (POST 409 below it).
+  COACH_MIN_ANALYSED_GAMES: z.coerce.number().int().min(1).default(20),
+  // "gemini" (the real model) or "scripted" (agent/scriptedModel.ts: no AI calls, for local
+  // development only; refused below when running in production).
+  COACH_MODEL: z.enum(["gemini", "scripted"]).default("gemini"),
   // Goes in the User-Agent of every Chess.com / Lichess request, so they can reach us
   // instead of blocking us. Required: the importers must not run without it.
   CONTACT_EMAIL: z.email(),
@@ -103,6 +108,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     // Only names and rule messages: never echo values, which may be secrets.
     const problems = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
     throw new Error(`Invalid environment:\n  ${problems.join("\n  ")}`);
+  }
+  // The scripted model fakes the coach: it must never answer real visitors.
+  if (parsed.data.COACH_MODEL === "scripted" && (parsed.data.NODE_ENV === "production" || cleaned.RENDER === "true")) {
+    throw new Error('Invalid environment:\n  COACH_MODEL: "scripted" is for local development only');
   }
   // Our own daily budget must leave headroom under Google's: past RPD every call is a 429.
   if (parsed.data.AI_DAILY_CALL_BUDGET > parsed.data.GEMINI_RPD) {

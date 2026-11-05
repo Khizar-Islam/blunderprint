@@ -2,10 +2,12 @@ import type { ErrorRequestHandler, RequestHandler } from "express";
 import { logger } from "../lib/logger.js";
 
 // Throw this (or any error with a numeric statusCode) to send a 4xx with a safe message.
+// `code` (optional) is a machine-readable reason the page can switch on, e.g. "not_enough_games".
 export class HttpError extends Error {
   constructor(
     public statusCode: number,
     message: string,
+    public code?: string,
   ) {
     super(message);
     this.name = "HttpError";
@@ -45,7 +47,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   // (Gemini, Mongo drivers) carry their own status, which is about *their* request, not this one.
   const statusCode = err?.statusCode;
   if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500) {
-    res.status(statusCode).json({ error: String(err.message) });
+    res.status(statusCode).json({ error: String(err.message), ...(err instanceof HttpError && err.code ? { code: err.code } : {}) });
     return;
   }
 

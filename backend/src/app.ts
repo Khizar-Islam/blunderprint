@@ -1,13 +1,16 @@
 import cors from "cors";
 import express, { type Express } from "express";
+import type { CoachRuntime } from "./agent/coach.js";
 import type { Queue } from "./jobs/queue.js";
 import { apiNotFound, errorHandler } from "./middleware/errorHandler.js";
 import { requestId } from "./middleware/requestId.js";
 import { analysisRouter, type AnalysisRouterOptions } from "./routes/analysis.js";
+import { coachRouter } from "./routes/coach.js";
 import { gamesRouter } from "./routes/games.js";
 import { healthRouter } from "./routes/health.js";
 import { jobsRouter } from "./routes/jobs.js";
 import { playersRouter } from "./routes/players.js";
+import { runsRouter } from "./routes/runs.js";
 import { summaryRouter } from "./routes/summary.js";
 
 export interface AppOptions {
@@ -16,6 +19,8 @@ export interface AppOptions {
   getDbStatus: () => boolean;
   queue: Pick<Queue, "enqueue" | "depth">;
   version: string;
+  // The coach (report routes). Tests that don't need it leave it out.
+  coach?: CoachRuntime;
   // Tests shorten these.
   healthCacheMs?: number;
   sseHeartbeatMs?: number;
@@ -30,6 +35,7 @@ export function createApp({
   getDbStatus,
   queue,
   version,
+  coach,
   healthCacheMs,
   sseHeartbeatMs,
   analysis,
@@ -61,6 +67,8 @@ export function createApp({
   app.use("/api", jobsRouter({ heartbeatMs: sseHeartbeatMs }));
   app.use("/api", gamesRouter());
   app.use("/api", analysisRouter(queue, analysis));
+  if (coach) app.use("/api", coachRouter({ queue, coach }));
+  app.use("/api", runsRouter({ heartbeatMs: sseHeartbeatMs }));
 
   // 6. Unknown /api routes → 404 JSON, then the error handler last.
   app.use("/api", apiNotFound);

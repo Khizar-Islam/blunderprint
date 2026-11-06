@@ -76,8 +76,8 @@ After a game is analysed, a per-player `extract` job turns it into features: eac
 
 ### Measured (5–6 Nov 2026, on Render's free tier)
 
-- **A real report in ~47 s** with 5–6 requests to Gemini.
-- **Overload:** during one run, Google answered 503 "high demand". The run retried with backoff, switched to the fallback model (`gemini-3.1-flash-lite`) after two overloads in a row, and still saved **3 verified patterns**.
+- **Clean runs** used 4–6 requests to Gemini.
+- **Overload:** during one run, Google answered 503 "high demand". The run retried with backoff, switched to the fallback model (`gemini-3.1-flash-lite`) after two overloads in a row, and the fallback wrote the answer: **3 verified patterns in ~47 s**. That run used **8 requests** (the daily budget went 388 → 380): 4 normal calls, 3 failed 503 attempts and 1 repair.
 - **Cached repeat:** asking again for the same data returned 200 in **110 ms with 0 AI calls**.
 - `/api/health` stayed at **~100 ms** while a run was going.
 

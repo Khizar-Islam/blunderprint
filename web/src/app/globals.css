@@ -82,3 +82,12 @@ body {
     pointer-events: none;
   }
 }
+
+/* The landing hero (components/landing/HeroPrint.tsx): its notes, rings and leaders appear by CSS
+   transitions. With reduced motion they appear at once: the component shows the final state, and this
+   removes the transition. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-in {
+    transition: none !important;
+  }
+}

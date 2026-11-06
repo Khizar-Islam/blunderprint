@@ -113,12 +113,17 @@ export function loupePly(width: number, plies: number, x: number): number | null
 }
 
 // Draws the rows. `alpha(row)` fades rows in (reveal and newly arrived games).
+// `colouredUpTo`: plies after it are drawn as faint stone, as if not analysed yet (the landing
+// hero's engine pass colours the print column by column). End markers appear once every
+// column is coloured.
 export function drawRows(
   ctx: CanvasRenderingContext2D,
   l: Layout,
   rows: { classes: string; color: Color }[],
   alpha: (row: number) => number,
+  colouredUpTo = Infinity,
 ): void {
+  const tick = (r: { classes: string; color: Color }, ply: number): Tick => (ply <= colouredUpTo ? tickAt(r.classes, ply, r.color) : "opponent");
   ctx.clearRect(0, 0, l.width, l.height);
   rows.forEach((r, row) => {
     const a = alpha(row);
@@ -129,15 +134,15 @@ export function drawRows(
     // Runs of one colour are one rectangle: fewer draw calls, and no hairline seams between ticks.
     let start = 1;
     for (let ply = 2; ply <= shown + 1; ply++) {
-      const prev = tickAt(r.classes, ply - 1, r.color);
-      if (ply === shown + 1 || tickAt(r.classes, ply, r.color) !== prev) {
+      const prev = tick(r, ply - 1);
+      if (ply === shown + 1 || tick(r, ply) !== prev) {
         ctx.fillStyle = TICK_COLOR[prev];
         ctx.fillRect((start - 1) * l.tickW, y, (ply - start) * l.tickW, l.rowH);
         start = ply;
       }
     }
     const t = truncation(r.classes, r.color, l.columns);
-    if (t.cut) {
+    if (t.cut && colouredUpTo > l.columns) {
       // End marker: a short notch after a 2 px gap, in the colour of the worst hidden error.
       ctx.fillStyle = t.worstHidden ? TICK_COLOR[t.worstHidden] : NEUTRAL_MARKER;
       ctx.fillRect(l.columns * l.tickW + 2, y, MARKER_W - 2, l.rowH);

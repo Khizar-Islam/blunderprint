@@ -152,11 +152,14 @@ blunderprint/
 │  │                          HeatBoard + heat.ts, OpeningsTable, charts/ (StackedBars, AnimatedNumber,
 │  │                          scale.ts, sample.ts);
 │  │                          coach/: CoachButton, CoachPage, AgentTrace, PatternCard, StatLine,
-│  │                          EvidenceBoard, FingerprintLens + lens.ts)
+│  │                          EvidenceBoard, FingerprintLens + lens.ts;
+│  │                          landing/: HeroPrint (canvas) + heroTimeline.ts, demoData.ts)
+│  ├─ src/data/demo.json     (committed landing snapshot of the frozen demo player)
 │  ├─ src/engine/            (stockfish.ts worker wrapper, uci.ts parsing, analyseGame.ts,
 │  │                          replay.ts, scheduler.ts claim/analyse/post + Web Lock,
 │  │                          useAnalysis.ts React hook, throughput.ts s/game)
 │  ├─ scripts/copy-engine.mjs (predev/prebuild: copies the engine from node_modules/stockfish)
+│  ├─ scripts/snapshot-demo.mjs (by hand, npm run snapshot:demo: live API → src/data/demo.json)
 │  ├─ public/engine/         (gitignored, copied at build: stockfish-19-lite-single.js + .wasm,
 │  │                          Copying.txt GPL text, SOURCE.txt where the source is)
 │  └─ .env.example
@@ -468,7 +471,13 @@ Rules:
 ## 12. Frontend: pages, design and animation
 
 ### Pages
-- `/`: landing. A pre-analysed demo player's Blunderprint animating, plus one input: username and platform toggle.
+- `/`: landing. A pre-analysed demo player's Blunderprint animating, plus one input: username and platform toggle. **As built (Stage 7 chunk A):**
+  - Headline "Your mistakes leave a print.", the search form, and the hero **"the print develops"** (`landing/HeroPrint.tsx`, phases in `heroTimeline.ts`): 200 faint rows arrive (0–0.9 s, counter ticks up), an ink scan line colours the player's moves (1.2–4 s), then three real evidence moves from the demo report get a ring, a hairline leader and a margin note (move, clock, win-chance cost, the pattern's label and code-written number). ~5.7 s, then the notes take turns being highlighted (desktop only). Hover the print to read a game, click to open it; Replay.
+  - Data: the committed snapshot `src/data/demo.json` (`npm run snapshot:demo`; it refuses unless the player is a frozen demo player, every game analysed and the report current). Never a live fetch: the hero must not wait on a sleeping Render.
+  - Time-based, not frame-counted; timers land the final canvas and every note even with no animation frames; no frames offscreen. Reduced motion: the final print and all notes at once.
+  - **Demo path on the first screen:** right under the form, "No account? Explore the demo: Open this Blunderprint · Read the coach report" (most recruiters have no chess account).
+  - Layout: text and hero side by side only from 1280 px (narrower, the text column wraps the demo links below the fold); below that the hero sits under the text. The notes stay beside the print while the print keeps ≥ 400 px, else they become a numbered list under it. Rows 1 + 0.5 px below a 480 px box (300 px for 200 games). Phones: full-width 44 px controls. Checked at 390, 768, 1024 and 1280 px (no horizontal overflow).
+  - Caption: "Lichess · DrNykterstein · 200 public games, analysed in the browser · as of <date>" and "Not affiliated with the player". The footer's health check is the API prewarm.
 - `/p/[platform]/[username]`: dashboard. Import progress, then analysis progress, then the patterns dashboard (built in Stage 3), then the full games list (never filtered), and later a "Coach me" button.
   - **Filters** (colour, speed, played: all time / 30 days / 90 days / 1 year) live in the URL (`?color=&speed=&range=`) and are pushed with `history.pushState`, so links can be shared and the back button steps through them. The URL keeps the preset, the API gets a `from` date.
   - **Data:** `GET /summary`. The last answer stays on screen while a new filter loads, so the charts animate from the old values. Refetches when the engine stores a game or an import finishes, at most every 10 s, and keeps polling while `extracting`; none while the tab is hidden.

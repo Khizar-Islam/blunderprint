@@ -8,6 +8,7 @@ import { isValidUsername, PLATFORM_NAMES, PLATFORMS, type Platform } from "@/lib
 // The toggle is a real radio group (native <input type="radio"> with the same name), so the
 // browser gives it keyboard behaviour for free: Tab enters the group, arrow keys move between
 // the options and select them. The inputs are visually hidden; the labels are the visible pills.
+// Phones: the toggle, the input and the button are full width, every target at least 44 px tall.
 export function PlayerSearch() {
   const router = useRouter();
   const [platform, setPlatform] = useState<Platform>("chesscom");
@@ -27,12 +28,12 @@ export function PlayerSearch() {
 
   return (
     <form onSubmit={submit} className="flex w-full max-w-md flex-col gap-3" noValidate>
-      <fieldset className="flex gap-1 self-start rounded-md border border-ink/20 p-1">
+      <fieldset className="flex gap-1 rounded-md border border-ink/20 p-1 sm:self-start">
         <legend className="sr-only">Platform</legend>
         {PLATFORMS.map((p) => (
           <label
             key={p}
-            className="cursor-pointer rounded px-3 py-1 text-sm text-graphite transition-colors select-none hover:bg-square-light has-checked:bg-ink has-checked:text-bone has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ink active:scale-95"
+            className="flex-1 cursor-pointer rounded px-3 py-2.5 text-center text-sm sm:flex-none sm:py-1 text-graphite transition-colors select-none hover:bg-square-light has-checked:bg-ink has-checked:text-bone has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ink active:scale-95"
           >
             <input
               type="radio"
@@ -50,7 +51,7 @@ export function PlayerSearch() {
         ))}
       </fieldset>
 
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <label className="sr-only" htmlFor="username">
           {PLATFORM_NAMES[platform]} username
         </label>
@@ -67,11 +68,11 @@ export function PlayerSearch() {
           spellCheck={false}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
-          className="min-w-0 flex-1 rounded-md border border-ink/30 bg-transparent px-3 py-2 font-mono text-base text-ink transition-colors placeholder:font-sans placeholder:text-graphite/50 hover:border-ink/60 focus-visible:border-ink"
+          className="min-h-11 min-w-0 flex-1 rounded-md border border-ink/30 bg-transparent px-3 py-2 font-mono text-base text-ink transition-colors placeholder:font-sans placeholder:text-graphite/50 hover:border-ink/60 focus-visible:border-ink"
         />
         <button
           type="submit"
-          className="rounded-md bg-ink px-4 py-2 text-bone transition hover:bg-graphite active:scale-95"
+          className="min-h-11 rounded-md bg-ink px-4 py-2 text-bone transition hover:bg-graphite active:scale-95"
         >
           Show games
         </button>

@@ -23,6 +23,14 @@ export function relativeTime(iso: string, now = Date.now()): string {
 export const fullDate = (iso: string) =>
   new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
 
+// A day: "6 Nov 2026".
+export const dayDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { dateStyle: "medium" });
+
+// A frozen demo player (backend lib/demo.ts): their games never change, so the dashboard and
+// the game review say when they were fetched instead of "imported 3 days ago".
+export const demoLine = (lastImportedAt?: string) =>
+  lastImportedAt ? `Demo player · games as of ${dayDate(lastImportedAt)}` : "Demo player";
+
 // Both importers store "<initial seconds>+<increment seconds>", or "1/<seconds per move>" for
 // daily games. Shown the way players say it: "3+2", "10+0", "½+0", "3d" (shown as "daily 3d").
 export function formatTimeControl(tc?: string): string | null {

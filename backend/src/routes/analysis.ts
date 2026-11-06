@@ -7,6 +7,7 @@ import { Game } from "../db/models/game.js";
 import { PLATFORMS, Player } from "../db/models/player.js";
 import { enqueueExtract } from "../jobs/handlers/extract.js";
 import type { Queue } from "../jobs/queue.js";
+import { noDemoPlayers, type IsDemo } from "../lib/demo.js";
 import { logger } from "../lib/logger.js";
 import { parseOr400 } from "../lib/validate.js";
 import { HttpError } from "../middleware/errorHandler.js";
@@ -25,6 +26,8 @@ import { HttpError } from "../middleware/errorHandler.js";
 export interface AnalysisRouterOptions {
   claimSize?: number; // K
   leaseMs?: number;
+  // Frozen demo players get no games to analyse (lib/demo.ts).
+  isDemo?: IsDemo;
 }
 
 const ENGINE = "sf19-lite";
@@ -85,7 +88,7 @@ const claimable = (now: Date) => ({
 
 export function analysisRouter(
   queue: Pick<Queue, "enqueue">,
-  { claimSize = 3, leaseMs = 10 * 60_000 }: AnalysisRouterOptions = {},
+  { claimSize = 3, leaseMs = 10 * 60_000, isDemo = noDemoPlayers }: AnalysisRouterOptions = {},
 ): Router {
   const router = Router();
 
@@ -97,6 +100,12 @@ export function analysisRouter(
     const id = randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + leaseMs);
+    // A frozen demo player: nothing to claim, nothing written. The browser treats it like
+    // "no work left" (the scheduler goes idle); `frozen` says why.
+    if (isDemo(platform, username)) {
+      res.json({ claimId: id, expiresAt: expiresAt.toISOString(), engine: ENGINE, games: [], frozen: true });
+      return;
+    }
     const claimed: { _id: Types.ObjectId; pgn: string; plies: number; color: string }[] = [];
 
     // One atomic findOneAndUpdate per game: two tabs claiming at the same moment can never

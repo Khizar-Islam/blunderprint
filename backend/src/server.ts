@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { syncRunExpiry } from "./agent/runExpiry.js";
 import { createApp } from "./app.js";
 import { loadEnv, type Env } from "./config/env.js";
 import { connectWithRetry, disconnectDb, isDbConnected } from "./db/connect.js";
@@ -12,6 +13,7 @@ import { createJobSystem } from "./jobs/setup.js";
 import { startWorker, type Worker } from "./jobs/worker.js";
 import { logger } from "./lib/logger.js";
 import { VERSION } from "./lib/version.js";
+import { demoChecker } from "./lib/demo.js";
 import { createShutdown } from "./shutdown.js";
 
 let env: Env;
@@ -37,6 +39,7 @@ const app = createApp({
   queue,
   version: VERSION,
   coach,
+  isDemo: demoChecker(env.demoPlayers),
 });
 
 // Startup order: listen → connect → indexes → worker.
@@ -56,6 +59,15 @@ void (async () => {
   // unique partial index on jobs.key, imports rely on the unique { playerId, sourceId }, and the
   // report cache on the unique report key. Already-built indexes make this a quick no-op.
   await Promise.all([Player.init(), Game.init(), Job.init(), Report.init(), AgentRun.init(), Usage.init()]);
+  if (shuttingDown) return;
+  // Runs expire 14 days after they were created, except the run behind each demo player's
+  // current report. Also dates runs saved before expiresAt existed. Not fatal: worst case a
+  // demo trace expires, or an old run lives on until the next start.
+  await syncRunExpiry(env.demoPlayers)
+    .then((result) => logger.info("Run expiry synced", { demoPlayers: env.demoPlayers, ...result }))
+    .catch((err: unknown) =>
+      logger.warn("Run expiry sync failed", { error: err instanceof Error ? err.message : String(err) }),
+    );
   if (shuttingDown) return;
   // Expired leases from a previous run (crash, Render sleep) are reaped on the first loop turn.
   // Two lanes: imports and extracts in one, coach reports in the other, so a report that spends

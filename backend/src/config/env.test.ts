@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadEnv, parseCorsOrigins, parseTrustProxyHops } from "./env.js";
+import { loadEnv, parseCorsOrigins, parseDemoPlayers, parseTrustProxyHops } from "./env.js";
 
 const VALID_URI = "mongodb+srv://user:pass@example.mongodb.net/blunderprint";
 const BASE = { MONGODB_URI: VALID_URI, CONTACT_EMAIL: "dev@example.com" };
@@ -107,4 +107,18 @@ test("loadEnv: the fallback model and the per-run request ceiling", () => {
   assert.equal(loadEnv({ ...BASE, GEMINI_FALLBACK_MODEL: "none" }).GEMINI_FALLBACK_MODEL, "none");
   // The ceiling must cover every logical call once (10 + 2).
   assert.throws(() => loadEnv({ ...BASE, COACH_MAX_REQUESTS: "11" }), /COACH_MAX_REQUESTS: must be at least/);
+});
+
+test("parseDemoPlayers: platform:username keys, lower-cased, trimmed, without duplicates", () => {
+  assert.deepEqual(parseDemoPlayers(undefined), []);
+  assert.deepEqual(parseDemoPlayers(" lichess:DrNykterstein , chesscom:Some_Name-1,,lichess:drnykterstein "), [
+    "lichess:drnykterstein",
+    "chesscom:some_name-1",
+  ]);
+});
+
+test("parseDemoPlayers: an invalid entry stops startup and names it", () => {
+  for (const bad of ["DrNykterstein", "chess:hikaru", "lichess:", "lichess:a b", "lichess:x"]) {
+    assert.throws(() => parseDemoPlayers(bad), /DEMO_PLAYERS has an invalid entry/);
+  }
 });

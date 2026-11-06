@@ -2,6 +2,7 @@ import cors from "cors";
 import express, { type Express } from "express";
 import type { CoachRuntime } from "./agent/coach.js";
 import type { Queue } from "./jobs/queue.js";
+import { noDemoPlayers, type IsDemo } from "./lib/demo.js";
 import { apiNotFound, errorHandler } from "./middleware/errorHandler.js";
 import { requestId } from "./middleware/requestId.js";
 import { analysisRouter, type AnalysisRouterOptions } from "./routes/analysis.js";
@@ -21,6 +22,8 @@ export interface AppOptions {
   version: string;
   // The coach (report routes). Tests that don't need it leave it out.
   coach?: CoachRuntime;
+  // Frozen demo players (lib/demo.ts, env DEMO_PLAYERS). None by default.
+  isDemo?: IsDemo;
   // Tests shorten these.
   healthCacheMs?: number;
   sseHeartbeatMs?: number;
@@ -36,6 +39,7 @@ export function createApp({
   queue,
   version,
   coach,
+  isDemo = noDemoPlayers,
   healthCacheMs,
   sseHeartbeatMs,
   analysis,
@@ -62,11 +66,11 @@ export function createApp({
 
   // 5. Routes.
   app.use("/api", healthRouter({ getDbStatus, getQueueDepth: () => queue.depth(), version, cacheMs: healthCacheMs }));
-  app.use("/api", playersRouter({ queue }));
+  app.use("/api", playersRouter({ queue, isDemo }));
   app.use("/api", summaryRouter({ queue }));
   app.use("/api", jobsRouter({ heartbeatMs: sseHeartbeatMs }));
-  app.use("/api", gamesRouter());
-  app.use("/api", analysisRouter(queue, analysis));
+  app.use("/api", gamesRouter({ isDemo }));
+  app.use("/api", analysisRouter(queue, { ...analysis, isDemo }));
   if (coach) app.use("/api", coachRouter({ queue, coach }));
   app.use("/api", runsRouter({ heartbeatMs: sseHeartbeatMs }));
 

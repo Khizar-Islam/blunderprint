@@ -3,6 +3,7 @@ import type { Types } from "mongoose";
 import { z } from "zod";
 import { Game } from "../db/models/game.js";
 import { Player } from "../db/models/player.js";
+import { noDemoPlayers, type IsDemo } from "../lib/demo.js";
 import { HttpError } from "../middleware/errorHandler.js";
 
 const gameParams = z.object({ id: z.string().regex(/^[0-9a-f]{24}$/i) });
@@ -14,11 +15,13 @@ const GAME_PROJECTION = {
   "analysis.claimExpiresAt": 0,
 };
 
-export function gamesRouter(): Router {
+export function gamesRouter({ isDemo = noDemoPlayers }: { isDemo?: IsDemo } = {}): Router {
   const router = Router();
 
   // One game with its PGN, clocks and analysis. `player` lets the page check that the game
   // belongs to the player in its URL (/p/:platform/:username/game/:id) and 404 otherwise.
+  // A frozen demo player (lib/demo.ts) gets demo: true + lastImportedAt, so an unanalysed game
+  // says "not analysed" instead of starting the engine (the claim would hand out nothing).
   router.get("/games/:id", async (req, res) => {
     const parsed = gameParams.safeParse(req.params);
     // A malformed id can't match any game: same answer as a missing one.
@@ -28,12 +31,19 @@ export function gamesRouter(): Router {
       { _id: Types.ObjectId; playerId: Types.ObjectId } & Record<string, unknown>
     >();
     if (!game) throw new HttpError(404, "Game not found");
-    const player = await Player.findById(game.playerId, { platform: 1, username: 1 }).lean();
+    const player = await Player.findById(game.playerId, { platform: 1, username: 1, lastImportedAt: 1 }).lean();
 
     const { _id, playerId: _playerId, ...rest } = game;
     res.json({
       game: { id: String(_id), ...rest },
-      player: player ? { platform: player.platform, username: player.username } : null,
+      player: player
+        ? {
+            platform: player.platform,
+            username: player.username,
+            demo: isDemo(player.platform, player.username),
+            lastImportedAt: player.lastImportedAt,
+          }
+        : null,
     });
   });
 

@@ -8,6 +8,7 @@ import { toPublicJob } from "../jobs/events.js";
 import { importJobKey } from "../jobs/handlers/import.js";
 import type { Queue } from "../jobs/queue.js";
 import { afterCursor, decodeCursor, encodeCursor } from "../lib/cursor.js";
+import { noDemoPlayers, type IsDemo } from "../lib/demo.js";
 import { parseOr400 } from "../lib/validate.js";
 import { HttpError } from "../middleware/errorHandler.js";
 
@@ -56,7 +57,13 @@ export const LIST_PROJECTION = {
   "analysis.claimExpiresAt": 0,
 };
 
-export function playersRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Router {
+export function playersRouter({
+  queue,
+  isDemo = noDemoPlayers,
+}: {
+  queue: Pick<Queue, "enqueue">;
+  isDemo?: IsDemo;
+}): Router {
   const router = Router();
   const params = parsePlayerParams;
   // Uses the partial unique index on key: this filter matches its partialFilterExpression.
@@ -66,6 +73,8 @@ export function playersRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
   // Start (or rejoin) an import. Idempotent: while one is queued or running for this player,
   // the same job comes back, so double-clicks and page reloads never start a second one.
   // A player whose last successful import is under 6 h old gets 200 { upToDate: true } instead.
+  // A demo player (lib/demo.ts) is frozen once imported: 200 { upToDate: true, frozen: true }
+  // however old the import is. Their first import still runs, to seed them.
   router.post("/players/:platform/:username/import", async (req, res) => {
     const { platform, username } = params(req.params);
     const [player, activeJob] = await Promise.all([
@@ -74,6 +83,10 @@ export function playersRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
       findActiveImport(platform, username),
     ]);
     const importedAt = player?.lastImportedAt?.getTime();
+    if (!activeJob && importedAt !== undefined && isDemo(platform, username)) {
+      res.status(200).json({ upToDate: true, frozen: true });
+      return;
+    }
     if (!activeJob && importedAt !== undefined && Date.now() - importedAt < FRESH_IMPORT_MS) {
       res.status(200).json({ upToDate: true });
       return;
@@ -113,7 +126,9 @@ export function playersRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
 
     const { _id, lastViewedAt: _viewed, ...rest } = player ?? {};
     res.json({
-      player: player ? { id: String(_id), ...rest } : null,
+      // demo: frozen (lib/demo.ts): the dashboard shows "Demo player · games as of <date>" and
+      // runs no analysis.
+      player: player ? { id: String(_id), ...rest, demo: isDemo(platform, username) } : null,
       activeJob: activeJob ? toPublicJob(activeJob) : null,
     });
   });

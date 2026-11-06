@@ -27,13 +27,24 @@ const agentRunSchema = new Schema(
     error: { code: String, message: String },
     startedAt: Date,
     finishedAt: Date,
+    // When MongoDB deletes the run (TTL below). Set to created + RUN_TTL_MS for every run; left
+    // out (never deleted) only for the run behind a demo player's current report
+    // (agent/runExpiry.ts), so its "How this report was made" stays.
+    expiresAt: Date,
   },
   { timestamps: true, minimize: false },
 );
 
-// TTL: runs disappear 14 days after they were created, so the traces never pile up in the free
-// 512 MB. The report itself lives in `reports` and isn't affected.
-agentRunSchema.index({ createdAt: 1 }, { expireAfterSeconds: 14 * 24 * 60 * 60 });
+// TTL on expiresAt: MongoDB's background task deletes a run once expiresAt has passed
+// (expireAfterSeconds 0 = "at the date in the field"), so the traces never pile up in the free
+// 512 MB. A run WITHOUT expiresAt is never deleted: that's how demo traces are kept. The report
+// itself lives in `reports` and isn't affected.
+// Replaced { createdAt: 1 } (expireAfterSeconds 14 days) in Stage 7: a TTL on createdAt can't
+// spare single runs. The old index must be dropped by hand on Atlas (Mongoose never drops one).
+agentRunSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+export const RUN_TTL_MS = 14 * 24 * 60 * 60_000;
+export const runExpiresAt = (from = new Date()) => new Date(from.getTime() + RUN_TTL_MS);
 
 export const MAX_RUN_STEPS = 60;
 

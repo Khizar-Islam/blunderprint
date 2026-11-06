@@ -59,7 +59,7 @@ test("GET /games/:id: the whole game for the review page, without claim internal
   assert.equal(body.game.analysis.claimExpiresAt, undefined);
   assert.equal(body.game.playerId, undefined);
   assert.equal(body.game._id, undefined);
-  assert.deepEqual(body.player, { platform: "lichess", username: "Alice" });
+  assert.deepEqual(body.player, { platform: "lichess", username: "Alice", demo: false });
 });
 
 test("GET /games/:id: missing or malformed ids are 404", async () => {

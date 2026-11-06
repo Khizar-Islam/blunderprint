@@ -123,12 +123,14 @@ blunderprint/
 │  │  ├─ agent/              (tools/*.ts incl. candidates.ts, loop.ts, verifier.ts, prompts.ts, schema.ts,
 │  │  │                       model.ts + gemini.ts + scriptedModel.ts (dev), pacer.ts, context.ts,
 │  │  │                       coach.ts runtime, budget.ts kill switch + daily budget, friendly.ts error codes,
-│  │  │                       basis.ts analysedGamesHash, reportStore.ts, runs.ts run store + event bus)
+│  │  │                       basis.ts analysedGamesHash, reportStore.ts, runs.ts run store + event bus,
+│  │  │                       runExpiry.ts which runs the TTL may delete)
 │  │  ├─ routes/             (players, games, jobs (SSE stream), analysis, summary, positions,
 │  │  │                       coach (GET/POST report), runs (SSE stream), health)
 │  │  ├─ middleware/         (requestId.ts, errorHandler.ts, rateLimit.ts, budget.ts)
 │  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
-│  │                          validate.ts zod → 400, sleep.ts, version.ts, explain.ts explain summaries)
+│  │                          validate.ts zod → 400, sleep.ts, version.ts, explain.ts explain summaries,
+│  │                          demo.ts frozen demo players)
 │  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
 │  │                          importOnce, explainGames, explainSummary, extractFeatures (backfill),
 │  │                          fetchDivisionFixture; coach: coachTools, coachCli, coachFixture, fakeModel;
@@ -283,7 +285,7 @@ agentRuns: { playerId, kind: "report", jobId, status: "queued"|"running"|"done"|
 - `analysedGamesHash` (`agent/basis.ts`): SHA-1 of `FEATURES_VERSION` + the sorted ids of the player's analysed games with current features. Taken when a run **starts**, so games analysed during a run make the report stale instead of mislabelled.
 - `reports` indexes: unique `{ playerId, analysedGamesHash, promptVersion, model }` (the cache key; the model is part of it) and `{ playerId, model, createdAt: -1 }` (latest report). Only the **newest report per player and model** is kept: older ones are deleted after the new one is saved. Per model, so a local scripted run never deletes a real report.
 - Each evidence item also stores its game's move `ribbon` (the coach page's fingerprint lens). Reports saved before that (Stage 5 chunk D) get their ribbons filled on first read: one query, saved back without touching `updatedAt`, no AI call (`withRibbons`).
-- `agentRuns`: TTL index on `createdAt`, 14 days.
+- `agentRuns`: TTL index on `expiresAt` (`expireAfterSeconds: 0`, Stage 7; it replaced a 14-day TTL on `createdAt`). Every run is created with `expiresAt` = created + 14 days; only the run behind a **demo player's current report** has none, so the demo's "How this report was made" never expires. `agent/runExpiry.ts` `syncRunExpiry` keeps those runs and dates every other run without one (createdAt + 14 days), at startup and after each saved report.
 
 ### usage (limits and AI budget)
 `{ _id: "<scope>|<yyyy-mm-dd>", count, expiresAt }`. The date is a **Pacific-time** day (Google's daily quota resets at midnight Pacific). Scopes: `global:ai` (real model calls), `dev:scripted` (the local scripted model, so dev runs never use the real budget), and `ip:<hash>` in Stage 6 (hash the IP, don't store it raw). TTL index on `expiresAt` (3 days after the day ends).
@@ -430,7 +432,7 @@ GET  /api/players/:platform/:username              → { player, activeJob } (pl
 GET  /api/players/:platform/:username/summary      → { summary, cached, extracting } (?color=&speed=&from=&to=)
 GET  /api/players/:platform/:username/games        → cursor pagination (?cursor=&limit=&speed=&color=&result=)
 GET  /api/games/:id                                → game + analysis + features
-POST /api/analysis/claim                           → { claimId, expiresAt, games } up to K games to analyse (leases)
+POST /api/analysis/claim                           → { claimId, expiresAt, games } up to K games to analyse (leases); a demo player: games [] + frozen: true
 POST /api/analysis/results                         → evals for one claimed game (validated, idempotent)
 POST /api/analysis/release                         → hand unfinished claimed games back (sendBeacon, text/plain)
 GET  /api/positions/stats?fen=&band=               → positionStats lookup
@@ -449,6 +451,7 @@ Rules:
 - The SSE endpoints send a heartbeat comment every 15 s and close cleanly.
 - **CORS also applies to EventSource,** so the allowlist must include the Vercel site.
 - **POST import:** 202 `{ jobId }` starts (or rejoins) an import. 200 `{ upToDate: true }` when the last successful import is under **6 h** old and none is active (Chess.com only refreshes every 12–24 h anyway). Repeating the call is safe: while an import is queued or running, the same job comes back.
+- **Demo players** (`DEMO_PLAYERS`, `lib/demo.ts`) are **frozen** so a visit can never change the demo: once imported, POST import is 200 `{ upToDate: true, frozen: true }` however old the import (their first import still runs, to seed them); the claim hands out no games; GET player and GET game carry `demo: true`, and the UI shows "Demo player · games as of <date>" with no analysis bar (the review page doesn't start the engine). Their data is completed by hand (all games analysed, a fresh report) before they are added.
 - **GET summary:** no filters → the cached `players.summary` (built and stored on the first view of a version); any filter → computed live. Filters are strict: unknown keys are 400; `from` is inclusive and `to` exclusive, each a date or a full ISO timestamp.
   - `extracting: true` while analysed games lack features **or** the player's extract job is queued or running (the cached summary is only rebuilt at the end of that job). The dashboard keeps refetching while it's true.
   - **Backstop:** a GET that finds games without features enqueues the extract job, on purpose (the unique key makes repeats free).
@@ -557,7 +560,7 @@ CORS_ORIGINS=           # optional extra origins
 TRUST_PROXY_HOPS=       # 3 on Render, unset locally
 CONTACT_EMAIL=          # used in the User-Agent for Chess.com/Lichess
 MAX_GAMES_PER_PLAYER=200
-DEMO_PLAYERS=           # e.g. chesscom:myname,lichess:somename (never evicted)
+DEMO_PLAYERS=           # e.g. lichess:DrNykterstein: frozen (no re-import, no claims), trace kept, never evicted; invalid entry stops startup
 PORT=5000
 ```
 **web/.env.local**: `NEXT_PUBLIC_API_URL=`

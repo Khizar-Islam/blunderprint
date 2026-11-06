@@ -31,6 +31,8 @@ export interface Player {
   lastImportedAt?: string;
   gamesCount: number;
   analysedCount: number;
+  // A frozen demo player (backend lib/demo.ts): no re-import, no analysis in the browser.
+  demo?: boolean;
 }
 
 // What GET /api/jobs/:id/stream sends in every event (backend/src/jobs/events.ts toPublicJob).
@@ -156,7 +158,10 @@ export interface GameDetail extends Omit<GameRow, "analysis"> {
 }
 
 export function fetchGame(id: string, signal: AbortSignal) {
-  return getJson<{ game: GameDetail; player: { platform: Platform; username: string } | null }>(
+  return getJson<{
+    game: GameDetail;
+    player: { platform: Platform; username: string; demo?: boolean; lastImportedAt?: string } | null;
+  }>(
     `/api/games/${encodeURIComponent(id)}`,
     { signal },
   );

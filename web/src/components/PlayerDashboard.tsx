@@ -13,7 +13,7 @@ import {
   type Platform,
   type Player,
 } from "@/lib/api";
-import { relativeTime } from "@/lib/format";
+import { demoLine, relativeTime } from "@/lib/format";
 import { useJobStream, type JobEventType } from "@/lib/useJobStream";
 import { useWakingRequest } from "@/lib/useWakingRequest";
 import { useAnalysis } from "@/engine/useAnalysis";
@@ -155,7 +155,10 @@ function Dashboard({ platform, username }: Props) {
   // ---- Browser engine analysis (CLAUDE.md 8.2) -----------------------------------------------
   // Runs once the player exists (the claim route needs them). While an import streams in,
   // every new page of games kicks the scheduler, so an idle one claims the new games.
-  const analysis = useAnalysis(platform, username, player != null);
+  // A frozen demo player is never analysed here (the server would hand out nothing anyway), so
+  // the engine isn't even loaded.
+  const demo = player?.demo === true;
+  const analysis = useAnalysis(platform, username, player != null && !demo);
   const { kick } = analysis;
   // The coach button (GET /report) follows the same pulse as the patterns.
   const coachInfo = useCoachInfo(platform, username, player != null, analysis.doneThisSession + importsDone);
@@ -211,7 +214,11 @@ function Dashboard({ platform, username }: Props) {
           player && (
             <p className="font-mono text-sm text-graphite">
               {player.gamesCount} games
-              {player.lastImportedAt && <> · imported {relativeTime(player.lastImportedAt)}</>}
+              {demo ? (
+                <> · {demoLine(player.lastImportedAt)}</>
+              ) : (
+                player.lastImportedAt && <> · imported {relativeTime(player.lastImportedAt)}</>
+              )}
             </p>
           )
         )}
@@ -239,7 +246,7 @@ function Dashboard({ platform, username }: Props) {
         </Notice>
       )}
 
-      {player && games.length > 0 && (
+      {player && !demo && games.length > 0 && (
         <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
       )}
 

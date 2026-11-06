@@ -6,7 +6,7 @@ import { runAgent } from "../../agent/loop.js";
 import { PROMPT_VERSION } from "../../agent/prompts.js";
 import { publicReportOf, saveReport, toPublicReport } from "../../agent/reportStore.js";
 import { createStepWriter, runStore } from "../../agent/runs.js";
-import { AgentRun } from "../../db/models/agentRun.js";
+import { AgentRun, runExpiresAt } from "../../db/models/agentRun.js";
 import type { JobDoc } from "../../db/models/job.js";
 import { Player } from "../../db/models/player.js";
 import { Report } from "../../db/models/report.js";
@@ -46,7 +46,9 @@ export async function startReportRun(
   playerId: Types.ObjectId,
   modelName: string,
 ): Promise<{ runId: string; created: boolean }> {
-  const run = await AgentRun.create({ playerId, model: modelName, promptVersion: PROMPT_VERSION });
+  // expiresAt: deleted by the TTL index 14 days from now, unless it ends up behind a demo
+  // player's report (agent/runExpiry.ts).
+  const run = await AgentRun.create({ playerId, model: modelName, promptVersion: PROMPT_VERSION, expiresAt: runExpiresAt() });
   const payload: ReportPayload = { runId: String(run._id), model: modelName };
   const { job, created } = await queue.enqueue({
     type: "report",
@@ -69,11 +71,14 @@ export interface ReportHandlerOptions {
   saveRetryDelaysMs?: number[];
   // Injected by tests to make the save fail.
   save?: typeof saveReport;
+  // Called after a report is saved (setup.ts: keep a demo player's run, agent/runExpiry.ts).
+  // A failure is only logged: the report is saved and the run is done.
+  afterSave?: () => Promise<unknown>;
 }
 
 export function createReportHandler(
   coach: CoachRuntime,
-  { saveRetryDelaysMs = [500, 2_000], save = saveReport }: ReportHandlerOptions = {},
+  { saveRetryDelaysMs = [500, 2_000], save = saveReport, afterSave }: ReportHandlerOptions = {},
 ): JobHandler {
   return {
     async run({ job, signal }) {
@@ -176,6 +181,11 @@ export function createReportHandler(
           }
         }
         await runStore.done(runId, { reportId: saved._id, usage: result.usage }, toPublicReport(saved));
+        if (afterSave) {
+          await afterSave().catch((err: unknown) =>
+            logger.warn("After-save step failed", { ...log, error: err instanceof Error ? err.message : String(err) }),
+          );
+        }
         logger.info("Coach report saved", {
           ...log,
           reportId: String(saved._id),

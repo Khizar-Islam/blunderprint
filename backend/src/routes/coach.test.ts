@@ -20,6 +20,7 @@ import { Report } from "../db/models/report.js";
 import { Usage } from "../db/models/usage.js";
 import { createReportHandler, type ReportHandlerOptions } from "../jobs/handlers/report.js";
 import { saveReport } from "../agent/reportStore.js";
+import { syncRunExpiry } from "../agent/runExpiry.js";
 import { createQueue } from "../jobs/queue.js";
 import { startWorker, type Worker } from "../jobs/worker.js";
 
@@ -455,6 +456,41 @@ describe("the guards and errors", () => {
     const job = await Job.findOne({ type: "report" }).lean();
     assert.deepEqual([job!.status, job!.attempts], ["done", 1]);
     assert.equal(await Report.countDocuments({ playerId: aliceId }), 1);
+  });
+
+  // The worker marks the job done after the handler (and so afterSave) has returned.
+  const jobDone = async () => {
+    for (let i = 0; i < 200; i++) {
+      const job = await Job.findOne({ type: "report" }).lean();
+      if (job?.status === "done" || job?.status === "failed") return job;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error("the report job never finished");
+  };
+
+  it("afterSave runs after the save: a demo player's new run loses its expiresAt (the trace is kept)", async () => {
+    const s = await setup({ handler: { afterSave: () => syncRunExpiry(["lichess:alice"]) } });
+    const { runId } = await (await post(reportUrl(s))).json() as any;
+    assert.ok((await AgentRun.findById(runId).lean())!.expiresAt, "created with an expiry");
+    assert.equal((await streamAll(s, runId)).at(-1)!.event, "done");
+    assert.equal((await jobDone()).status, "done");
+    assert.equal((await AgentRun.findById(runId).lean())!.expiresAt, undefined);
+  });
+
+  it("a failing afterSave is only logged: the run is done and the report saved", async () => {
+    const s = await setup({
+      handler: {
+        afterSave: async () => {
+          throw new Error("Atlas hiccup");
+        },
+      },
+    });
+    const { runId } = await (await post(reportUrl(s))).json() as any;
+    assert.equal((await streamAll(s, runId)).at(-1)!.event, "done");
+    const job = await jobDone();
+    assert.deepEqual([job.status, job.attempts], ["done", 1]);
+    assert.equal(await Report.countDocuments({ playerId: aliceId }), 1);
+    assert.ok((await AgentRun.findById(runId).lean())!.expiresAt, "a normal run keeps its expiry");
   });
 
   it("the save always fails: the run fails with internal, the job is not retried, one agent run", async () => {

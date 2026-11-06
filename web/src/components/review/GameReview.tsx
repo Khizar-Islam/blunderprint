@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAnalysis, type AnalysisView, type LiveGame } from "@/engine/useAnalysis";
 import { fetchGame, PLATFORM_NAMES, type GameDetail, type Platform } from "@/lib/api";
-import { formatTimeControl, fullDate } from "@/lib/format";
+import { demoLine, formatTimeControl, fullDate } from "@/lib/format";
 import { clampPly } from "@/lib/plyParam";
 import { progressRibbon } from "@/lib/ribbon";
 import { buildTimeline, uciToSan, type Timeline } from "@/lib/timeline";
@@ -43,7 +43,15 @@ export function GameReview({ platform, username, gameId, initialPly = null }: Pr
   if (!player || player.platform !== platform || player.username.toLowerCase() !== username.toLowerCase()) {
     return <NotFound platform={platform} username={username} />;
   }
-  return <Review game={game} platform={platform} username={player.username} initialPly={initialPly} />;
+  return (
+    <Review
+      game={game}
+      platform={platform}
+      username={player.username}
+      initialPly={initialPly}
+      demo={player.demo ? { lastImportedAt: player.lastImportedAt } : null}
+    />
+  );
 }
 
 const unfinished = (g: GameDetail) => g.analysis.status === "pending" || g.analysis.status === "claimed";
@@ -53,11 +61,14 @@ function Review({
   platform,
   username,
   initialPly,
+  demo,
 }: {
   game: GameDetail;
   platform: Platform;
   username: string;
   initialPly: number | null;
+  // A frozen demo player (backend lib/demo.ts): an unanalysed game stays unanalysed.
+  demo: { lastImportedAt?: string } | null;
 }) {
   const [game, setGame] = useState(initial);
 
@@ -65,7 +76,7 @@ function Review({
   // The scheduler only runs while this game is unfinished: once its result is stored we fetch
   // the game again, `needsAnalysis` turns false, and the hook stops the engines and hands the
   // other claimed games back (the dashboard is where the rest get analysed).
-  const needsAnalysis = unfinished(game);
+  const needsAnalysis = unfinished(game) && !demo;
   // One engine: only this game matters here; a second would start on another game that gets
   // handed back half-done as soon as this one is stored.
   const analysis = useAnalysis(platform, username, needsAnalysis, { prefer: game.id, engines: 1 });
@@ -166,6 +177,11 @@ function Review({
     <div className="flex flex-col gap-6">
       <Header game={game} platform={platform} username={username} />
       {needsAnalysis && <AnalysingNotice analysis={analysis} live={live} finished={finishedHere} />}
+      {demo && unfinished(game) && (
+        <p className="font-mono text-sm text-graphite/80">
+          {demoLine(demo.lastImportedAt)}: this game isn&apos;t analysed. You can still step through it.
+        </p>
+      )}
       {game.analysis.status === "unanalysable" && (
         <p className="font-mono text-sm text-graphite/80">
           The engine couldn&apos;t replay this game&apos;s moves, so it has no analysis. You can still step through it.

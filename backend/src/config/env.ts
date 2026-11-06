@@ -42,6 +42,26 @@ export function parseCorsOrigins(raw: string | undefined): string[] {
   return origins;
 }
 
+// DEMO_PLAYERS: comma-separated "platform:username" (e.g. "lichess:DrNykterstein"). Demo players
+// are frozen (lib/demo.ts). Returned as "platform:usernamelower" keys. Like CORS_ORIGINS, an
+// invalid entry stops startup, so a typo can't silently unfreeze the demo.
+const DEMO_ENTRY = /^(chesscom|lichess):([A-Za-z0-9_-]{2,30})$/;
+export function parseDemoPlayers(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const keys = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "")
+    .map((entry) => {
+      const match = DEMO_ENTRY.exec(entry);
+      if (!match) {
+        throw new Error(`DEMO_PLAYERS has an invalid entry: "${entry}" (expected e.g. lichess:DrNykterstein)`);
+      }
+      return `${match[1]}:${match[2]!.toLowerCase()}`;
+    });
+  return [...new Set(keys)];
+}
+
 const envSchema = z.object({
   MONGODB_URI: z.string().regex(/^mongodb(\+srv)?:\/\//, "must be a mongodb:// or mongodb+srv:// URI"),
   // Optional until Stage 5 (the coach agent), so the API can boot without them.
@@ -103,6 +123,8 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema> & {
   TRUST_PROXY_HOPS: number;
   corsOrigins: string[];
+  // DEMO_PLAYERS as "platform:usernamelower" keys (parseDemoPlayers).
+  demoPlayers: string[];
   isRender: boolean;
 };
 
@@ -146,6 +168,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     ...parsed.data,
     TRUST_PROXY_HOPS: parseTrustProxyHops(cleaned.TRUST_PROXY_HOPS),
     corsOrigins: [...FIXED_CORS_ORIGINS, ...parseCorsOrigins(cleaned.CORS_ORIGINS)],
+    demoPlayers: parseDemoPlayers(cleaned.DEMO_PLAYERS),
     isRender: cleaned.RENDER === "true",
   };
 }

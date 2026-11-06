@@ -2,6 +2,7 @@ import type { QueryFilter } from "mongoose";
 import type { JobFields, JobType } from "../db/models/job.js";
 import { createCoachRuntime, type CoachRuntime } from "../agent/coach.js";
 import type { Model } from "../agent/model.js";
+import { syncRunExpiry } from "../agent/runExpiry.js";
 import type { Env } from "../config/env.js";
 import { createChessComImporter } from "../importers/chesscom.js";
 import { createLichessImporter } from "../importers/lichess.js";
@@ -12,7 +13,9 @@ import { createReportHandler } from "./handlers/report.js";
 import { createQueue } from "./queue.js";
 import type { Handlers } from "./worker.js";
 
-export type JobSystemEnv = Pick<Env, "CONTACT_EMAIL" | "MAX_GAMES_PER_PLAYER"> & Parameters<typeof createCoachRuntime>[0];
+export type JobSystemEnv = Pick<Env, "CONTACT_EMAIL" | "MAX_GAMES_PER_PLAYER"> &
+  Partial<Pick<Env, "demoPlayers">> &
+  Parameters<typeof createCoachRuntime>[0];
 
 // Builds the queue, the coach runtime and every job handler from config. One polite client per
 // site, shared by everything in the process, so "one request at a time" holds across all jobs.
@@ -31,7 +34,8 @@ export function createJobSystem(env: JobSystemEnv, { model }: { model?: Model } 
       queue,
     }),
     extract: createExtractHandler(),
-    report: createReportHandler(coach),
+    // A new report for a demo player: keep its run (the trace) and date the one it replaced.
+    report: createReportHandler(coach, { afterSave: () => syncRunExpiry(env.demoPlayers ?? []) }),
   };
   // The two worker lanes (server.ts starts one worker per lane). Reports only take jobs for
   // this process's model (see handlers/report.ts).

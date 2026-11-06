@@ -21,7 +21,7 @@ Work in progress.
   - **Charts:** errors by phase, clock left, move number and speed, per 100 moves or per game, and the openings table. Bars built on fewer than 5 games are greyed out.
 - **Free-tier cold starts:** pages show "Waking the server up… (Ns)" while the sleeping API starts.
 
-Tests (3 Nov 2026): backend 226 passing, web 104 passing (`npm test` in each folder).
+Tests (6 Nov 2026): backend 399 passing, web 127 passing (`npm test` in each folder).
 
 ## The engine runs in your browser
 
@@ -60,6 +60,28 @@ After a game is analysed, a per-player `extract` job turns it into features: eac
   - Feature extraction: 145 games in 28 s. About 302 ms a game for the first (cold) batch, then 135–220 ms a game, including the database write.
   - The summary route, timed from the browser: 110–117 ms cached, 128–136 ms filtered.
   - Render's edge compresses with Brotli: 46 KB of JSON becomes 7.1 KB on the wire.
+
+## The coach agent (Stage 5)
+
+"Coach me" starts a Gemini agent that looks into the player's analysed games with read-only MongoDB tools and writes 3–5 recurring patterns, each with positions from the player's own games and a drill. **Code finds the weaknesses** (every group of moves at least 15% worse than the player's own rate, on enough games and moves); the model picks among them and explains them; **code checks every claim** before anything is shown. It runs as a queued job on its own worker lane, so a minute spent on the AI never holds up imports. Each step streams to the page over SSE as a live trace.
+
+**What the verifier checks** (code, not AI):
+- The pattern's candidate really came back from the weakness tool in this run. The statistic and its label are copied from that candidate, so the model writes no numbers of its own.
+- The evidence comes from a matching examples step: exactly the candidate's filter, from at least 2 different games, and no position used in two patterns.
+- No two patterns cover overlapping groups of moves.
+- Digits in the text only from named fields (the candidate's figures, each position's move number, win chance lost and clock). No spelled-out numbers.
+- Chess moves named in the text only from the pattern's own positions (the move played and the better move).
+- A minimum length: the explanation at least 2 sentences and 120 characters, the drill at least 60.
+- Anything that fails gets one repair round. Then it's trimmed or the pattern is dropped.
+
+### Measured (5–6 Nov 2026, on Render's free tier)
+
+- **A real report in ~47 s** with 5–6 requests to Gemini.
+- **Overload:** during one run, Google answered 503 "high demand". The run retried with backoff, switched to the fallback model (`gemini-3.1-flash-lite`) after two overloads in a row, and still saved **3 verified patterns**.
+- **Cached repeat:** asking again for the same data returned 200 in **110 ms with 0 AI calls**.
+- `/api/health` stayed at **~100 ms** while a run was going.
+
+The live link stays private until Stage 6 (per-visitor limits).
 
 ## Licences
 

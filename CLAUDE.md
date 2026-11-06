@@ -365,6 +365,8 @@ The script must be **resumable and idempotent**. Track the processed shards in a
 
 ## 10. The coach agent
 
+**The design in one paragraph:** code finds the weaknesses, the model picks and explains them, and code checks every claim. `get_weakness_candidates` computes the candidate groups and their numbers; the model investigates with read-only tools (phase 1), then answers in a fixed JSON shape with no numbers or titles of its own (phase 2); the verifier copies the figures from the candidate, checks the evidence and the prose, asks for one repair round, and trims or drops what still fails. Google's overloads are retried with backoff and, after two in a row, the rest of the run switches to a fallback model.
+
 ### Tools (read-only, return **compact aggregated JSON**, never raw game dumps; ≤ ~2k tokens each)
 
 | Tool | Purpose |
@@ -508,6 +510,7 @@ Rules:
 - Agent trace lines type in one by one with the step timings. Pattern cards reveal staggered, and each card's board animates to the critical position.
 - Every interactive element gets hover and press feedback.
 - Respect `prefers-reduced-motion`.
+- **Animated numbers always land** (`AnimatedNumber` + `charts/countTo.ts`, coach and dashboard): a browser that throttles animation frames (background tab, battery saver; a test browser ran 1 frame in 500 ms) left a coach stat at "0.0". A timer writes the final value 150 ms after the count should have ended, frames or not, and a visually hidden copy always carries the final value for screen readers (the counting text is `aria-hidden`).
 
 ### The cold-start UX
 Render's free API sleeps after 15 minutes. The first request can take up to about a minute. Show a "Waking the server up… (Ns)" counter after 3 seconds, the same pattern as Interview Prep.
@@ -565,14 +568,16 @@ PORT=5000
 
 Deploy at the end of **Stage 0** and keep deploying after every stage. That way, platform problems (CORS, proxy hops, sleeping servers, changed addresses) show up early, not on demo day.
 
+**Order from here (decided 6 Nov 2026):** Stage 7 (landing + animation pass) next, then Stage 6, then Stage 4.
+
 | Stage | Build | Demo at the end | Done when |
 |---|---|---|---|
 | **0. Scaffold + deploy** | Monorepo, Express app with health route, env validation, error handler, CORS, trust proxy, Mongo connection; Next.js skeleton with the palette and type; MongoDB MCP server (read-only) | Live site shows "API ok · DB ok" | Deployed on Vercel + Render; `/api/health` live; tests pass |
 | **1. Import + queue** ✅ done 31 Oct 2026 | Job queue (leases, retries, idempotency), Chess.com + Lichess importers, SSE progress, games list with cursor pagination | Type a username, watch games stream in live | Re-import doesn't duplicate; killing the server mid-import resumes after restart; 429 handled |
 | **2. Engine + game review** ✅ done 3 Nov 2026 (5e4ec5d, a27157d, 6cba1ad) | Stockfish worker pool, claim/results API, classification, board + eval graph + move list | "Here are your blunders" on real games | Closed tab loses no work; measured seconds per game written in the README |
 | **3. Patterns dashboard** ✅ done 3 Nov 2026 (a6ab232, 4417b71, d458f56, 54cf13f) | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
-| **4. The big dataset** ⏸ deferred until after Stage 5 (4 Nov 2026: not enough free disk space for the parquet shards) | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
-| **5. Coach agent** 🔧 in progress (tools d2c510c; loop + verifier 3af51cb, a0e7f4f; API chunk C; coach page chunk D) | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
+| **4. The big dataset** ⏸ deferred until after Stage 5 (4 Nov 2026: not enough free disk space on the laptop for the parquet shards). Plan kept: a DuckDB pipeline on the laptop, bullet included, 400-point bands per mover (each move counted in the band of the player who made it), prune locally, publish only the pruned result to Atlas | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
+| **5. Coach agent** ✅ done 6 Nov 2026 (tools d2c510c; loop + verifier 3af51cb, a0e7f4f; API 7286ca4; overload fix cf4d685; coach page 6a065a5; wrap-up docs) | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
 | **6. Ask + guards** | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
 | **7. Landing + animation pass** | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
 | **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences: final check of the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), **verify the licence of react-chessboard's piece set**, and **decide the repo's own licence** | Portfolio-ready | Everything in section 16 has a fallback in place |

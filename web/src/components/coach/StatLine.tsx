@@ -22,7 +22,7 @@ export function StatLine({ stat }: { stat: CoachStat }) {
     <div ref={ref} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-mono text-5xl leading-none tracking-tight text-ink tabular-nums sm:text-6xl">
-          <AnimatedNumber value={shown ? stat.value : 0} format={t.value} />
+          <AnimatedNumber value={stat.value} hold={!shown} format={t.value} />
         </span>
         <span className="font-mono text-lg text-graphite tabular-nums">
           vs your <span className="text-ink">{t.baseline}</span>

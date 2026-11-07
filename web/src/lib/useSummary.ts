@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { fetchSummary, type Platform, type SummaryResponse } from "./api";
+import type { Platform, SummaryResponse } from "./api";
 import { refetchDelay } from "./refetch";
+import { loadSummary } from "./summaryPrefetch";
 
 // The patterns summary for one player and one filter (`query`, from lib/filters.ts apiQuery).
 //
+// - The first request takes the dashboard's prefetched answer when there is one (it started in
+//   parallel with the player lookup; lib/summaryPrefetch.ts), else it fetches.
 // - A new query fetches at once and aborts the previous request. The last answer stays on screen
 //   meanwhile (`loading` is true and the section dims it), so the charts animate from the old
 //   numbers to the new ones instead of flashing empty.
@@ -59,7 +62,9 @@ export function useSummary(platform: Platform, username: string, query: string, 
     inFlight.current = true;
     const askedAt = pulseRef.current;
     try {
-      const response = await fetchSummary(platform, username, query, c.signal);
+      const response = await loadSummary(platform, username, query, c.signal);
+      // A prefetched answer doesn't listen to the signal: drop it if this request was replaced.
+      if (c.signal.aborted) return;
       setAnswer({ response, query, pulse: askedAt });
       setError(null);
     } catch (err) {

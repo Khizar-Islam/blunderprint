@@ -2,17 +2,9 @@
 
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import {
-  ApiError,
-  fetchGames,
-  fetchPlayer,
-  isValidUsername,
-  PLATFORM_NAMES,
-  startImport,
-  type GameRow,
-  type Platform,
-  type Player,
-} from "@/lib/api";
+import { ApiError, fetchGames, fetchPlayer, isValidUsername, PLATFORM_NAMES, type GameRow, type Platform, type Player } from "@/lib/api";
+import { startDashboard, type Start } from "@/lib/dashboardStart";
+import { apiQuery, parseFilters } from "@/lib/filters";
 import { demoLine, relativeTime } from "@/lib/format";
 import { useJobStream, type JobEventType } from "@/lib/useJobStream";
 import { useWakingRequest } from "@/lib/useWakingRequest";
@@ -34,30 +26,16 @@ export function PlayerDashboard({ platform, username }: Props) {
   return <Dashboard platform={platform} username={username} />;
 }
 
-// What the first request (GET player, then POST import if needed) settles on.
-interface Start {
-  player: Player | null;
-  jobId: string | null; // the import to follow, if one is queued or running
-}
-
 // Sorted like the API (playedAt desc, then id desc), so merging pages never reorders rows.
 const byNewest = (a: GameRow, b: GameRow) => b.playedAt.localeCompare(a.playedAt) || b.id.localeCompare(a.id);
 
 function Dashboard({ platform, username }: Props) {
-  // 1. GET player → { player, activeJob }. 2. With no active import, POST one: the API answers
-  // 202 with a job, or 200 { upToDate } when the last import is under 6 h old. Both requests
-  // are safe to repeat, so the waking hook may retry the pair while Render wakes up.
-  const start = useWakingRequest<Start>(async (signal) => {
-    let found: Awaited<ReturnType<typeof fetchPlayer>> | null = null;
-    try {
-      found = await fetchPlayer(platform, username, signal);
-    } catch (err) {
-      if (!(err instanceof ApiError && err.status === 404)) throw err; // 404: never imported
-    }
-    if (found?.activeJob) return { player: found.player, jobId: found.activeJob.id };
-    const result = await startImport(platform, username, signal);
-    return { player: found?.player ?? null, jobId: result.kind === "job" ? result.jobId : null };
-  });
+  // The summary starts in parallel with GET player → POST import (lib/dashboardStart.ts), for
+  // the filters in the URL (the same query the patterns section will ask for). Both requests are
+  // safe to repeat, so the waking hook may retry them while Render wakes up.
+  const start = useWakingRequest<Start>((signal) =>
+    startDashboard(platform, username, apiQuery(parseFilters(new URLSearchParams(window.location.search)), new Date()), signal),
+  );
 
   const started = start.state.kind === "done" ? start.state.value : null;
   // The player as of the start request, until an import finishes and we fetch it again.

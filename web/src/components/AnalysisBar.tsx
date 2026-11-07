@@ -4,6 +4,8 @@ import type { AnalysisView } from "@/engine/useAnalysis";
 
 // One line above the games list: what the in-browser engine is doing, and the control for it.
 // The numbers are this visitor's: "N analysed" counts the stored total plus this session's.
+// Under it, a thin rule of how much is analysed: its length is scaleX in its style (bar-x), so
+// it glides with each stored game and lands right even without animation frames.
 export function AnalysisBar({
   analysis,
   analysedCount,
@@ -15,6 +17,7 @@ export function AnalysisBar({
 }) {
   const { state, paused, needsTap, error, secondsPerGame } = analysis;
   const analysed = Math.min(gamesCount, analysedCount + analysis.doneThisSession);
+  const fraction = gamesCount > 0 ? analysed / gamesCount : 0;
   const counts = (
     <span className="tabular-nums">
       {analysed} of {gamesCount} analysed
@@ -51,8 +54,8 @@ export function AnalysisBar({
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-sm text-graphite" role="status" aria-live="polite">
+    <div className="flex flex-col gap-2">
+      <p className="flex min-h-7 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-sm text-graphite" role="status" aria-live="polite">
         <span>{text}</span>
         {button && (
           <button type="button" className="btn-quiet text-xs" onClick={button.onClick}>
@@ -60,6 +63,9 @@ export function AnalysisBar({
           </button>
         )}
       </p>
+      <div className="h-px w-full max-w-md bg-ink/15" aria-hidden="true">
+        <div className="bar-x h-px w-full bg-ink" style={{ transform: `scaleX(${fraction})` }} />
+      </div>
       {error && <p className="text-sm text-blunder">{error}</p>}
     </div>
   );

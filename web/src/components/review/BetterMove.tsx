@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { HEX, LABEL, TEXT } from "./classes";
 
 // Under the board on an inaccuracy/mistake/blunder: "Nxe5?? was a blunder. Better was Nf3",
@@ -14,6 +14,8 @@ import { HEX, LABEL, TEXT } from "./classes";
 // - quick click (or Enter/Space): toggles, and stays on until clicked again or the move changes
 // - press and hold: shown only while held, released → back to the position after the move
 // - hold B anywhere on the page (handled by GameReview)
+// While the button is pressed, a teal line fills along its bottom edge over HOLD_MS: once it's
+// full, the press counts as a hold (release goes back), so you can see which one you're doing.
 
 const HOLD_MS = 250; // a press longer than this is a hold, not a click
 
@@ -33,10 +35,12 @@ export function BetterMove({
   onPeek: (on: boolean) => void;
 }) {
   const press = useRef<{ at: number; wasOn: boolean } | null>(null);
+  const [holding, setHolding] = useState(false);
 
   const end = (cancelled: boolean) => {
     const p = press.current;
     press.current = null;
+    setHolding(false);
     if (!p) return;
     if (cancelled || performance.now() - p.at >= HOLD_MS) onPeek(false); // a hold: release ends it
     else onPeek(!p.wasOn); // a click: toggle
@@ -63,7 +67,7 @@ export function BetterMove({
             type="button"
             aria-pressed={peek}
             title="Show the position before the move (or hold B)"
-            className={`btn-quiet text-xs select-none touch-none ${peek ? "bg-ink text-bone" : ""}`}
+            className={`btn-quiet relative overflow-hidden text-xs select-none touch-none ${peek ? "bg-ink text-bone" : ""}`}
             onPointerDown={(e) => {
               if (e.button !== 0) return;
               // Capture: the release counts even if the pointer slides off the button. Throws for
@@ -72,6 +76,7 @@ export function BetterMove({
                 e.currentTarget.setPointerCapture(e.pointerId);
               } catch {}
               press.current = { at: performance.now(), wasOn: peek };
+              setHolding(true);
               onPeek(true);
             }}
             onPointerUp={() => end(false)}
@@ -83,6 +88,13 @@ export function BetterMove({
             }}
           >
             {peek ? "Showing" : "Show"}
+            {holding && (
+              <span
+                aria-hidden="true"
+                className="bar-x absolute inset-x-0 bottom-0 h-0.5 bg-best [animation-timing-function:linear]"
+                style={{ animationDuration: `${HOLD_MS}ms` }}
+              />
+            )}
           </button>
         )}
       </p>

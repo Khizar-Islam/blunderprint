@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "motion/react";
 import Link from "next/link";
 import { memo, useState } from "react";
 import type { LiveGame } from "@/engine/useAnalysis";
@@ -55,7 +54,8 @@ export function GamesList({
 const RESULT_LABEL = { win: "Win", loss: "Loss", draw: "Draw" } as const;
 
 // W/L/D in ink and graphite only: the classification colours are kept for move classifications.
-function ResultMark({ result }: { result: GameRow["result"] }) {
+// (Also used by the landing page's "How it works" illustration.)
+export function ResultMark({ result }: { result: GameRow["result"] }) {
   const style =
     result === "win"
       ? "bg-ink text-bone"
@@ -74,7 +74,7 @@ function ResultMark({ result }: { result: GameRow["result"] }) {
 }
 
 // A tiny square in the colour the player had.
-function ColorChip({ color }: { color: GameRow["color"] }) {
+export function ColorChip({ color }: { color: GameRow["color"] }) {
   return (
     <span
       className={`inline-block size-2.5 shrink-0 rounded-[2px] border border-ink/60 ${color === "white" ? "bg-bone" : "bg-ink"}`}
@@ -129,13 +129,9 @@ const Row = memo(function Row({
   const opening = game.opening?.name ?? game.opening?.eco;
 
   return (
-    // `initial` only applies when a row mounts, so rows already on screen never re-animate.
-    <motion.li
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: "easeOut", delay }}
-      className="border-b border-ink/10"
-    >
+    // A CSS animation (anim-rise) runs once, when a row mounts, so rows already on screen never
+    // re-animate; the row's normal style is its final state, so it shows even without frames.
+    <li className="anim-rise border-b border-ink/10 [animation-duration:250ms]" style={{ animationDelay: `${delay}s` }}>
       {/* The whole row opens the game review. prefetch off: Next would prefetch every row that
           scrolls into view (up to 200), and the review page loads its data in the browser anyway. */}
       <Link
@@ -180,6 +176,6 @@ const Row = memo(function Row({
         </div>
         <Ribbon game={game} live={live} />
       </Link>
-    </motion.li>
+    </li>
   );
 });

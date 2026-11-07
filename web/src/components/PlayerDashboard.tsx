@@ -246,11 +246,16 @@ function Dashboard({ platform, username }: Props) {
         </Notice>
       )}
 
+      {/* Sections appear as their data arrives. Each one's space is held while it loads (a
+          placeholder of about its height), so what's below doesn't jump; then it fades in. */}
       {player && !demo && games.length > 0 && (
-        <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
+        <div className="anim-fade">
+          <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
+        </div>
       )}
+      {player && !demo && games.length === 0 && gamesState === "loading" && <div className="h-[37px]" aria-hidden="true" />}
 
-      {player && games.length > 0 && <CoachButton info={coachInfo} platform={platform} username={username} />}
+      {player && (games.length > 0 || gamesState === "loading") && <CoachButton info={coachInfo} platform={platform} username={username} />}
 
       {/* Patterns refetch when the engine stores a game or an import finishes (the pulse), at most
           every 10 s. Suspense: the section reads the URL's filters (useSearchParams). */}

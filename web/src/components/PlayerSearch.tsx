@@ -3,18 +3,21 @@
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { isValidUsername, PLATFORM_NAMES, PLATFORMS, type Platform } from "@/lib/api";
+import { useIndicator } from "@/lib/useIndicator";
 
 // Platform toggle + username → /p/[platform]/[username].
 // The toggle is a real radio group (native <input type="radio"> with the same name), so the
 // browser gives it keyboard behaviour for free: Tab enters the group, arrow keys move between
 // the options and select them. The inputs are visually hidden; the labels are the visible pills.
 // Phones: the toggle, the input and the button are full width, every target at least 44 px tall.
+// The chosen platform's ink pill slides between the two (lib/useIndicator.ts).
 export function PlayerSearch() {
   const router = useRouter();
   const [platform, setPlatform] = useState<Platform>("chesscom");
   const [username, setUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const errorId = useId();
+  const { container: toggle, pill } = useIndicator<HTMLFieldSetElement, HTMLSpanElement>(PLATFORMS.indexOf(platform));
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -28,12 +31,14 @@ export function PlayerSearch() {
 
   return (
     <form onSubmit={submit} className="flex w-full max-w-md flex-col gap-3" noValidate>
-      <fieldset className="flex gap-1 rounded-md border border-ink/20 p-1 sm:self-start">
+      <fieldset ref={toggle} className="group relative flex gap-1 rounded-md border border-ink/20 p-1 sm:self-start">
         <legend className="sr-only">Platform</legend>
+        <span ref={pill} className="seg-indicator rounded bg-ink opacity-0" aria-hidden="true" />
         {PLATFORMS.map((p) => (
           <label
             key={p}
-            className="flex-1 cursor-pointer rounded px-3 py-2.5 text-center text-sm sm:flex-none sm:py-1 text-graphite transition-colors select-none hover:bg-square-light has-checked:bg-ink has-checked:text-bone has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ink active:scale-95"
+            data-segment
+            className="relative flex-1 cursor-pointer rounded px-3 py-2.5 text-center text-sm text-graphite transition-[color,background-color,transform] duration-150 select-none hover:bg-square-light active:scale-95 has-checked:bg-ink has-checked:text-bone has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ink sm:flex-none sm:py-1 group-data-[indicator=on]:has-checked:bg-transparent"
           >
             <input
               type="radio"

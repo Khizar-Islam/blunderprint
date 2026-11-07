@@ -21,7 +21,8 @@ export function CoachButton({ info, platform, username }: { info: CoachInfo | nu
   const [error, setError] = useState<string | null>(null);
   const href = `/p/${platform}/${encodeURIComponent(username)}/coach`;
   const state = coachButtonState(info);
-  if (state.kind === "loading") return null;
+  // While GET /report loads: the section's frame at its usual height, so nothing below jumps.
+  if (state.kind === "loading") return <section aria-hidden="true" className={FRAME} />;
 
   async function start() {
     setStarting(true);
@@ -39,61 +40,69 @@ export function CoachButton({ info, platform, username }: { info: CoachInfo | nu
 
   const resting = `The coach is resting until midnight Pacific (${hoursText(msUntilPacificMidnight(new Date()))}).`;
 
+  // Keyed by the state: when it changes (locked → "Coach me" → working → report), the new
+  // content fades in where the old one was (a CSS animation; the frame itself stays put).
   return (
-    <section aria-label="Coach" className="flex flex-col gap-3 border-y border-ink/15 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex flex-col gap-1">
-        <p className="font-mono text-xs tracking-wide text-graphite/60 uppercase">Coach</p>
-        {state.kind === "locked" && (
-          <>
-            <p className="font-display text-xl text-ink">The coach unlocks at {state.needed} analysed games</p>
-            <Progress analysed={state.analysed} needed={state.needed} />
-          </>
+    <section aria-label="Coach" className={FRAME}>
+      <div key={state.kind} className="anim-fade flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <p className="font-mono text-xs tracking-wide text-graphite/60 uppercase">Coach</p>
+          {state.kind === "locked" && (
+            <>
+              <p className="font-display text-xl text-ink">The coach unlocks at {state.needed} analysed games</p>
+              <Progress analysed={state.analysed} needed={state.needed} />
+            </>
+          )}
+          {state.kind === "start" && <p className="font-display text-xl text-ink">Your recurring weaknesses, with evidence from your games</p>}
+          {state.kind === "running" && <p className="font-display text-xl text-ink">The coach is working on your report</p>}
+          {state.kind === "report" && (
+            <>
+              <p className="font-display text-xl text-ink">Your coach report is ready</p>
+              {state.stale && (
+                <p className="text-sm text-graphite">
+                  {state.stale.reason === "new_version"
+                    ? "An updated coach is available."
+                    : state.stale.newGames > 0
+                      ? `${state.stale.newGames} new game${state.stale.newGames === 1 ? "" : "s"} analysed since your last report.`
+                      : "Your analysed games changed since your last report."}
+                  {state.note === "off" && " A new report can't start while the coach is switched off."}
+                  {state.note === "resting" && ` ${resting}`}
+                </p>
+              )}
+            </>
+          )}
+          {state.kind === "off" && <p className="text-sm text-graphite">The coach is switched off right now. Your dashboard and game reviews still work.</p>}
+          {state.kind === "resting" && <p className="text-sm text-graphite">{resting}</p>}
+          {error && (
+            <p className="text-sm text-blunder" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+
+        {state.kind === "start" && (
+          <button type="button" className="btn-solid" onClick={() => void start()} disabled={starting}>
+            {starting ? "Starting…" : "Coach me"}
+          </button>
         )}
-        {state.kind === "start" && <p className="font-display text-xl text-ink">Your recurring weaknesses, with evidence from your games</p>}
-        {state.kind === "running" && <p className="font-display text-xl text-ink">The coach is working on your report</p>}
+        {state.kind === "running" && (
+          <Link href={href} className="btn-solid">
+            Watch it live →
+          </Link>
+        )}
         {state.kind === "report" && (
-          <>
-            <p className="font-display text-xl text-ink">Your coach report is ready</p>
-            {state.stale && (
-              <p className="text-sm text-graphite">
-                {state.stale.reason === "new_version"
-                  ? "An updated coach is available."
-                  : state.stale.newGames > 0
-                    ? `${state.stale.newGames} new game${state.stale.newGames === 1 ? "" : "s"} analysed since your last report.`
-                    : "Your analysed games changed since your last report."}
-                {state.note === "off" && " A new report can't start while the coach is switched off."}
-                {state.note === "resting" && ` ${resting}`}
-              </p>
-            )}
-          </>
-        )}
-        {state.kind === "off" && <p className="text-sm text-graphite">The coach is switched off right now. Your dashboard and game reviews still work.</p>}
-        {state.kind === "resting" && <p className="text-sm text-graphite">{resting}</p>}
-        {error && (
-          <p className="text-sm text-blunder" role="alert">
-            {error}
-          </p>
+          <Link href={href} className="btn-solid">
+            See your coach report →
+          </Link>
         )}
       </div>
-
-      {state.kind === "start" && (
-        <button type="button" className="btn-solid" onClick={() => void start()} disabled={starting}>
-          {starting ? "Starting…" : "Coach me"}
-        </button>
-      )}
-      {state.kind === "running" && (
-        <Link href={href} className="btn-solid">
-          Watch it live →
-        </Link>
-      )}
-      {state.kind === "report" && (
-        <Link href={href} className="btn-solid">
-          See your coach report →
-        </Link>
-      )}
     </section>
   );
 }
+
+// The section's frame. Its minimum height is about the tallest usual state (locked, with the
+// progress rule), so a state change or the first load doesn't move the page below it.
+const FRAME = "flex min-h-[9rem] flex-col justify-center border-y border-ink/15 py-4 sm:min-h-[7.25rem]";
 
 // "12 / 20" ticking up live, over a rule of 20 segments, one per game needed.
 function Progress({ analysed, needed }: { analysed: number; needed: number }) {

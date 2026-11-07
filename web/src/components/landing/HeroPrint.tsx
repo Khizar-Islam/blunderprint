@@ -19,7 +19,9 @@ import { clockText, heroDurationMs, heroFrame, heroLayout, noteStartMs, placeNot
 // - One canvas, drawn by the same drawRows as the dashboard's Blunderprint.
 // - Driven by elapsed time; the loop only runs while the canvas changes (until the engine pass
 //   ends), never offscreen. Timers land the final canvas and every note even if no animation
-//   frame runs (a throttled tab), the same idea as AnimatedNumber's countTo.
+//   frame runs (a throttled tab), the same idea as AnimatedNumber's countTo. And if no frame has
+//   run at all STALL_MS after the start while the hero is in view, nobody is seeing it play: it
+//   jumps straight to the final state instead of waiting out the 5.7 s timeline.
 // - The notes, rings and leaders are DOM/SVG with CSS transitions, so their final state is
 //   their normal style. Reduced motion: the final print and all three notes at once.
 // - Notes beside the print (wide screens), once finished: they take turns being highlighted;
@@ -33,6 +35,7 @@ const NOTE_MIN_GAP = 108; // the tallest note plus breathing room
 const THIN_BELOW = 480; // a box narrower than this: phone rows (1 + 0.5 px)
 const MIN_PRINT_W = 400; // a print narrower than this beside the notes: notes go under it instead
 const LAND_MARGIN_MS = 150;
+const STALL_MS = 800;
 const CYCLE_MS = 3500;
 const INK = "#1b1d1a";
 
@@ -113,14 +116,25 @@ export function HeroPrint({ demo }: { demo: DemoSnapshot }) {
     const elapsed = performance.now() - at;
 
     let frame = 0;
-    const loop = () => {
+    let sawFrame = false;
+    const loop = (fromFrame: boolean) => {
+      if (fromFrame) sawFrame = true;
       const t = performance.now() - at;
       paint(t);
-      frame = t < SCAN_END_MS && inView.current ? requestAnimationFrame(loop) : 0;
+      frame = t < SCAN_END_MS && inView.current ? requestAnimationFrame(() => loop(true)) : 0;
     };
-    loop();
+    loop(false);
 
-    const timers = [
+    const finishNow = () => {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      timers.forEach((id) => window.clearTimeout(id));
+      paint(Infinity);
+      setNotesShown(notes.length);
+      setFinished(true);
+    };
+
+    const timers: number[] = [
       // The canvas's final state, frames or not.
       window.setTimeout(() => {
         cancelAnimationFrame(frame);
@@ -130,11 +144,19 @@ export function HeroPrint({ demo }: { demo: DemoSnapshot }) {
       ...notes.map((_, k) => window.setTimeout(() => setNotesShown((c) => Math.max(c, k + 1)), Math.max(0, noteStartMs(k) - elapsed))),
       window.setTimeout(() => setFinished(true), Math.max(0, heroDurationMs(notes.length) - elapsed)),
     ];
+    // No animation frames (a throttled or background tab, a browser that has them switched off).
+    if (elapsed < STALL_MS) {
+      timers.push(
+        window.setTimeout(() => {
+          if (!sawFrame && inView.current) finishNow();
+        }, STALL_MS - elapsed),
+      );
+    }
 
     // Offscreen: no frames. Back in view: carry on from the current time.
     const io = new IntersectionObserver(([entry]) => {
       inView.current = entry!.isIntersecting;
-      if (inView.current && !frame && performance.now() - at < SCAN_END_MS) frame = requestAnimationFrame(loop);
+      if (inView.current && !frame && performance.now() - at < SCAN_END_MS) frame = requestAnimationFrame(() => loop(true));
     });
     io.observe(el);
 
@@ -360,7 +382,7 @@ function Note({
       <span className="font-mono text-sm text-ink tabular-nums">
         {t.value(note.stat.value)} <span className="text-graphite">vs your {t.baseline}</span>
       </span>
-      <Link href={href} className="self-start py-1 font-mono text-xs text-graphite underline decoration-ink/25 underline-offset-2 transition-colors hover:text-ink hover:decoration-ink" tabIndex={on ? 0 : -1}>
+      <Link href={href} className="self-start py-1 font-mono text-xs text-graphite underline decoration-ink/25 underline-offset-2 transition-colors hover:text-ink hover:decoration-ink active:opacity-70" tabIndex={on ? 0 : -1}>
         Open the game →
       </Link>
     </div>

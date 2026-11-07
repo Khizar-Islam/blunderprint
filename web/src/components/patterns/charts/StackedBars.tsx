@@ -1,6 +1,5 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
 import type { ErrorKind, KindCounts } from "@/lib/api";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { fewGames } from "./sample";
@@ -13,9 +12,11 @@ import { niceMax, ticks } from "./scale";
 //
 // The kinds are drawn as three rectangles that all start at x = 0 and overlap: the widest
 // (all errors, inaccuracy colour) underneath, then blunders + mistakes, then blunders on top.
-// Only `width` changes, so motion animates one attribute per rectangle from the old value to the
-// new one when the filters change; bars are keyed by bucket, so a bucket keeps its rectangles
-// (and animates) instead of being replaced.
+// Each rectangle is full width, and its length is a CSS transform, scaleX(share), in its style
+// (the bar-x utility in globals.css): it grows from 0 when it first appears and glides from the
+// old length to the new one when the filters change. CSS runs that without animation frames, so a
+// throttled tab still ends on the right length. Bars are keyed by bucket, so a bucket keeps its
+// rectangles (and glides) instead of being replaced.
 
 export interface BarRow {
   key: string;
@@ -39,8 +40,6 @@ const FEW: Record<ErrorKind, string> = {
   blunder: "var(--color-square-dark)",
 };
 
-const EASE = [0.22, 1, 0.36, 1] as const;
-
 export function StackedBars({
   title,
   caption,
@@ -52,7 +51,6 @@ export function StackedBars({
   rows: BarRow[];
   format: (n: number) => string;
 }) {
-  const reduced = useReducedMotion();
   const max = niceMax(Math.max(0, ...rows.map((r) => r.value ?? 0)));
   const grid = ticks(max).slice(1, -1); // inner gridlines only
 
@@ -77,7 +75,7 @@ export function StackedBars({
           return (
             <li
               key={row.key}
-              className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[8.5rem_1fr_3.5rem]"
+              className="-mx-1.5 grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 rounded-sm px-1.5 py-0.5 transition-colors duration-150 hover:bg-square-light/45 sm:grid-cols-[8.5rem_1fr_3.5rem]"
               aria-label={`${row.label}: ${row.value === null ? "no data" : format(row.value)}; ${row.counts.blunder} blunders, ${row.counts.mistake} mistakes, ${row.counts.inaccuracy} inaccuracies${few ? "; few games, read with care" : ""}`}
             >
               <span className={`flex min-w-0 flex-col text-sm ${few ? "text-graphite/60" : "text-ink"}`}>
@@ -108,15 +106,14 @@ export function StackedBars({
                   />
                 ))}
                 {(["inaccuracy", "mistake", "blunder"] as const).map((kind) => (
-                  <motion.rect
+                  <rect
                     key={kind}
                     x="0"
                     y="0"
+                    width="100"
                     height="10"
-                    style={{ fill: few ? FEW[kind] : FILL[kind] }}
-                    initial={{ width: 0 }}
-                    animate={{ width: widths[kind] }}
-                    transition={reduced ? { duration: 0 } : { duration: 0.6, ease: EASE }}
+                    className="bar-x"
+                    style={{ fill: few ? FEW[kind] : FILL[kind], transform: `scaleX(${widths[kind] / 100})` }}
                   />
                 ))}
               </svg>

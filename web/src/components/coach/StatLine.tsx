@@ -1,22 +1,20 @@
 "use client";
 
-import { motion, useInView, useReducedMotion } from "motion/react";
-import { useRef } from "react";
 import type { CoachStat } from "@/lib/api";
 import { statText } from "@/lib/coach";
+import { useReveal } from "@/lib/useReveal";
 import { AnimatedNumber } from "../patterns/charts/AnimatedNumber";
 
 // The pattern's number, big: "7.9 vs your 3.1", with the unit in words and the sample size.
 // Two thin bars put the two figures side by side on one scale (this situation in ink, the
 // player's usual in stone). All numbers come from code (the verifier copied them from the
 // candidate), never from the model.
+// The bars' length is scaleX in their style (bar-x): 0 until the stat scrolls into view, then a
+// CSS transition grows them, so they land on the right length even without animation frames.
 export function StatLine({ stat }: { stat: CoachStat }) {
-  const reduced = !!useReducedMotion();
-  const ref = useRef<HTMLDivElement>(null);
-  const inView = useInView(ref, { once: true, amount: 0.6 });
+  const { ref, shown } = useReveal<HTMLDivElement>(0.6);
   const t = statText(stat);
   const max = Math.max(stat.value, stat.baseline) || 1;
-  const shown = reduced || inView;
 
   return (
     <div ref={ref} className="flex flex-col gap-3">
@@ -39,11 +37,9 @@ export function StatLine({ stat }: { stat: CoachStat }) {
           <div key={bar.label} className="grid grid-cols-[3rem_1fr] items-center gap-2">
             <span className="font-mono text-[11px] text-graphite/60">{bar.label}</span>
             <div className="h-1.5 bg-square-light/60">
-              <motion.div
-                className={`h-full ${bar.color}`}
-                initial={{ width: reduced ? `${(bar.value / max) * 100}%` : "0%" }}
-                animate={{ width: shown ? `${(bar.value / max) * 100}%` : "0%" }}
-                transition={reduced ? { duration: 0 } : { duration: 0.7, delay: 0.1 + i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+              <div
+                className={`bar-x h-full w-full ${bar.color}`}
+                style={{ transform: `scaleX(${shown ? bar.value / max : 0})`, transitionDuration: "700ms", transitionDelay: `${100 + i * 100}ms` }}
               />
             </div>
           </div>

@@ -1,6 +1,5 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
 import { useRef } from "react";
 import type { MoveClass } from "@/lib/api";
 import { formatEval, winPercentSeries, type Eval } from "@/lib/winPercent";
@@ -10,8 +9,10 @@ import { isError } from "./classes";
 // every ply), White's share light at the bottom, Black's dark at the top, a dashed 50% line.
 // Dots mark the imported player's inaccuracies, mistakes and blunders.
 //
-// - Draws itself in once (motion's pathLength), unless the visitor asked for less motion.
+// - Draws itself in once, left to right: a CSS clip-path wipe (anim-wipe), so it ends fully drawn
+//   even in a browser that runs no animation frames; none with reduced motion.
 // - Drag across it (mouse, pen or finger) to scrub the board; ←/→ work anywhere on the page.
+// - The teal cursor glides to the current move (a short CSS transition on its transform).
 // - The SVG stretches to its box (preserveAspectRatio="none", strokes don't scale), and the dots
 //   are HTML positioned in %, so they stay round at any width.
 
@@ -33,7 +34,6 @@ export function EvalGraph({
   onScrub: (ply: number) => void;
   labelFor: (ply: number) => string; // "15… a6??", for the slider's spoken value
 }) {
-  const reduced = useReducedMotion();
   const box = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const series = winPercentSeries(evals);
@@ -53,7 +53,6 @@ export function EvalGraph({
   const dots = (classes ?? []).flatMap((c, i) =>
     isError(c) && (i + 1) % 2 === playerParity ? [{ ply: i + 1, cls: c }] : [],
   );
-  const drawIn = reduced ? false : { pathLength: 0 };
 
   return (
     <div className="flex flex-col gap-1">
@@ -66,7 +65,7 @@ export function EvalGraph({
         aria-valuemax={n}
         aria-valuenow={current}
         aria-valuetext={current === 0 ? "start position" : `${labelFor(current)}, eval ${formatEval(evals[current - 1])}`}
-        className="relative h-24 w-full cursor-ew-resize touch-pan-y overflow-hidden rounded-sm bg-graphite select-none sm:h-28"
+        className="relative h-24 w-full cursor-ew-resize touch-pan-y overflow-hidden rounded-sm bg-graphite outline-1 outline-offset-2 outline-transparent transition-[outline-color] duration-150 select-none hover:outline-ink/40 active:outline-ink sm:h-28"
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           dragging.current = true;
@@ -81,14 +80,8 @@ export function EvalGraph({
         onPointerUp={() => (dragging.current = false)}
         onPointerCancel={() => (dragging.current = false)}
       >
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
-          <motion.path
-            d={area}
-            fill="var(--color-square-light)"
-            initial={reduced ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.5 }}
-          />
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="anim-wipe absolute inset-0 h-full w-full" aria-hidden>
+          <path d={area} fill="var(--color-square-light)" />
           <line
             x1={0}
             x2={W}
@@ -98,26 +91,17 @@ export function EvalGraph({
             strokeDasharray="4 4"
             vectorEffect="non-scaling-stroke"
           />
-          <motion.path
-            d={line}
-            fill="none"
-            stroke="var(--color-ink)"
-            strokeWidth={1.5}
-            vectorEffect="non-scaling-stroke"
-            initial={drawIn}
-            animate={{ pathLength: 1 }}
-            transition={{ duration: 1, ease: "easeInOut" }}
-          />
-          <line
-            x1={x(current)}
-            x2={x(current)}
-            y1={0}
-            y2={H}
-            stroke="var(--color-best)"
-            strokeWidth={2}
-            vectorEffect="non-scaling-stroke"
-          />
+          <path d={line} fill="none" stroke="var(--color-ink)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
         </svg>
+        {/* The cursor: a full-width layer moved by translateX(% of its own width = the graph's), so
+            it can glide with a CSS transition; the 2 px teal line sits at its left edge. */}
+        <div
+          className="motion-slide pointer-events-none absolute inset-0 transition-transform duration-150 ease-out"
+          style={{ transform: `translateX(${(x(current) / W) * 100}%)` }}
+          aria-hidden
+        >
+          <div className="absolute inset-y-0 left-0 w-0.5 -translate-x-1/2 bg-best" />
+        </div>
         {dots.map((d) => (
           <span
             key={d.ply}

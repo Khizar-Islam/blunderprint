@@ -83,11 +83,88 @@ body {
   }
 }
 
-/* The landing hero (components/landing/HeroPrint.tsx): its notes, rings and leaders appear by CSS
-   transitions. With reduced motion they appear at once: the component shows the final state, and this
-   removes the transition. */
+/* ---- Motion (Stage 7 chunk C) ---------------------------------------------------------------
+   One rule everywhere: an element's FINAL state is its normal style, and a CSS animation only
+   says where it comes FROM (a keyframe with just `from`; `backwards` applies it during the
+   delay). CSS animations and transitions run in the browser's own animation engine, not on
+   requestAnimationFrame, so a tab that throttles or never runs animation frames still ends on
+   the right size, colour and position. Later changes (a filter, a new count) are CSS
+   transitions on the same property. With reduced motion every one of them is switched off
+   below, so the final state shows at once. */
+@theme {
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes bp-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes bp-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes bp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--bp-rise, 6px));
+  }
+}
+@keyframes bp-wipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+/* A bar's length is transform: scaleX(f) in its style; it grows from 0 on mount and glides to a
+   new length on change. Works on HTML and on SVG rects (origin: the left edge). */
+@utility bar-x {
+  transform-origin: 0 0;
+  transform-box: view-box;
+  animation: bp-grow-x 600ms var(--ease-out-quint) backwards;
+  transition: transform 600ms var(--ease-out-quint);
+}
+@utility anim-fade {
+  animation: bp-fade 300ms ease-out backwards;
+}
+@utility anim-rise {
+  animation: bp-rise 450ms var(--ease-out-quint) backwards;
+}
+@utility anim-wipe {
+  animation: bp-wipe 1000ms ease-in-out backwards;
+}
+/* Waits for a reveal (useReveal): invisible until it's in view, then anim-rise takes over. */
+@utility reveal-wait {
+  opacity: 0;
+}
+
+/* A sliding segment indicator (lib/useIndicator.ts): the ink pill behind the chosen option. */
+@utility seg-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  transition:
+    transform 260ms var(--ease-out-quint),
+    width 260ms var(--ease-out-quint),
+    height 260ms var(--ease-out-quint);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .hero-in {
+  /* The landing hero (components/landing/HeroPrint.tsx) appears by CSS transitions; its
+     component shows the final state and this removes the transition. */
+  .hero-in,
+  .bar-x,
+  .anim-fade,
+  .anim-rise,
+  .anim-wipe,
+  .seg-indicator,
+  .motion-slide {
+    animation: none !important;
     transition: none !important;
+  }
+  .reveal-wait {
+    opacity: 1 !important;
   }
 }

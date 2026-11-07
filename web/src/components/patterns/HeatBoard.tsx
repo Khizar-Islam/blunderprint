@@ -1,6 +1,5 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import type { Summary } from "@/lib/api";
 import { displayOrder, edgeLabels, heatOpacity, heatSquares, severity, squareLabel, type HeatMode } from "./heat";
@@ -11,6 +10,9 @@ import { displayOrder, edgeLabels, heatOpacity, heatSquares, severity, squareLab
 // were (heat.ts severity: blunder 3, mistake 2, inaccuracy 1), on a scale from 0, so only the
 // hot spots stand out. The label still breaks the count down by kind. The view follows the
 // colour filter: both / White / Black.
+// Each square's heat is its opacity, in its normal style: it fades in square by square (a CSS
+// animation from 0) and glides to the new strength when the filters change (a CSS transition),
+// so it needs no animation frames. Hover outlines a square in ink; a press dips it.
 
 const HEAT = "var(--color-blunder)";
 
@@ -27,7 +29,6 @@ const describe = (sq: { inaccuracy: number; mistake: number; blunder: number; to
         .join(", ");
 
 export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode: HeatMode }) {
-  const reduced = useReducedMotion();
   const cells = heatSquares(squares, mode);
   const max = Math.max(0, ...cells.map(severity));
   const order = displayOrder(mode);
@@ -71,18 +72,18 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
                 onMouseEnter={() => setFocus(i)}
                 onMouseLeave={() => setFocus(null)}
                 onBlur={() => setFocus(null)}
-                className={`relative transition-transform duration-100 active:scale-95 ${light ? "bg-square-light/60" : "bg-square-dark/35"} focus-visible:z-10`}
+                className={`relative cursor-default transition-transform duration-100 hover:z-10 hover:outline-2 hover:-outline-offset-2 hover:outline-ink active:scale-90 ${light ? "bg-square-light/60" : "bg-square-dark/35"} focus-visible:z-10`}
               >
                 {cell.total > 0 && (
-                  <motion.span
-                    className="absolute inset-0"
-                    style={{ backgroundColor: HEAT }}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: heatOpacity(severity(cell), max) }}
-                    transition={reduced ? { duration: 0 } : { duration: 0.5, delay: (n % 8) * 0.02 + Math.floor(n / 8) * 0.02 }}
+                  <span
+                    className="anim-fade absolute inset-0 transition-opacity duration-500 [animation-duration:500ms] motion-reduce:transition-none"
+                    style={{
+                      backgroundColor: HEAT,
+                      opacity: heatOpacity(severity(cell), max),
+                      animationDelay: `${(n % 8) * 20 + Math.floor(n / 8) * 20}ms`,
+                    }}
                   />
                 )}
-                {focus === i && <span className="absolute inset-0 outline-2 -outline-offset-2 outline-ink" />}
               </button>
             );
           })}

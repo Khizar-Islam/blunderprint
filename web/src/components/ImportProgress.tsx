@@ -1,25 +1,17 @@
 "use client";
 
-import { animate, motion, useMotionValue, useTransform } from "motion/react";
 import { useEffect, useState } from "react";
 import { PLATFORM_NAMES, type Platform, type PublicJob } from "@/lib/api";
 import type { StreamConnection } from "@/lib/useJobStream";
+import { AnimatedNumber } from "./patterns/charts/AnimatedNumber";
 
 // A rate-limit wait (429) happens inside the importer: the job stays "running" and the stream
 // goes quiet for up to a minute. After this long without an event we say so.
 const QUIET_HINT_AFTER_MS = 20_000;
 
-// A number that counts up to `value` instead of jumping (motion animates a MotionValue and we
-// render its rounded value). With reduced motion, MotionConfig makes this instant.
-function TickingNumber({ value }: { value: number }) {
-  const count = useMotionValue(value);
-  const rounded = useTransform(count, (v) => Math.round(v));
-  useEffect(() => {
-    const controls = animate(count, value, { duration: 0.6, ease: "easeOut" });
-    return () => controls.stop();
-  }, [count, value]);
-  return <motion.span className="tabular-nums">{rounded}</motion.span>;
-}
+// The games counter counts up instead of jumping (AnimatedNumber: it lands on the real number by
+// a timer even when the browser runs no animation frames; instant with reduced motion).
+const whole = (n: number) => String(Math.round(n));
 
 // Re-renders every second while `active`, for countdowns and "quiet for N s" checks.
 function useNow(active: boolean) {
@@ -63,20 +55,16 @@ export function ImportProgress({
   return (
     <section aria-label="Import progress" className="flex flex-col gap-3">
       <div className="flex items-baseline gap-2 font-mono">
-        <span className="text-3xl text-ink">
-          <TickingNumber value={done} />
+        <span className="text-3xl text-ink tabular-nums">
+          <AnimatedNumber value={done} format={whole} />
         </span>
         <span className="text-sm text-graphite/70">{total ? `of ${total} games` : "games"}</span>
       </div>
 
-      {/* A thin rule that grows from the left as games arrive. scaleX animates on the GPU. */}
+      {/* A thin rule that grows from the left as games arrive: its length is scaleX in its style,
+          and a CSS transition (bar-x) glides it, so it never waits on animation frames. */}
       <div className="h-px w-full bg-ink/15">
-        <motion.div
-          className="h-px origin-left bg-ink"
-          initial={{ scaleX: 0 }}
-          animate={{ scaleX: fraction }}
-          transition={{ type: "spring", stiffness: 120, damping: 24 }}
-        />
+        <div className="bar-x h-px w-full bg-ink" style={{ transform: `scaleX(${fraction})` }} />
       </div>
 
       <p className="text-sm text-graphite" role="status" aria-live="polite">

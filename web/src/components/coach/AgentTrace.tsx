@@ -22,10 +22,13 @@ const GLYPH: Record<TraceKind, string> = {
 };
 
 const TYPE_MS = 260; // how long one line takes to type in
+const LAND_MARGIN_MS = 150;
 
 const seconds = (ms: number) => (ms >= 10_000 ? `${Math.round(ms / 1000)} s` : ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`);
 
-function TypedText({ text, animate }: { text: string; animate: boolean }) {
+// Types on animation frames; a timer shows the whole text when the typing should have ended,
+// so a browser that throttles frames still ends with every line complete.
+export function TypedText({ text, animate }: { text: string; animate: boolean }) {
   const [shown, setShown] = useState(animate ? 0 : text.length);
   useEffect(() => {
     if (!animate) return;
@@ -35,7 +38,14 @@ function TypedText({ text, animate }: { text: string; animate: boolean }) {
       setShown(n);
       if (n < text.length) frame = requestAnimationFrame(tick);
     });
-    return () => cancelAnimationFrame(frame);
+    const land = window.setTimeout(() => {
+      cancelAnimationFrame(frame);
+      setShown(text.length);
+    }, TYPE_MS + LAND_MARGIN_MS);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(land);
+    };
   }, [animate, text]);
   // The full text is always in the DOM for screen readers; only the visible part changes.
   return (
@@ -46,7 +56,7 @@ function TypedText({ text, animate }: { text: string; animate: boolean }) {
   );
 }
 
-function Line({ step, animate }: { step: TraceStep; animate: boolean }) {
+export function TraceLine({ step, animate }: { step: TraceStep; animate: boolean }) {
   const isSwitch = step.kind === "switch";
   const muted = step.kind === "retry";
   return (
@@ -126,7 +136,7 @@ export function AgentTrace({
         aria-relevant="additions"
       >
         {steps.map((step) => (
-          <Line key={step.n} step={step} animate={live && !reduced} />
+          <TraceLine key={step.n} step={step} animate={live && !reduced} />
         ))}
         {live && status !== "done" && status !== "failed" && (
           <li className="py-1 pl-12 font-mono text-[13px] text-graphite/50" aria-hidden="true">

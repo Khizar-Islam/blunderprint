@@ -8,7 +8,7 @@ import { count } from "@/lib/format";
 import { useSummary } from "@/lib/useSummary";
 import { Blunderprint } from "./Blunderprint";
 import { StackedBars, type BarRow } from "./charts/StackedBars";
-import { Filters } from "./Filters";
+import { ChipGroup, Filters } from "./Filters";
 import { HeatBoard } from "./HeatBoard";
 import { OpeningsTable } from "./OpeningsTable";
 
@@ -76,11 +76,17 @@ export function PatternsDashboard({
           </button>
         </p>
       )}
-      {!summary && !view.error && <p className="font-mono text-sm text-graphite/70">Loading patterns…</p>}
+      {/* While the first summary loads, its space is held (most of a screen), so the games list
+          below doesn't jump up and back down. */}
+      {!summary && !view.error && <p className="min-h-[70vh] font-mono text-sm text-graphite/70">Loading patterns…</p>}
 
+      {/* The parts rise in one after another when the first summary arrives (CSS, on mount only;
+          a filter change keeps them mounted, and the bars and numbers glide instead). */}
       {summary && (
         <div className={`flex flex-col gap-10 transition-opacity duration-200 ${view.loading ? "opacity-60" : ""}`}>
-          <Headline summary={summary} extracting={view.data!.extracting} />
+          <div className="anim-rise">
+            <Headline summary={summary} extracting={view.data!.extracting} />
+          </div>
 
           {summary.totals.analysed === 0 ? (
             <div className="flex flex-col items-start gap-2 border-l-2 border-ink/30 py-1 pl-4">
@@ -96,7 +102,7 @@ export function PatternsDashboard({
             </div>
           ) : (
             <>
-              <div className="grid gap-8 lg:grid-cols-[1fr_20rem]">
+              <div className="anim-rise grid gap-8 [animation-delay:80ms] lg:grid-cols-[1fr_20rem]">
                 <figure className="flex min-w-0 flex-col gap-2">
                   <figcaption className="flex flex-col gap-0.5">
                     <span className="font-display text-xl text-ink">The Blunderprint</span>
@@ -110,7 +116,7 @@ export function PatternsDashboard({
                 <HeatBoard squares={summary.squares} mode={filters.color ?? "both"} />
               </div>
 
-              <div className="flex flex-col gap-5">
+              <div className="anim-rise flex flex-col gap-5 [animation-delay:160ms]">
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
                   <h3 className="font-display text-2xl text-ink">Errors by</h3>
                   <RateToggle value={rate} onChange={setRate} />
@@ -140,7 +146,9 @@ export function PatternsDashboard({
                 </div>
               </div>
 
-              <OpeningsTable openings={summary.openings} />
+              <div className="anim-rise [animation-delay:240ms]">
+                <OpeningsTable openings={summary.openings} />
+              </div>
             </>
           )}
         </div>
@@ -185,27 +193,11 @@ function Headline({ summary, extracting }: { summary: Summary; extracting: boole
   );
 }
 
+const RATE_OPTIONS: { key: RateMode; label: string }[] = [
+  { key: "per100", label: "per 100 moves" },
+  { key: "perGame", label: "per game" },
+];
+
 function RateToggle({ value, onChange }: { value: RateMode; onChange: (v: RateMode) => void }) {
-  const options: [RateMode, string][] = [
-    ["per100", "per 100 moves"],
-    ["perGame", "per game"],
-  ];
-  return (
-    <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Error rate">
-      {options.map(([key, label]) => (
-        <button
-          key={key}
-          type="button"
-          role="radio"
-          aria-checked={value === key}
-          onClick={() => onChange(key)}
-          className={`rounded-full border px-2.5 py-0.5 text-xs transition-[background-color,color,border-color,transform] duration-150 active:scale-95 ${
-            value === key ? "border-ink bg-ink text-bone" : "border-ink/20 text-graphite hover:border-ink hover:text-ink"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
+  return <ChipGroup label="Error rate" showLabel={false} options={RATE_OPTIONS} current={value} onPick={(k) => k && onChange(k)} />;
 }

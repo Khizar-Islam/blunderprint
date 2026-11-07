@@ -1,8 +1,8 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import type { CoachPattern, Platform } from "@/lib/api";
+import { useReveal } from "@/lib/useReveal";
 import { EvidenceBoard } from "./EvidenceBoard";
 import { FingerprintLens } from "./FingerprintLens";
 import { StatLine } from "./StatLine";
@@ -10,6 +10,9 @@ import { StatLine } from "./StatLine";
 // One verified pattern: its label (written by code), the fingerprint lens, the big statistic,
 // the coach's explanation and drill, and 2-4 evidence boards. The lens and the boards share a
 // "lit" index, so hovering either lights the other.
+// The card rises in when it scrolls into view. Cards that come into view together (the first
+// screen) start 120 ms apart; one scrolled to later starts at once (lib/useReveal.ts). It's a
+// CSS animation from below to the card's normal style, so it ends in place even without frames.
 
 const BOARD_COLS: Record<number, string> = {
   1: "grid-cols-2 md:grid-cols-3",
@@ -31,18 +34,16 @@ export function PatternCard({
   platform: Platform;
   username: string;
 }) {
-  const reduced = !!useReducedMotion();
+  const { ref, shown, delayMs } = useReveal<HTMLElement>(0.15, true);
   const [lit, setLit] = useState<number | null>(null);
   const hrefOf = (e: { gameId: string; ply: number }) => `/p/${platform}/${encodeURIComponent(username)}/game/${encodeURIComponent(e.gameId)}?ply=${e.ply}`;
   const cols = BOARD_COLS[Math.min(4, pattern.evidence.length)] ?? BOARD_COLS[4];
 
   return (
-    <motion.article
-      className="flex flex-col gap-6 border-t-2 border-ink pt-5"
-      initial={reduced ? false : { opacity: 0, y: 16 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.15 }}
-      transition={{ duration: 0.5, delay: Math.min(index, 2) * 0.12, ease: [0.22, 1, 0.36, 1] }}
+    <article
+      ref={ref}
+      className={`flex flex-col gap-6 border-t-2 border-ink pt-5 [--bp-rise:16px] [animation-duration:500ms] ${shown ? "anim-rise" : "reveal-wait"}`}
+      style={{ animationDelay: `${delayMs}ms` }}
       aria-labelledby={`pattern-${index}`}
     >
       <header className="flex flex-col gap-1">
@@ -80,6 +81,6 @@ export function PatternCard({
           />
         ))}
       </div>
-    </motion.article>
+    </article>
   );
 }

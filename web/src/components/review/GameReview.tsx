@@ -196,6 +196,13 @@ function Review({
             orientation={game.color}
             lastMove={move && !showingBefore ? { from: move.from, to: move.to, cls } : undefined}
             arrows={arrows}
+            label={
+              !move
+                ? "Starting position"
+                : `Position ${showingBefore ? "before" : "after"} ${Math.ceil(ply / 2)}${ply % 2 ? "." : "…"} ${move.san}${
+                    showingBefore && betterSan ? `, with arrows for ${move.san} and the better ${betterSan}` : ""
+                  }`
+            }
           />
           <Controls ply={ply} last={last} go={go} />
           <div className="min-h-12">

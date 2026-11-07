@@ -11,6 +11,18 @@ import { isError } from "./classes";
 // the dark ones, in Geist Mono. Dark labels on both because the dark stone (#8C8675) is a
 // mid-tone: bone on it is only ~2.8:1 contrast, ink ~4.5:1. The last move's two squares are tinted: in its classification colour
 // when it was an inaccuracy/mistake/blunder, otherwise a faint ink tint.
+//
+// View-only, so its insides are `inert`: with dragging off, react-chessboard (through dnd-kit)
+// still makes every piece a focusable "draggable" button (tabindex 0), which put 32 dead tab
+// stops on each board (160+ on the coach page). Inert takes them out of the tab order and the
+// accessibility tree; the board is one image with a label saying which position it shows.
+//
+// The same inner wrapper is its own compositing layer (will-change: transform). On Windows,
+// Chrome draws text with subpixel (ClearType) smoothing, which puts blue and orange fringes on
+// each glyph; on the 11 px, semi-transparent coordinates over the light stone the fringes
+// outweighed the grey, so letters like b and h read blue. Text in a layer without an opaque
+// background is drawn with greyscale smoothing instead. The colours themselves were always
+// ours (NOTATION_ON_LIGHT / NOTATION_ON_DARK).
 
 export interface BoardArrow {
   from: string;
@@ -36,6 +48,7 @@ export function Board({
   id = "review-board",
   animationMs = 180,
   showCoordinates = true,
+  label,
 }: {
   fen: string;
   orientation: "white" | "black";
@@ -47,6 +60,8 @@ export function Board({
   animationMs?: number;
   // Off on the coach's small evidence boards, where they'd crowd the squares.
   showCoordinates?: boolean;
+  // What a screen reader hears for the board, e.g. "Position after 18. Nxe5".
+  label: string;
 }) {
   // Pieces slide between positions, except for visitors who asked for less motion.
   const reduced = useReducedMotion();
@@ -55,27 +70,29 @@ export function Board({
     : {};
 
   return (
-    <div className="aspect-square w-full overflow-hidden rounded-sm">
-      <Chessboard
-        options={{
-          id,
-          position: fen,
-          boardOrientation: orientation,
-          allowDragging: false,
-          allowDrawingArrows: false,
-          showAnimations: !reduced,
-          animationDurationInMs: animationMs,
-          lightSquareStyle: { backgroundColor: "var(--color-square-light)" },
-          darkSquareStyle: { backgroundColor: "var(--color-square-dark)" },
-          showNotation: showCoordinates,
-          lightSquareNotationStyle: NOTATION_ON_LIGHT,
-          darkSquareNotationStyle: NOTATION_ON_DARK,
-          alphaNotationStyle: { ...NOTATION_TEXT, position: "absolute", bottom: 1, right: 3 },
-          numericNotationStyle: { ...NOTATION_TEXT, position: "absolute", top: 1, left: 3 },
-          squareStyles,
-          arrows: arrows.map((a) => ({ startSquare: a.from, endSquare: a.to, color: a.color })),
-        }}
-      />
+    <div className="aspect-square w-full overflow-hidden rounded-sm" role="img" aria-label={label}>
+      <div inert className="h-full w-full will-change-transform">
+        <Chessboard
+          options={{
+            id,
+            position: fen,
+            boardOrientation: orientation,
+            allowDragging: false,
+            allowDrawingArrows: false,
+            showAnimations: !reduced,
+            animationDurationInMs: animationMs,
+            lightSquareStyle: { backgroundColor: "var(--color-square-light)" },
+            darkSquareStyle: { backgroundColor: "var(--color-square-dark)" },
+            showNotation: showCoordinates,
+            lightSquareNotationStyle: NOTATION_ON_LIGHT,
+            darkSquareNotationStyle: NOTATION_ON_DARK,
+            alphaNotationStyle: { ...NOTATION_TEXT, position: "absolute", bottom: 1, right: 3 },
+            numericNotationStyle: { ...NOTATION_TEXT, position: "absolute", top: 1, left: 3 },
+            squareStyles,
+            arrows: arrows.map((a) => ({ startSquare: a.from, endSquare: a.to, color: a.color })),
+          }}
+        />
+      </div>
     </div>
   );
 }

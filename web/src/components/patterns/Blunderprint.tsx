@@ -36,7 +36,8 @@ type Ribbon = Summary["ribbons"][number];
 type Active = { row: number; ply: number | null; source: "pointer" | "key" | "tap" };
 
 const REVEAL_MS = 700; // the first draw sweeps down the rows in this long
-const FADE_MS = 300; // each row's fade-in (also for games that arrive later)
+const FADE_MS = 300; // each row's fade-in (also for games that arrive later, e.g. one the engine just finished)
+const LAND_MARGIN_MS = 150; // the safety timer's slack after the last fade should have ended
 const LOUPE_H = 14;
 
 const RESULT = { win: "Win", loss: "Loss", draw: "Draw" } as const;
@@ -100,7 +101,21 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
       if (pending) frame = requestAnimationFrame(paint);
     };
     paint();
-    return () => cancelAnimationFrame(frame);
+    // The fade runs on animation frames; a browser that throttles them (a background tab, battery
+    // saver) could leave rows half drawn. This timer draws the final state when the last fade
+    // should have ended, frames or not (the same idea as AnimatedNumber's countTo).
+    const lastStart = Math.max(0, ...ribbons.map((r) => appearAt.current.get(r.gameId) ?? 0));
+    const land = window.setTimeout(
+      () => {
+        cancelAnimationFrame(frame);
+        drawRows(ctx, l, ribbons, () => 1);
+      },
+      Math.max(0, lastStart + FADE_MS - performance.now()) + LAND_MARGIN_MS,
+    );
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(land);
+    };
   }, [l, ribbons, reduced]);
 
   // The selection can outlive the data (filters changed): drop it if its row is gone.
@@ -181,7 +196,8 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
           role="img"
           aria-label={`Blunderprint: ${ribbons.length} analysed games, newest at the top, one tick per move. Use the arrow keys to explore and Enter to open a game.`}
           aria-describedby="blunderprint-status"
-          className={`block cursor-crosshair touch-manipulation rounded-[1px] focus-visible:outline-offset-4`}
+          // A pointer over a move (a click opens the game there); the plain arrow between moves.
+          className={`block touch-manipulation rounded-[1px] outline-1 outline-offset-4 outline-transparent transition-[outline-color] duration-150 hover:outline-ink/25 focus-visible:outline-offset-4 active:outline-ink/50 ${current?.source === "pointer" && current.ply ? "cursor-pointer" : "cursor-default"}`}
           style={{ width: l.width, height: l.height }}
           onPointerMove={onPointerMove}
           onPointerDown={(e) => (pointerType.current = e.pointerType)}
@@ -191,15 +207,16 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
         />
         {current && game && (
           <>
-            {/* The hovered row and tick, outlined in ink. */}
+            {/* The hovered row and tick, outlined in ink. The outlines glide from row to row (a short
+                CSS transition on their position) instead of blinking from one to the next. */}
             <div
               ref={highlight}
-              className="pointer-events-none absolute -inset-x-1 border border-ink/70"
+              className="motion-slide anim-fade pointer-events-none absolute -inset-x-1 border border-ink/70 transition-[top] duration-100 ease-out"
               style={{ top: current.row * l.pitch - 1, height: l.rowH + 2 }}
             />
             {current.ply !== null && current.ply <= l.columns && (
               <div
-                className="pointer-events-none absolute border border-ink"
+                className="motion-slide pointer-events-none absolute border border-ink transition-[top,left] duration-75 ease-out"
                 style={{ top: current.row * l.pitch - 3, height: l.rowH + 6, left: (current.ply - 1) * l.tickW - 1, width: Math.max(3, l.tickW + 2) }}
               />
             )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useInView, useReducedMotion } from "motion/react";
+import { useInView, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { CoachEvidence } from "@/lib/api";
@@ -51,9 +51,12 @@ function Arrow({ uci, color, orientation, draw, reduced }: { uci: string | null;
   const side = { x: -uy * 0.24, y: ux * 0.24 };
   const head = `${tip.x},${tip.y} ${base.x + side.x},${base.y + side.y} ${base.x - side.x},${base.y - side.y}`;
   const shown = draw || reduced;
+  // The shaft draws itself with a dash the length of the line (pathLength 1, offset 1 → 0) and
+  // the head fades in as it arrives: CSS transitions on the styles, so the arrow ends drawn even
+  // without animation frames. Reduced motion: no transition.
   return (
     <g opacity={0.85}>
-      <motion.line
+      <line
         x1={a.x}
         y1={a.y}
         x2={base.x}
@@ -61,16 +64,18 @@ function Arrow({ uci, color, orientation, draw, reduced }: { uci: string | null;
         stroke={color}
         strokeWidth={0.17}
         strokeLinecap="round"
-        initial={false}
-        animate={{ pathLength: shown ? 1 : 0, opacity: shown ? 1 : 0 }}
-        transition={reduced ? { duration: 0 } : { duration: SLIDE_MS / 1000, ease: [0.22, 1, 0.36, 1] }}
+        pathLength={1}
+        strokeDasharray="1"
+        style={{
+          strokeDashoffset: shown ? 0 : 1,
+          opacity: shown ? 1 : 0,
+          transition: reduced ? undefined : `stroke-dashoffset ${SLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${SLIDE_MS}ms`,
+        }}
       />
-      <motion.polygon
+      <polygon
         points={head}
         fill={color}
-        initial={false}
-        animate={{ opacity: shown ? 1 : 0 }}
-        transition={reduced ? { duration: 0 } : { duration: 0.15, delay: shown ? SLIDE_MS / 1000 - 0.1 : 0 }}
+        style={{ opacity: shown ? 1 : 0, transition: reduced ? undefined : `opacity 150ms ${shown ? SLIDE_MS - 100 : 0}ms` }}
       />
     </g>
   );
@@ -131,7 +136,14 @@ export function EvidenceBoard({
         className={`relative rounded-sm transition-[outline-color] duration-150 outline-2 outline-offset-2 ${active ? "outline-ink" : "outline-transparent"}`}
         style={{ opacity: shownPhase === "hidden" ? 0 : 1, transition: reduced ? undefined : `opacity ${FADE_MS}ms ease-out, outline-color 150ms` }}
       >
-        <Board id={boardId} fen={position} orientation={orientation} animationMs={SLIDE_MS} showCoordinates={false} />
+        <Board
+          id={boardId}
+          fen={position}
+          orientation={orientation}
+          animationMs={SLIDE_MS}
+          showCoordinates={false}
+          label={`Position before ${caption.move.toLowerCase()} ${caption.played}, with arrows for the move played and the better move`}
+        />
         <svg viewBox="0 0 8 8" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
           <Arrow uci={evidence.playedUci} color={RUST} orientation={orientation} draw={shownPhase !== "hidden" && shownPhase !== "before"} reduced={reduced} />
           <Arrow uci={evidence.betterUci} color={TEAL} orientation={orientation} draw={shownPhase === "better"} reduced={reduced} />

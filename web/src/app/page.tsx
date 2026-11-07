@@ -2,18 +2,13 @@ import Link from "next/link";
 import { HealthStatus } from "@/components/HealthStatus";
 import { demo } from "@/components/landing/demoData";
 import { HeroPrint } from "@/components/landing/HeroPrint";
+import { HowItWorks } from "@/components/landing/HowItWorks";
 import { PlayerSearch } from "@/components/PlayerSearch";
 
 // The landing page. The hero is drawn from a committed snapshot (src/data/demo.json), so it
 // never waits on the API. The footer's health check doubles as the prewarm: it asks the API
 // for /api/health as the page loads, so a sleeping Render instance starts waking while the
 // hero plays, and the first click usually finds it awake.
-
-const STEPS = [
-  { title: "Import", text: "Up to 200 of your recent Chess.com or Lichess games, streamed in live." },
-  { title: "Engine in your browser", text: "Stockfish runs on your own computer and marks every inaccuracy, mistake and blunder." },
-  { title: "A coach that checks its claims", text: "An AI agent investigates the data with tools; code verifies every number and position it cites." },
-];
 
 // A secondary action: ink text, underlined, a 44 px tall target, press feedback.
 const DEMO_LINK =
@@ -58,16 +53,8 @@ export default function Home() {
         <HeroPrint demo={demo} />
       </section>
 
-      <section>
-        <ol className="grid max-w-4xl gap-x-10 gap-y-4 border-t border-ink/15 pt-6 sm:grid-cols-3">
-          {STEPS.map((s, i) => (
-            <li key={s.title} className="grid grid-cols-[1.5rem_1fr] gap-x-2 gap-y-1">
-              <span className="font-mono text-sm text-graphite tabular-nums">{i + 1}.</span>
-              <span className="text-sm font-medium text-ink">{s.title}</span>
-              <span className="col-start-2 text-sm text-graphite">{s.text}</span>
-            </li>
-          ))}
-        </ol>
+      <section aria-label="How it works">
+        <HowItWorks demo={demo} />
       </section>
 
       <footer className="mt-auto pt-4">

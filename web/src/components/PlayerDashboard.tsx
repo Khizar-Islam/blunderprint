@@ -33,14 +33,25 @@ function Dashboard({ platform, username }: Props) {
   // The summary starts in parallel with GET player → POST import (lib/dashboardStart.ts), for
   // the filters in the URL (the same query the patterns section will ask for). Both requests are
   // safe to repeat, so the waking hook may retry them while Render wakes up.
+  // `foundPlayer` arrives with GET player, before the import check settles: the patterns, the
+  // games and the coach button render from it at once (on the demo dashboard that took one
+  // round trip off LCP). If the import check then starts an import, it's followed as before.
+  const [foundPlayer, setFoundPlayer] = useState<Player | null>(null);
   const start = useWakingRequest<Start>((signal) =>
-    startDashboard(platform, username, apiQuery(parseFilters(new URLSearchParams(window.location.search)), new Date()), signal),
+    startDashboard(
+      platform,
+      username,
+      apiQuery(parseFilters(new URLSearchParams(window.location.search)), new Date()),
+      signal,
+      setFoundPlayer,
+    ),
   );
 
   const started = start.state.kind === "done" ? start.state.value : null;
   // The player as of the start request, until an import finishes and we fetch it again.
   const [refreshedPlayer, setRefreshedPlayer] = useState<Player | null>(null);
-  const player = refreshedPlayer ?? started?.player ?? null;
+  const player = refreshedPlayer ?? started?.player ?? foundPlayer;
+  const hasPlayer = player != null;
   const [games, setGames] = useState<GameRow[]>([]);
   const [gamesState, setGamesState] = useState<"idle" | "loading" | "error">("idle");
   const [lastEventAt, setLastEventAt] = useState(() => Date.now());
@@ -105,10 +116,11 @@ function Dashboard({ platform, username }: Props) {
     return () => controller.current?.abort();
   }, []);
 
-  // Once the start request settles: show what is stored already (a re-import, or up to date).
+  // Once the player is known: show what is stored already (a re-import, or up to date). Once,
+  // not again when the import check settles: an import it starts brings its own progress syncs.
   useEffect(() => {
-    if (started?.player) void load("reload");
-  }, [started, load]);
+    if (hasPlayer) void load("reload");
+  }, [hasPlayer, load]);
 
   // ---- Following the import ------------------------------------------------------------------
   const onEvent = useCallback(
@@ -149,7 +161,8 @@ function Dashboard({ platform, username }: Props) {
     <p className="text-sm text-graphite/70">Chess.com publishes games with a 12–24 hour delay, so the newest may be missing.</p>
   );
 
-  if (start.state.kind === "loading") {
+  // Still looking, with nothing stored to show yet (GET player hasn't answered, or a first import).
+  if (start.state.kind === "loading" && !foundPlayer) {
     return (
       <Status>
         {start.waking ? `Waking the server up… (${Math.floor(start.elapsedMs / 1_000)}s)` : "Looking up the player…"}
@@ -181,7 +194,10 @@ function Dashboard({ platform, username }: Props) {
   }
 
   const importing = started?.jobId != null && job?.status !== "done";
-  const finished = !importing;
+  // Settled with no import running (not while the import check is still out: it may start one).
+  const finished = started != null && !importing;
+  // Known to have no games (then the sections below have nothing to show and give way to a notice).
+  const noGames = finished && games.length === 0 && gamesState === "idle";
 
   return (
     <div className="flex flex-col gap-8">
@@ -217,7 +233,7 @@ function Dashboard({ platform, username }: Props) {
         </p>
       )}
 
-      {finished && games.length === 0 && gamesState === "idle" && (
+      {noGames && (
         <Notice title="No games to show">
           We found no standard games for this player. Variants (like Chess960) and games from a custom position are
           skipped.
@@ -231,9 +247,11 @@ function Dashboard({ platform, username }: Props) {
           <AnalysisBar analysis={analysis} analysedCount={player.analysedCount} gamesCount={games.length} />
         </div>
       )}
-      {player && !demo && games.length === 0 && gamesState === "loading" && <div className="h-[37px]" aria-hidden="true" />}
+      {player && !demo && games.length === 0 && !noGames && gamesState !== "error" && <div className="h-[37px]" aria-hidden="true" />}
 
-      {player && (games.length > 0 || gamesState === "loading") && <CoachButton info={coachInfo} platform={platform} username={username} />}
+      {/* From the first render with a player, not once the games request is out: appearing one
+          render later, its 148 px pushed the patterns down (measured CLS 0.054 on load). */}
+      {player && !noGames && <CoachButton info={coachInfo} platform={platform} username={username} />}
 
       {/* Patterns refetch when the engine stores a game or an import finishes (the pulse), at most
           every 10 s. Suspense: the section reads the URL's filters (useSearchParams). */}

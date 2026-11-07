@@ -83,6 +83,36 @@ After a game is analysed, a per-player `extract` job turns it into features: eac
 
 The live link stays private until Stage 6 (per-visitor limits).
 
+## Performance (measured on my laptop)
+
+Add `?perf=1` to any page's address and a small box in the corner measures it in your own browser: the gaps between frames, long animation frames, dropped frames, JS heap, LCP and CLS, with "Copy results" (`web/src/lib/perfProbe.ts`; without `?perf=1` none of it is downloaded).
+
+**The perf checklist** (7 Nov 2026): the live site, normal Chrome, dev tools closed, 1280×593 window, DPR 1.5, 8 cores, 60 Hz. Timed from "Restart", after each page had loaded.
+
+| Test | Frames | Worst gap | Dropped | Long frames | Load |
+|---|---|---|---|---|---|
+| 1. Landing hero plays + "How it works" | 1,364 | 17.0 ms | 0% | 0 | LCP 308 ms · CLS 0.003 |
+| 2. Dashboard, 9 filter changes (70.9 s) | 4,253 | 33.4 ms | 0% | 0 | LCP 1,728 ms · CLS 0.016 |
+| 3. Dashboard, hover the print + board, scroll the games (39.0 s) | 2,342 | 17.0 ms | 0% | 0 | LCP 1,952 ms · CLS 0.258 → fixed, below |
+| 4. Game review, drag the graph + hold ←/→ (53.7 s) | 3,223 | 17.5 ms | 0% | 0 | LCP 708 ms · CLS 0.010 |
+| 5. Coach report, scroll through the boards (34.7 s) | 2,078 | 33.5 ms | 0.2% | 0 | LCP 2,292 ms · 2 long frames on load (worst 145 ms) |
+
+At 60 Hz a frame is 16.7 ms, so a worst gap of ~17 ms means no frame was missed; 33 ms is one missed frame.
+
+**What the checklist found, and the fixes:**
+- **Layout shift while hovering the Blunderprint (CLS 0.258).** A layout-shift observer named the culprits: the hover outlines and the loupe were moved with `top`/`left`, and the browser counts every moved `top` as a layout shift. They now move with `transform` (not a shift, and cheaper to animate). Two smaller ones too: the coach button appeared one render after the patterns (pushing them down 148 px on load), and the heat board's readout grew from one line to two. The same scripted scenario went from CLS 0.059 to **0.005** (`web/scripts/ui-cls.mjs`).
+- **A 145 ms frame on the coach page.** All 9 evidence boards (react-chessboard) mounted at once when the report arrived. Now each board mounts only when it comes within 400 px of the screen, one per animation frame (`web/src/lib/mountQueue.ts`). In a headless-Chrome run of the same scroll, the worst frame went from 285–487 ms (live, before) to 113–179 ms; what's left is the page's own load (parsing and hydration), with no board mounting in it (`web/scripts/ui-frames.mjs`).
+
+**Lighthouse (mobile, simulated slow 4G and 4× slower CPU), live site:**
+
+| Page | Score | LCP | TBT | CLS |
+|---|---|---|---|---|
+| Landing | 100 | 1.3 s | 60 ms | 0 |
+| Demo dashboard, before (6 Nov) | 78 | 4.3 s | 320 ms | 0.028 |
+| Demo dashboard, summary fetched in parallel (7 Nov, 2 warm runs) | 78–79 | 4.0–4.2 s | 330–340 ms | 0 |
+
+The landing page ships 166 KB of JavaScript (compressed). The dashboard waits on the API (Render's free tier) more than on the browser: its summary now loads in parallel with the player lookup, and the patterns render as soon as the lookup answers instead of after the import check too.
+
 ## Licences
 
 Blunderprint ships [Stockfish](https://github.com/official-stockfish/Stockfish) through [stockfish.js](https://github.com/nmrugg/stockfish.js) (v19.0.1, unmodified), which are licensed under the **GNU GPL v3**. The engine files are copied from the npm package at build time and served from `/engine/`, together with the licence text (`/engine/Copying.txt`) and a note on where their source code is (`/engine/SOURCE.txt`).

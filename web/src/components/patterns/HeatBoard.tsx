@@ -97,7 +97,9 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
       </div>
       <p className="text-center font-mono text-[11px] tracking-wide text-graphite/60 uppercase">your side</p>
 
-      <p className="min-h-5 font-mono text-xs text-graphite" aria-live="polite">
+      {/* Two lines held (min-h-8): a long square description wraps, and a one-line height made the
+          legend below jump 12 px as the pointer moved between squares. */}
+      <p className="min-h-8 font-mono text-xs text-graphite" aria-live="polite">
         {focused ? `${squareLabel(focus!, mode)}: ${describe(focused)}` : max === 0 ? "No errors yet." : "Hover a square for its count."}
       </p>
       <div className="flex flex-col gap-1 text-xs text-graphite/80">

@@ -208,16 +208,23 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
         {current && game && (
           <>
             {/* The hovered row and tick, outlined in ink. The outlines glide from row to row (a short
-                CSS transition on their position) instead of blinking from one to the next. */}
+                CSS transition) instead of blinking from one to the next. They (and the loupe) sit at
+                top 0 and are moved by `transform`, never `top`/`left`: a moved top is a layout shift
+                to the browser (hovering the print measured CLS 0.26 on the live site), a transform
+                isn't, and it's also cheaper to animate. */}
             <div
               ref={highlight}
-              className="motion-slide anim-fade pointer-events-none absolute -inset-x-1 border border-ink/70 transition-[top] duration-100 ease-out"
-              style={{ top: current.row * l.pitch - 1, height: l.rowH + 2 }}
+              className="motion-slide anim-fade pointer-events-none absolute -inset-x-1 top-0 border border-ink/70 transition-transform duration-100 ease-out"
+              style={{ transform: `translateY(${current.row * l.pitch - 1}px)`, height: l.rowH + 2 }}
             />
             {current.ply !== null && current.ply <= l.columns && (
               <div
-                className="motion-slide pointer-events-none absolute border border-ink transition-[top,left] duration-75 ease-out"
-                style={{ top: current.row * l.pitch - 3, height: l.rowH + 6, left: (current.ply - 1) * l.tickW - 1, width: Math.max(3, l.tickW + 2) }}
+                className="motion-slide pointer-events-none absolute top-0 left-0 border border-ink transition-transform duration-75 ease-out"
+                style={{
+                  transform: `translate(${(current.ply - 1) * l.tickW - 1}px, ${current.row * l.pitch - 3}px)`,
+                  height: l.rowH + 6,
+                  width: Math.max(3, l.tickW + 2),
+                }}
               />
             )}
             <Loupe
@@ -305,16 +312,19 @@ function Loupe({
 
   return (
     <div
-      className="absolute inset-x-0 z-20 flex flex-col gap-1.5 border border-ink/20 bg-bone px-3 py-2 shadow-[0_2px_0_rgba(27,29,26,0.08)]"
-      style={above ? { bottom: `calc(100% - ${top}px)` } : { top }}
+      className="absolute inset-x-0 top-0 z-20 flex flex-col gap-1.5 border border-ink/20 bg-bone px-3 py-2 shadow-[0_2px_0_rgba(27,29,26,0.08)]"
+      // Below the row: its top edge at `top`; above: its bottom edge at `top`. By transform, not
+      // top/bottom, so following the pointer is never a layout shift (see the outlines above).
+      style={{ transform: above ? `translateY(calc(${top}px - 100%))` : `translateY(${top}px)` }}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 font-mono text-xs text-graphite">
-        <span>
-          {fullDate(game.playedAt)} · {RESULT[game.result]} · {game.speed} · as {game.color}
-        </span>
-        <span className={kind ? TEXT[kind] : ""}>
-          {shownPly ? `move ${moveName(shownPly)}${kind ? ` · ${KIND_WORD[kind]}` : ""}` : `${Math.ceil(plies / 2)} moves`}
-          {cut.cut && !shownPly && " · longer than the chart shows"}
+        {/* One text node per side, and the right side fills the row (text-right): as the text
+            changes from move to move, nothing in here moves sideways (a layout shift each time). */}
+        <span>{`${fullDate(game.playedAt)} · ${RESULT[game.result]} · ${game.speed} · as ${game.color}`}</span>
+        <span className={`grow text-right ${kind ? TEXT[kind] : ""}`}>
+          {shownPly
+            ? `move ${moveName(shownPly)}${kind ? ` · ${KIND_WORD[kind]}` : ""}`
+            : `${Math.ceil(plies / 2)} moves${cut.cut ? " · longer than the chart shows" : ""}`}
         </span>
       </div>
       <div ref={box} className="w-full">

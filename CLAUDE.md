@@ -144,7 +144,9 @@ blunderprint/
 │  │                          ribbon.ts, timeline.ts replay + SAN, winPercent.ts graph + accuracy,
 │  │                          filters.ts URL ⇄ filters, useSummary.ts + refetch.ts, plyParam.ts,
 │  │                          coach.ts button state + stat/facts text, runStream.ts + useRunStream.ts,
-│  │                          useCoachInfo.ts)
+│  │                          useCoachInfo.ts; Stage 7: useReveal.ts + stagger.ts, useIndicator.ts,
+│  │                          dashboardStart.ts + summaryPrefetch.ts, mountQueue.ts + useMountWhenNear.ts,
+│  │                          perfProbe.ts + perfStats.ts (?perf=1))
 │  ├─ src/components/        (PlayerSearch, PlayerDashboard, ImportProgress, GamesList, HealthStatus,
 │  │                          MotionProvider, AnalysisBar;
 │  │                          review/: GameReview, Board, EvalGraph, MoveList, BetterMove, classes;
@@ -160,6 +162,9 @@ blunderprint/
 │  │                          useAnalysis.ts React hook, throughput.ts s/game)
 │  ├─ scripts/copy-engine.mjs (predev/prebuild: copies the engine from node_modules/stockfish)
 │  ├─ scripts/snapshot-demo.mjs (by hand, npm run snapshot:demo: live API → src/data/demo.json)
+│  ├─ scripts/ui-*.mjs       (Stage 7 checks over headless Chrome, run comments at the top of each:
+│  │                          ui-audit hover/press/focus, ui-motion reduced motion + no frames + 390 px,
+│  │                          ui-cls layout shift, ui-frames long frames, ui-labels, ui-shots)
 │  ├─ public/engine/         (gitignored, copied at build: stockfish-19-lite-single.js + .wasm,
 │  │                          Copying.txt GPL text, SOURCE.txt where the source is)
 │  └─ .env.example
@@ -524,6 +529,16 @@ Rules:
 - Respect `prefers-reduced-motion`.
 - **Animated numbers always land** (`AnimatedNumber` + `charts/countTo.ts`, coach and dashboard): a browser that throttles animation frames (background tab, battery saver; a test browser ran 1 frame in 500 ms) left a coach stat at "0.0". A timer writes the final value 150 ms after the count should have ended, frames or not, and a visually hidden copy always carries the final value for screen readers (the counting text is `aria-hidden`).
 
+**As built (Stage 7, done 7 Nov 2026):**
+- **CSS first:** the final state is always the element's normal style; keyframes only have a `from` (`bar-x` scaleX bars, `anim-fade`, `anim-rise`, `anim-wipe` in `globals.css`), so a browser with no animation frames still shows the final page. Reduced motion turns all of them off. Route changes fade in (`app/template.tsx`).
+- **Moves are transforms, never `top`/`left`:** hover outlines, the Blunderprint loupe, the eval-graph cursor and the sliding segment indicators (`useIndicator.ts`). A moved `top` counts as layout shift (the loupe once measured CLS 0.258); a transform doesn't.
+- **Reserved space:** every section that loads holds its height first (patterns placeholder, coach button frame from the first render with a player, two lines for the heat board readout, empty squares for the coach boards), so nothing on screen is pushed.
+- **Reveals:** `useReveal` (IntersectionObserver, a page-wide 120 ms stagger queue); coach cards, stats, lens and boards.
+- **Heavy mounts take turns:** coach evidence boards mount only within 400 px of the viewport, one per animation frame (`mountQueue.ts`, 100 ms timer fallback).
+- **Dashboard start:** the summary is fetched in parallel with GET player, and the patterns, games and coach button render as soon as GET player answers; the import check settles behind them (`dashboardStart.ts`).
+- **Every control** has hover, press and focus-visible feedback (checked by `scripts/ui-audit.mjs`: 0 failures on 366 controls). View-only boards are `inert` (no dead tab stops).
+- **`?perf=1`** on any page shows the smoothness probe (frame gaps, long animation frames, dropped frames, heap, LCP/CLS, "Copy results"); without it the code isn't downloaded. Results and Lighthouse numbers: README "Performance".
+
 ### The cold-start UX
 Render's free API sleeps after 15 minutes. The first request can take up to about a minute. Show a "Waking the server up… (Ns)" counter after 3 seconds, the same pattern as Interview Prep.
 
@@ -580,7 +595,7 @@ PORT=5000
 
 Deploy at the end of **Stage 0** and keep deploying after every stage. That way, platform problems (CORS, proxy hops, sleeping servers, changed addresses) show up early, not on demo day.
 
-**Order from here (decided 6 Nov 2026):** Stage 7 (landing + animation pass) next, then Stage 6, then Stage 4.
+**Order from here (decided 6 Nov 2026):** Stage 7 (landing + animation pass) ✅ done 7 Nov 2026; Stage 6 next, then Stage 4.
 
 | Stage | Build | Demo at the end | Done when |
 |---|---|---|---|
@@ -591,7 +606,7 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | **4. The big dataset** ⏸ deferred until after Stage 5 (4 Nov 2026: not enough free disk space on the laptop for the parquet shards). Plan kept: a DuckDB pipeline on the laptop, bullet included, 400-point bands per mover (each move counted in the band of the player who made it), prune locally, publish only the pruned result to Atlas | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
 | **5. Coach agent** ✅ done 6 Nov 2026 (tools d2c510c; loop + verifier 3af51cb, a0e7f4f; API 7286ca4; overload fix cf4d685; coach page 6a065a5; wrap-up docs) | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
 | **6. Ask + guards** | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
-| **7. Landing + animation pass** | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
+| **7. Landing + animation pass** ✅ done 7 Nov 2026 (frozen demo players 62c9a96, landing 97cf88e, animation pass c721a72, perf probe + parallel summary 2f2456f, perf fixes in the "perf: no layout shift on the dashboard…" commit) | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
 | **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences: final check of the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), **verify the licence of react-chessboard's piece set**, and **decide the repo's own licence** | Portfolio-ready | Everything in section 16 has a fallback in place |
 
 ---

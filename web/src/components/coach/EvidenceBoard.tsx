@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { CoachEvidence } from "@/lib/api";
 import { factsLine, fenAfterMove, moveCaption, uciSquares } from "@/lib/coach";
+import { useMountWhenNear } from "@/lib/useMountWhenNear";
 import { Board } from "../review/Board";
 
 // One evidence position on a pattern card. When it scrolls into view:
@@ -14,6 +15,11 @@ import { Board } from "../review/Board";
 // It ends on the position before the move with both arrows, which is also what visitors who
 // ask for reduced motion see at once. Under the board: the move, its cost, and the situation
 // from code (speed, phase, clock, opening), plus a link to that move in the game review.
+//
+// The board itself (react-chessboard, the heavy part) mounts only once the figure is within
+// 400 px of the viewport, one board per frame across the page (lib/useMountWhenNear.ts); until
+// then an empty square of the same size holds its place. The sequence above starts once it's
+// mounted and in view.
 
 // Arrow colours as hex: these are SVG attributes, where var(--…) doesn't work.
 const RUST = "#D9772B";
@@ -99,13 +105,14 @@ export function EvidenceBoard({
   const reduced = !!useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, amount: 0.4 });
+  const { ref: nearRef, mounted } = useMountWhenNear<HTMLElement>();
   const orientation = evidence.color ?? "white";
   const before = fullFen(evidence.fen);
   const after = fenAfterMove(evidence.fen, evidence.playedUci);
   const [phase, setPhase] = useState<Phase>(reduced ? "better" : "hidden");
 
   useEffect(() => {
-    if (reduced || !inView) return;
+    if (reduced || !inView || !mounted) return;
     const start = index * 300;
     const steps: [number, Phase][] = after
       ? [
@@ -122,7 +129,7 @@ export function EvidenceBoard({
         ];
     const timers = steps.map(([at, p]) => setTimeout(() => setPhase(p), at));
     return () => timers.forEach(clearTimeout);
-  }, [inView, reduced, index, after]);
+  }, [inView, mounted, reduced, index, after]);
 
   const shownPhase: Phase = reduced ? "better" : phase;
   const position = shownPhase === "played" && after ? after : before;
@@ -130,20 +137,24 @@ export function EvidenceBoard({
   const facts = factsLine(evidence);
 
   return (
-    <figure className="flex min-w-0 flex-col gap-2" onMouseEnter={() => onActive(true)} onMouseLeave={() => onActive(false)}>
+    <figure ref={nearRef} className="flex min-w-0 flex-col gap-2" onMouseEnter={() => onActive(true)} onMouseLeave={() => onActive(false)}>
       <div
         ref={ref}
         className={`relative rounded-sm transition-[outline-color] duration-150 outline-2 outline-offset-2 ${active ? "outline-ink" : "outline-transparent"}`}
         style={{ opacity: shownPhase === "hidden" ? 0 : 1, transition: reduced ? undefined : `opacity ${FADE_MS}ms ease-out, outline-color 150ms` }}
       >
-        <Board
-          id={boardId}
-          fen={position}
-          orientation={orientation}
-          animationMs={SLIDE_MS}
-          showCoordinates={false}
-          label={`Position before ${caption.move.toLowerCase()} ${caption.played}, with arrows for the move played and the better move`}
-        />
+        {mounted ? (
+          <Board
+            id={boardId}
+            fen={position}
+            orientation={orientation}
+            animationMs={SLIDE_MS}
+            showCoordinates={false}
+            label={`Position before ${caption.move.toLowerCase()} ${caption.played}, with arrows for the move played and the better move`}
+          />
+        ) : (
+          <div className="aspect-square w-full" aria-hidden="true" />
+        )}
         <svg viewBox="0 0 8 8" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
           <Arrow uci={evidence.playedUci} color={RUST} orientation={orientation} draw={shownPhase !== "hidden" && shownPhase !== "before"} reduced={reduced} />
           <Arrow uci={evidence.betterUci} color={TEAL} orientation={orientation} draw={shownPhase === "better"} reduced={reduced} />

@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
+import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
-import { friendly, friendlyFromAgent } from "./friendly.js";
+import { friendly, friendlyFromAgent, waitText } from "./friendly.js";
 
 describe("friendly messages", () => {
   it("maps every way a run can stop to a fixed code", () => {
@@ -41,4 +41,19 @@ describe("friendly messages", () => {
     assert.match(friendly("ai_budget_exhausted", { resetsInMs: 5.4 * 3_600_000 }).message, /midnight Pacific time \(about 5 hours from now\)/);
     assert.match(friendly("ai_budget_exhausted", { resetsInMs: 60_000 }).message, /about 1 hour from now/);
   });
+});
+
+test("the Stage 6 refusals: fixed messages, waits in words", () => {
+  assert.equal(waitText(30_000), "in a minute");
+  assert.equal(waitText(20 * 60_000 + 1), "in about 21 minutes");
+  assert.equal(waitText(89 * 60_000), "in about 89 minutes");
+  assert.equal(waitText(5 * 3_600_000), "in about 5 hours");
+  assert.match(friendly("limit_imports", { retryAfterMs: 20 * 60_000 }).message, /start another in about 20 minutes/);
+  assert.match(friendly("limit_reports", { retryAfterMs: 3 * 3_600_000 }).message, /in about 3 hours/);
+  for (const code of ["limit_requests", "limit_new_players", "storage_full", "busy"] as const) {
+    const f = friendly(code);
+    assert.equal(f.code, code);
+    assert.ok(f.message.length > 20);
+    assert.ok(!/\d{3}/.test(f.message), "no status codes or raw numbers in the message");
+  }
 });

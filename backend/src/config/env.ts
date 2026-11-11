@@ -6,6 +6,7 @@ import { logger } from "../lib/logger.js";
 export const FIXED_CORS_ORIGINS = ["http://localhost:3000", "https://blunderprint.vercel.app"];
 
 const MAX_TRUST_PROXY_HOPS = 5;
+const MIN_SALT_LENGTH = 32;
 
 // How many proxies sit in front of us (Render needs 3: visitor → Cloudflare → Render proxy).
 // Anything other than a whole number 0–5 is a config mistake: warn and fall back to 0,
@@ -114,6 +115,25 @@ const envSchema = z.object({
   CONTACT_EMAIL: z.email(),
   MAX_GAMES_PER_PLAYER: z.coerce.number().int().positive().default(200),
   DEMO_PLAYERS: z.string().default(""),
+  // Stage 6 guards (CLAUDE.md §10 "Guards"). The secret key of the visitor hash (lib/visitor.ts):
+  // required in production (checked below), at least 32 characters; never logged. Changing it
+  // starts every visitor's counters from zero.
+  IP_HASH_SALT: z.string().optional(),
+  // Per visitor (hashed IP). Counted only when the action really starts: a rejoined or
+  // up-to-date import, a cached report, a frozen demo player are free.
+  LIMIT_IMPORTS_PER_HOUR: z.coerce.number().int().positive().default(5),
+  LIMIT_IMPORTS_PER_DAY: z.coerce.number().int().positive().default(15),
+  LIMIT_REPORTS_PER_DAY: z.coerce.number().int().positive().default(3),
+  // The in-memory flood guard on /api (per visitor, per minute). Generous: a dashboard with the
+  // engine running makes a few requests every ten seconds.
+  LIMIT_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(300),
+  // Storage: no NEW player is imported once the database's dataSize + indexSize (what Atlas M0's
+  // 512 MB counts) reaches this. Players already stored can still refresh.
+  STORAGE_NEW_PLAYER_LIMIT_MB: z.coerce.number().positive().default(120),
+  // At most this many new players a day (Pacific), across all visitors.
+  NEW_PLAYERS_PER_DAY: z.coerce.number().int().positive().default(40),
+  // At most this many queued imports: past it, a new import gets 503 busy.
+  IMPORT_QUEUE_MAX: z.coerce.number().int().positive().default(10),
   PORT: z.coerce.number().int().positive().default(5000),
   NODE_ENV: z.string().default("development"),
   // Render sets RENDER=true on its services; used only for the trust-proxy warning.
@@ -156,6 +176,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   }
   if (parsed.data.COACH_SCRIPTED_SCENARIO !== "ok" && production) {
     throw new Error("Invalid environment:\n  COACH_SCRIPTED_SCENARIO: is for local development only");
+  }
+  // Without a secret salt the visitor hash could be reversed by hashing every IPv4 address.
+  if (production && (parsed.data.IP_HASH_SALT ?? "").length < MIN_SALT_LENGTH) {
+    throw new Error(`Invalid environment:\n  IP_HASH_SALT: required in production, at least ${MIN_SALT_LENGTH} characters`);
   }
   // Our own daily budget must leave headroom under Google's: past RPD every call is a 429.
   if (parsed.data.AI_DAILY_CALL_BUDGET > parsed.data.GEMINI_RPD) {

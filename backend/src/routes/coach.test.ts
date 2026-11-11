@@ -23,6 +23,8 @@ import { saveReport } from "../agent/reportStore.js";
 import { syncRunExpiry } from "../agent/runExpiry.js";
 import { createQueue } from "../jobs/queue.js";
 import { startWorker, type Worker } from "../jobs/worker.js";
+import { testGuards } from "../../scripts/testGuards.js";
+import type { Guards } from "../lib/guards.js";
 
 // The whole coach chain with no AI calls: the routes, the report job on its own worker lane,
 // the agent loop with the real tools and verifier, the run stream, the cache and the guards.
@@ -96,11 +98,12 @@ async function setup({
   worker = true,
   handler,
   fallback,
-}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; handler?: ReportHandlerOptions; fallback?: Model } = {}): Promise<Setup> {
+  guards,
+}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; handler?: ReportHandlerOptions; fallback?: Model; guards?: Guards } = {}): Promise<Setup> {
   const coach = createCoachRuntime({ ...ENV, ...env }, { model: model ?? createScriptedModel({ delayMs: 20 }), ...(fallback ? { fallback } : {}) });
   const queue = createQueue();
   const server = await startTestServer(
-    createApp({ corsOrigins: [], trustProxyHops: 0, getDbStatus: () => true, queue, version: "test", coach, sseHeartbeatMs: 1_000 }),
+    createApp({ corsOrigins: [], trustProxyHops: 0, getDbStatus: () => true, queue, version: "test", coach, sseHeartbeatMs: 1_000, guards }),
   );
   const workers: Worker[] = [];
   const startLane = (c: CoachRuntime = coach) => {
@@ -320,6 +323,36 @@ describe("the guards and errors", () => {
     assert.match(body.error, /resets at midnight Pacific time/);
     assert.equal(await AgentRun.countDocuments(), 0);
     assert.equal((await (await fetch(reportUrl(s))).json() as any).ai.canStart, false);
+  });
+
+  it("per visitor (Stage 6): only a run that starts counts; the 3rd start in a day gets 429 limit_reports + Retry-After", async () => {
+    const s = await setup({ worker: false, guards: testGuards({ reportsPerDay: 2 }) });
+    // Bob has too few games: a refusal before the limit never counts.
+    assert.equal((await post(reportUrl(s, "bob"))).status, 409);
+    const first = await post(reportUrl(s));
+    assert.equal(first.status, 202);
+    const { runId } = (await first.json()) as { runId: string };
+    // Asking again while the run waits: the same run, free.
+    const again = await post(reportUrl(s));
+    assert.equal(again.status, 202);
+    assert.equal(((await again.json()) as { runId: string }).runId, runId);
+    // Finish that run's job by hand, so the next POST would start a new one.
+    await Job.updateMany({}, { $set: { status: "done" } });
+    // (No report was saved, the worker is off, so nothing is cached: the next POST starts a run.)
+    assert.equal((await post(reportUrl(s))).status, 202); // the 2nd start
+    await Job.updateMany({}, { $set: { status: "done" } });
+    const refused = await post(reportUrl(s));
+    assert.equal(refused.status, 429);
+    const retryAfter = Number(refused.headers.get("retry-after"));
+    assert.ok(retryAfter > 0 && retryAfter <= 25 * 3600, String(retryAfter));
+    const body = (await refused.json()) as { code: string; error: string };
+    assert.equal(body.code, "limit_reports");
+    assert.match(body.error, /Reports already written are still shown/);
+    assert.equal(await AgentRun.countDocuments(), 2);
+    // The counter is stored under the visitor's hash, never the IP.
+    const ids = (await Usage.find({}, { _id: 1 }).lean()).map((d) => String(d._id));
+    assert.ok(ids.some((id) => /^ip:[0-9a-f]{32}\|reports\|\d{4}-\d{2}-\d{2}$/.test(id)), ids.join());
+    assert.ok(!ids.some((id) => id.includes("127.0.0.1")));
   });
 
   it("the budget running out mid-run stops it with ai_budget_exhausted", async () => {

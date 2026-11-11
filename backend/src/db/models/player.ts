@@ -32,6 +32,10 @@ const playerSchema = new Schema(
       // Newest game we have, in the platform's own time: Chess.com end_time, Lichess createdAt
       // (Lichess's `since` filter works on createdAt). Set only when an import finishes.
       newestGameAt: Date,
+      // When the dashboard last started an automatic refresh of this stored player (Stage 6).
+      // Such refreshes don't count toward the visitor's import limit, so they're held to one per
+      // player per 6 hours here (lastImportedAt alone wouldn't: it's only set on success).
+      lastAutoRefreshAt: Date,
     },
   },
   { timestamps: true },

@@ -1,10 +1,10 @@
 import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { Job } from "../db/models/job.js";
+import { FINISHED_JOB_TTL_SECONDS, Job } from "../db/models/job.js";
 import { clearDb, startTestDb } from "../../scripts/testDb.js";
 import { FatalError, RetryableError } from "./errors.js";
 import { jobEvents, type JobEvent } from "./events.js";
-import { createQueue } from "./queue.js";
+import { backfillFinishedAt, createQueue } from "./queue.js";
 
 let db: Awaited<ReturnType<typeof startTestDb>>;
 before(async () => {
@@ -225,4 +225,47 @@ test("every visible change bumps rev and emits one event; lease renewals and los
   assert.equal("workerId" in seen[0]!.job, false);
   assert.equal((await Job.findById(queued._id))!.rev, 5);
   assert.equal(jobEvents.listenerCount(String(queued._id)), 0);
+});
+
+test("finished jobs get finishedAt (done, failed, given up by the reaper) and a 7-day TTL index deletes them", async () => {
+  const clock = fakeClock();
+  const queue = createQueue({ now: clock.now });
+  const keys = ["import:lichess:a", "import:lichess:b", "import:lichess:c", "import:lichess:d"];
+  for (const key of keys) await queue.enqueue({ ...input, key, maxAttempts: 1 });
+
+  const a = await queue.claimNext("w1", LEASE);
+  await queue.complete(a!._id, "w1");
+  const b = await queue.claimNext("w1", LEASE);
+  await queue.fail(b!, "w1", new FatalError("user_not_found", "No such player"));
+  await queue.claimNext("w1", LEASE);
+  clock.advance(LEASE + 1);
+  await queue.reapExpired(); // out of attempts: failed
+  // The 4th is still queued: no finishedAt, so the TTL never touches it.
+
+  const byKey = Object.fromEntries((await Job.find({}).lean()).map((j) => [j.key, j]));
+  assert.equal(byKey["import:lichess:a"]!.finishedAt?.toISOString(), "2026-10-30T12:00:00.000Z");
+  assert.equal(byKey["import:lichess:b"]!.finishedAt?.toISOString(), "2026-10-30T12:00:00.000Z");
+  assert.equal(byKey["import:lichess:c"]!.status, "failed");
+  assert.ok(byKey["import:lichess:c"]!.finishedAt);
+  assert.equal(byKey["import:lichess:d"]!.finishedAt, undefined);
+
+  const ttl = (await Job.collection.indexes()).find((i) => i.key.finishedAt === 1);
+  assert.equal(ttl?.expireAfterSeconds, FINISHED_JOB_TTL_SECONDS);
+  assert.equal(FINISHED_JOB_TTL_SECONDS, 7 * 24 * 3600);
+});
+
+test("backfillFinishedAt dates finished jobs from before the TTL by their updatedAt, and leaves the rest", async () => {
+  const old = new Date("2026-10-01T10:00:00Z");
+  await Job.collection.insertMany([
+    { type: "import", key: "k1", status: "done", runAfter: old, createdAt: old, updatedAt: old },
+    { type: "import", key: "k2", status: "failed", runAfter: old, createdAt: old, updatedAt: old },
+    { type: "import", key: "k3", status: "queued", runAfter: old, createdAt: old, updatedAt: old },
+  ]);
+  assert.equal(await backfillFinishedAt(), 2);
+  const jobs = Object.fromEntries((await Job.find({}).lean()).map((j) => [j.key, j]));
+  assert.equal(jobs.k1!.finishedAt?.toISOString(), old.toISOString());
+  assert.equal(jobs.k2!.finishedAt?.toISOString(), old.toISOString());
+  assert.equal(jobs.k3!.finishedAt, undefined);
+  assert.equal(jobs.k1!.updatedAt.toISOString(), old.toISOString(), "not a change to the job");
+  assert.equal(await backfillFinishedAt(), 0, "a no-op the second time");
 });

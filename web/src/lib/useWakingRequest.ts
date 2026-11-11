@@ -9,8 +9,10 @@ const GIVE_UP_AFTER_MS = 60_000; // then stop and offer Retry
 const RETRY_EVERY_MS = 3_000; // a waking server can also fail fast (e.g. 502) before it is ready
 
 // Worth retrying while the server may still be waking: no answer at all, or a 502/503/504 from
-// Render's proxy. A 4xx is a real answer, so it is returned straight away.
-const isWakingError = (err: unknown) => err instanceof ApiError && (err.status === 0 || err.status >= 502);
+// Render's proxy. A 4xx is a real answer, so it is returned straight away, and so is a 5xx that
+// carries one of our codes (e.g. 503 storage_full or busy, Stage 6): our API answered it.
+export const isWakingError = (err: unknown) =>
+  err instanceof ApiError && (err.status === 0 || (err.status >= 502 && err.code === undefined));
 
 export type WakingState<T> =
   | { kind: "loading" }

@@ -1,8 +1,10 @@
+import type { Response } from "express";
 import type { AgentError } from "./loop.js";
 
 // Every coach failure a visitor can see, as a fixed code (the page can switch on it) and a
 // fixed message. The real error (an upstream message, a stack, loop.ts's "Unexpected error:
 // ...") only ever goes to the logs. Nothing else in the coach API sends error text to a visitor.
+// Stage 6 adds the guards' refusals (limits, storage, a full queue), used by the import route too.
 
 export type FriendlyCode =
   | "player_not_found"
@@ -17,7 +19,14 @@ export type FriendlyCode =
   | "coach_interrupted"
   | "coach_config"
   | "run_not_found"
-  | "internal";
+  | "internal"
+  // Stage 6 guards
+  | "limit_imports"
+  | "limit_reports"
+  | "limit_requests"
+  | "limit_new_players"
+  | "storage_full"
+  | "busy";
 
 export interface FriendlyError {
   code: FriendlyCode;
@@ -28,6 +37,8 @@ export interface FriendlyVars {
   analysed?: number;
   needed?: number;
   resetsInMs?: number;
+  // How long until a limit's window ends (also sent as Retry-After).
+  retryAfterMs?: number;
 }
 
 const hoursText = (ms: number | undefined) => {
@@ -35,6 +46,16 @@ const hoursText = (ms: number | undefined) => {
   const hours = Math.max(1, Math.round(ms / 3_600_000));
   return ` (about ${hours} hour${hours === 1 ? "" : "s"} from now)`;
 };
+
+// "in about 40 minutes" / "in about 3 hours" / "in a minute".
+export function waitText(ms: number | undefined): string {
+  if (ms === undefined) return "later";
+  const minutes = Math.ceil(ms / 60_000);
+  if (minutes <= 1) return "in a minute";
+  if (minutes < 90) return `in about ${minutes} minutes`;
+  const hours = Math.round(ms / 3_600_000);
+  return `in about ${hours} hours`;
+}
 
 export function friendly(code: FriendlyCode, vars: FriendlyVars = {}): FriendlyError {
   const messages: Record<FriendlyCode, () => string> = {
@@ -53,6 +74,16 @@ export function friendly(code: FriendlyCode, vars: FriendlyVars = {}): FriendlyE
     coach_config: () => "The coach hit a problem on our side. It's been logged.",
     run_not_found: () => "That coach run has expired or doesn't exist.",
     internal: () => "Something went wrong on our side.",
+    limit_imports: () =>
+      `You've started a lot of imports in a short time. You can start another ${waitText(vars.retryAfterMs)}. Players already imported can still be opened.`,
+    limit_reports: () =>
+      `You've started today's coach reports. You can start another ${waitText(vars.retryAfterMs)}. Reports already written are still shown.`,
+    limit_requests: () => `Too many requests from your connection. Wait a minute and try again.`,
+    limit_new_players: () =>
+      `Blunderprint has taken in all the new players it can today. Try again ${waitText(vars.retryAfterMs)}, or explore a player who's already here.`,
+    storage_full: () =>
+      "Blunderprint's free database is full, so new players can't be imported right now. Players already imported still work.",
+    busy: () => "A lot of imports are waiting right now. Try again in a minute.",
   };
   return { code, message: messages[code]() };
 }
@@ -97,3 +128,10 @@ export function friendlyFromAgent(error: AgentError | undefined, vars: FriendlyV
 // `notEnoughData` text is never shown (nothing checks it); it's logged instead.
 export const NO_PATTERNS_MESSAGE =
   "No weakness clearly stood out from your own average yet. More analysed games will help.";
+
+// Sends a friendly refusal: { error, code }, and Retry-After (whole seconds) when it's known.
+export function sendFriendly(res: Response, status: number, code: FriendlyCode, vars: FriendlyVars = {}): void {
+  const f = friendly(code, vars);
+  if (vars.retryAfterMs !== undefined) res.setHeader("Retry-After", String(Math.max(1, Math.ceil(vars.retryAfterMs / 1000))));
+  res.status(status).json({ error: f.message, code: f.code });
+}

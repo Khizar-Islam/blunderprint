@@ -4,6 +4,7 @@ import { loadEnv, parseCorsOrigins, parseDemoPlayers, parseTrustProxyHops } from
 
 const VALID_URI = "mongodb+srv://user:pass@example.mongodb.net/blunderprint";
 const BASE = { MONGODB_URI: VALID_URI, CONTACT_EMAIL: "dev@example.com" };
+const SALT = "x".repeat(32);
 
 test("parseTrustProxyHops accepts whole numbers 0 to 5", () => {
   for (const raw of ["0", "3", "5", " 3 "]) {
@@ -75,6 +76,7 @@ test("loadEnv parses booleans, numbers and extra CORS origins", () => {
     TRUST_PROXY_HOPS: "3",
     CORS_ORIGINS: "https://blunderprint.example.com",
     RENDER: "true",
+    IP_HASH_SALT: SALT,
   });
   assert.equal(env.AI_ENABLED, false);
   assert.equal(env.PORT, 8080);
@@ -121,4 +123,28 @@ test("parseDemoPlayers: an invalid entry stops startup and names it", () => {
   for (const bad of ["DrNykterstein", "chess:hikaru", "lichess:", "lichess:a b", "lichess:x"]) {
     assert.throws(() => parseDemoPlayers(bad), /DEMO_PLAYERS has an invalid entry/);
   }
+});
+
+test("loadEnv: the Stage 6 guard defaults, and the IP hash salt is required in production", () => {
+  const env = loadEnv(BASE);
+  assert.equal(env.IP_HASH_SALT, undefined); // local development may go without (lib/visitor.ts randomSalt)
+  assert.equal(env.LIMIT_IMPORTS_PER_HOUR, 5);
+  assert.equal(env.LIMIT_IMPORTS_PER_DAY, 15);
+  assert.equal(env.LIMIT_REPORTS_PER_DAY, 3);
+  assert.equal(env.LIMIT_REQUESTS_PER_MINUTE, 300);
+  assert.equal(env.STORAGE_NEW_PLAYER_LIMIT_MB, 120);
+  assert.equal(env.NEW_PLAYERS_PER_DAY, 40);
+  assert.equal(env.IMPORT_QUEUE_MAX, 10);
+
+  assert.throws(() => loadEnv({ ...BASE, RENDER: "true" }), /IP_HASH_SALT: required in production, at least 32 characters/);
+  assert.throws(() => loadEnv({ ...BASE, NODE_ENV: "production", IP_HASH_SALT: "x".repeat(31) }), /IP_HASH_SALT/);
+  assert.equal(loadEnv({ ...BASE, RENDER: "true", IP_HASH_SALT: SALT }).IP_HASH_SALT, SALT);
+  // The error never echoes the value.
+  try {
+    loadEnv({ ...BASE, RENDER: "true", IP_HASH_SALT: "short-secret-value" });
+    assert.fail("should throw");
+  } catch (err) {
+    assert.ok(!(err as Error).message.includes("short-secret-value"));
+  }
+  assert.throws(() => loadEnv({ ...BASE, LIMIT_IMPORTS_PER_HOUR: "0" }), /LIMIT_IMPORTS_PER_HOUR/);
 });

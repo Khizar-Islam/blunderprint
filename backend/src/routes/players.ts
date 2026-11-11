@@ -9,6 +9,9 @@ import { importJobKey } from "../jobs/handlers/import.js";
 import type { Queue } from "../jobs/queue.js";
 import { afterCursor, decodeCursor, encodeCursor } from "../lib/cursor.js";
 import { noDemoPlayers, type IsDemo } from "../lib/demo.js";
+import { sendFriendly } from "../agent/friendly.js";
+import { importRules, logRefusal, newPlayerRules, visitorOf, type Guards } from "../lib/guards.js";
+import { refund, take, type Taken } from "../lib/quota.js";
 import { parseOr400 } from "../lib/validate.js";
 import { HttpError } from "../middleware/errorHandler.js";
 
@@ -57,12 +60,22 @@ export const LIST_PROJECTION = {
   "analysis.claimExpiresAt": 0,
 };
 
+// How long a "busy" (full import queue) refusal asks the visitor to wait.
+const BUSY_RETRY_MS = 60_000;
+
+// Who asked for the import: "auto" = the dashboard checking a player on load, "user" = a click
+// (Try again, Retry). Default "user", so anything that doesn't say is counted.
+const importQuery = z.object({ trigger: z.enum(["auto", "user"]).default("user") }).strict();
+
 export function playersRouter({
   queue,
   isDemo = noDemoPlayers,
+  guards,
 }: {
   queue: Pick<Queue, "enqueue">;
   isDemo?: IsDemo;
+  // Stage 6 limits (lib/guards.ts). Left out = no limits (route tests).
+  guards?: Guards;
 }): Router {
   const router = Router();
   const params = parsePlayerParams;
@@ -77,13 +90,19 @@ export function playersRouter({
   // however old the import is. Their first import still runs, to seed them.
   router.post("/players/:platform/:username/import", async (req, res) => {
     const { platform, username } = params(req.params);
+    const { trigger } = parseOr400(importQuery, req.query, "Invalid query");
     const [player, activeJob] = await Promise.all([
       // lastImportedAt is only set when an import finishes successfully.
-      Player.findOne({ platform, usernameLower: username.toLowerCase() }, { lastImportedAt: 1 }).lean(),
+      Player.findOne(
+        { platform, usernameLower: username.toLowerCase() },
+        { lastImportedAt: 1, "importMeta.lastAutoRefreshAt": 1 },
+        // With a dotted projection Mongoose can't infer the row type; these are all we read.
+      ).lean<{ _id: Types.ObjectId; lastImportedAt?: Date | null; importMeta?: { lastAutoRefreshAt?: Date | null } }>(),
       findActiveImport(platform, username),
     ]);
     const importedAt = player?.lastImportedAt?.getTime();
-    if (!activeJob && importedAt !== undefined && isDemo(platform, username)) {
+    const demo = isDemo(platform, username);
+    if (!activeJob && importedAt !== undefined && demo) {
       res.status(200).json({ upToDate: true, frozen: true });
       return;
     }
@@ -91,12 +110,100 @@ export function playersRouter({
       res.status(200).json({ upToDate: true });
       return;
     }
+    // Rejoining the running import is free: nothing new starts.
+    if (activeJob) {
+      res.status(202).json({ jobId: String(activeJob._id), created: false, status: activeJob.status });
+      return;
+    }
 
-    const { job, created } = await queue.enqueue({
-      type: "import",
-      key: importJobKey(platform, username),
-      payload: { platform, username },
-    });
+    // An automatic refresh of a STORED player (the dashboard found it stale on load) isn't the
+    // visitor's doing, so it doesn't count toward their import limit. Instead it's held to one
+    // per player per 6 h, claimed atomically here: of two tabs loading at once, one starts it.
+    // If the last automatic one failed, the next waits out the 6 h (a click can retry sooner,
+    // and that counts). New players always count, whatever the trigger says.
+    const autoRefresh = trigger === "auto" && player !== null && !demo;
+    const previousAuto = player?.importMeta?.lastAutoRefreshAt ?? null;
+    if (autoRefresh) {
+      const cutoff = new Date(Date.now() - FRESH_IMPORT_MS);
+      const claimed = await Player.updateOne(
+        {
+          _id: player._id,
+          $or: [{ "importMeta.lastAutoRefreshAt": null }, { "importMeta.lastAutoRefreshAt": { $lt: cutoff } }],
+        },
+        { $set: { "importMeta.lastAutoRefreshAt": new Date() } },
+        { timestamps: false },
+      );
+      if (claimed.modifiedCount === 0) {
+        res.status(200).json({ upToDate: true });
+        return;
+      }
+    }
+    // Hands the 6-hour slot back when no import came of it (refused, or the enqueue failed).
+    const releaseAuto = async () => {
+      if (!autoRefresh) return;
+      await Player.updateOne(
+        { _id: player!._id },
+        previousAuto
+          ? { $set: { "importMeta.lastAutoRefreshAt": previousAuto } }
+          : { $unset: { "importMeta.lastAutoRefreshAt": 1 } },
+        { timestamps: false },
+      );
+    };
+
+    // A new import really starts here, so the Stage 6 guards apply (never to a demo player,
+    // whose first import seeds the demo). Cheapest and global first, the visitor's own counters
+    // last, so a refusal for a full database doesn't use up the visitor's imports.
+    let taken: Taken[] = [];
+    if (guards && !demo) {
+      const now = guards.now?.() ?? new Date();
+      // "New" = nothing stored yet. A stored player's re-import replaces games, it doesn't add a player.
+      const newPlayer = !player;
+      if (newPlayer && (await guards.storage.full())) {
+        logRefusal(res, "storage", { usedMb: await guards.storage.usedMb(), limitMb: guards.storage.limitMb });
+        return sendFriendly(res, 503, "storage_full");
+      }
+      // Served by the { status, runAfter } index (status prefix).
+      const queued = await Job.countDocuments({ status: "queued", type: "import" });
+      if (queued >= guards.limits.importQueueMax) {
+        await releaseAuto();
+        logRefusal(res, "queue", { queued });
+        return sendFriendly(res, 503, "busy", { retryAfterMs: BUSY_RETRY_MS });
+      }
+      if (!autoRefresh) {
+        const mine = await take(importRules(visitorOf(res), guards.limits), now);
+        if (!mine.ok) {
+          logRefusal(res, "imports", { window: mine.rule.window });
+          return sendFriendly(res, 429, "limit_imports", { retryAfterMs: mine.retryAfterMs });
+        }
+        taken = [mine.taken];
+      }
+      if (newPlayer) {
+        const global = await take(newPlayerRules(guards.limits), now);
+        if (!global.ok) {
+          await Promise.all(taken.map(refund));
+          logRefusal(res, "new_players");
+          return sendFriendly(res, 503, "limit_new_players", { retryAfterMs: global.retryAfterMs });
+        }
+        taken.push(global.taken);
+      }
+    }
+    const giveBack = () => Promise.all(taken.map(refund));
+
+    let enqueued: Awaited<ReturnType<typeof queue.enqueue>>;
+    try {
+      enqueued = await queue.enqueue({
+        type: "import",
+        key: importJobKey(platform, username),
+        payload: { platform, username },
+      });
+    } catch (err) {
+      await giveBack().catch(() => {});
+      await releaseAuto().catch(() => {});
+      throw err;
+    }
+    const { job, created } = enqueued;
+    // Someone else started the same import a moment ago: we rejoined it, so it isn't ours to count.
+    if (!created) await giveBack();
     res.status(202).json({ jobId: String(job._id), created, status: job.status });
   });
 

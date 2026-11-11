@@ -125,10 +125,11 @@ describe("failureAction", () => {
   test("what each friendly code offers", () => {
     assert.equal(failureAction("ai_disabled"), "none");
     assert.equal(failureAction("ai_budget_exhausted"), "wait");
+    assert.equal(failureAction("limit_reports"), "wait");
     assert.equal(failureAction("not_enough_games"), "dashboard");
     assert.equal(failureAction("player_not_found"), "import");
     assert.equal(failureAction("run_not_found"), "reload");
-    for (const code of ["ai_busy", "ai_unavailable", "coach_timeout", "coach_too_long", "coach_no_answer", "coach_interrupted", "internal", "something_new", undefined]) {
+    for (const code of ["ai_busy", "ai_unavailable", "coach_timeout", "coach_too_long", "coach_no_answer", "coach_interrupted", "internal", "limit_requests", "something_new", undefined]) {
       assert.equal(failureAction(code), "retry", String(code));
     }
   });

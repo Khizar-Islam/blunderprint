@@ -173,6 +173,7 @@ export function failureAction(code: string | undefined): FailureAction {
     case "ai_disabled":
       return "none";
     case "ai_budget_exhausted":
+    case "limit_reports": // this visitor's reports for today (Stage 6)
       return "wait";
     case "not_enough_games":
       return "dashboard";

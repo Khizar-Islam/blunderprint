@@ -3,7 +3,10 @@ import express, { type Express } from "express";
 import type { CoachRuntime } from "./agent/coach.js";
 import type { Queue } from "./jobs/queue.js";
 import { noDemoPlayers, type IsDemo } from "./lib/demo.js";
+import type { Guards } from "./lib/guards.js";
+import { visitorMiddleware } from "./lib/visitor.js";
 import { apiNotFound, errorHandler } from "./middleware/errorHandler.js";
+import { floodGuard } from "./middleware/rateLimit.js";
 import { requestId } from "./middleware/requestId.js";
 import { analysisRouter, type AnalysisRouterOptions } from "./routes/analysis.js";
 import { coachRouter } from "./routes/coach.js";
@@ -24,6 +27,9 @@ export interface AppOptions {
   coach?: CoachRuntime;
   // Frozen demo players (lib/demo.ts, env DEMO_PLAYERS). None by default.
   isDemo?: IsDemo;
+  // The Stage 6 guards (lib/guards.ts): visitor hash, limits, storage gate. server.ts always
+  // passes them; route tests that aren't about limits leave them out (= no limits).
+  guards?: Guards;
   // Tests shorten these.
   healthCacheMs?: number;
   sseHeartbeatMs?: number;
@@ -40,6 +46,7 @@ export function createApp({
   version,
   coach,
   isDemo = noDemoPlayers,
+  guards,
   healthCacheMs,
   sseHeartbeatMs,
   analysis,
@@ -47,11 +54,15 @@ export function createApp({
   const app = express();
   app.disable("x-powered-by");
 
-  // 1. Trust proxy first, so req.ip is the real visitor for everything after it (rate limiters in Stage 6).
+  // 1. Trust proxy first, so req.ip is the real visitor for everything after it (the visitor hash
+  //    and every limit). On Render: 3 hops (visitor → Cloudflare → Render's proxy → us).
   app.set("trust proxy", trustProxyHops);
 
-  // 2. Request ID + one log line per request.
+  // 2. Request ID + one log line per request (no IP in it).
   app.use(requestId);
+
+  // 2b. The visitor's hashed key on res.locals.visitor (lib/visitor.ts). The raw IP goes no further.
+  if (guards) app.use(visitorMiddleware(guards.visitorKey));
 
   // 3. CORS allowlist. No Origin header (curl, Render's health check) is allowed;
   //    a disallowed origin gets no CORS headers, so the browser blocks the response.
@@ -61,17 +72,24 @@ export function createApp({
     }),
   );
 
+  // 3b. The flood guard (per visitor, per minute), after CORS so a refused browser can still read
+  //     the friendly message, and before the body parser so a flood doesn't parse bodies.
+  if (guards) app.use("/api", floodGuard(guards.limits.requestsPerMinute));
+
   // 4. JSON bodies with an explicit size limit.
   app.use(express.json({ limit: "100kb" }));
 
   // 5. Routes.
-  app.use("/api", healthRouter({ getDbStatus, getQueueDepth: () => queue.depth(), version, cacheMs: healthCacheMs }));
-  app.use("/api", playersRouter({ queue, isDemo }));
+  app.use(
+    "/api",
+    healthRouter({ getDbStatus, getQueueDepth: () => queue.depth(), version, cacheMs: healthCacheMs, storage: guards?.storage }),
+  );
+  app.use("/api", playersRouter({ queue, isDemo, guards }));
   app.use("/api", summaryRouter({ queue }));
   app.use("/api", jobsRouter({ heartbeatMs: sseHeartbeatMs }));
   app.use("/api", gamesRouter({ isDemo }));
   app.use("/api", analysisRouter(queue, { ...analysis, isDemo }));
-  if (coach) app.use("/api", coachRouter({ queue, coach }));
+  if (coach) app.use("/api", coachRouter({ queue, coach, guards }));
   app.use("/api", runsRouter({ heartbeatMs: sseHeartbeatMs }));
 
   // 6. Unknown /api routes → 404 JSON, then the error handler last.

@@ -260,7 +260,9 @@ function Failure({
   if (action === "dashboard") return <Notice title="Not enough analysed games yet" link={{ href: dashboard, label: "Back to the dashboard" }}>{message}</Notice>;
   if (action === "import") return <Notice title="No games yet" link={{ href: dashboard, label: "Import this player" }}>{message}</Notice>;
   if (action === "reload") return <Notice title="That run is gone" action={{ label: "Reload", onClick: () => window.location.reload() }}>{message}</Notice>;
-  if (action === "wait") return <Notice title="The coach is resting">{message}</Notice>;
+  if (action === "wait") {
+    return <Notice title={error?.code === "limit_reports" ? "You've reached today's reports" : "The coach is resting"}>{message}</Notice>;
+  }
   return <Notice title="The coach is switched off">{message}</Notice>;
 }
 

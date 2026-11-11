@@ -20,6 +20,9 @@ export interface Health {
   db: boolean;
   queueDepth: number;
   version: string;
+  // dataSize + indexSize in MB, and the size at which new players stop being imported (Stage 6).
+  storageMb?: number | null;
+  storageLimitMb?: number;
 }
 
 export interface Player {
@@ -126,11 +129,23 @@ export function fetchPlayer(platform: Platform, username: string, signal: AbortS
 
 export type StartImportResult = { kind: "job"; jobId: string } | { kind: "upToDate" };
 
+// "auto": the dashboard checking a player as it loads. A stale STORED player refreshed this way
+// doesn't count toward the visitor's import limit (backend routes/players.ts, Stage 6), and runs
+// at most once per player per 6 h. "user": a click (Try again, Retry), which counts.
+export type ImportTrigger = "auto" | "user";
+
 // Retrying this call is safe: the route is idempotent. While an import for this player is
 // queued or running, it returns that same job (a unique index on the job key guarantees one),
 // so a double-click, a reload or a retry after a timeout never starts a second import.
-export async function startImport(platform: Platform, username: string, signal: AbortSignal): Promise<StartImportResult> {
-  const body = await getJson<{ jobId?: string; upToDate?: boolean }>(`${playerPath(platform, username)}/import`, {
+// The trigger goes in the query string, not a JSON body: a body would make the browser send a
+// CORS preflight (an extra round trip) before every import check.
+export async function startImport(
+  platform: Platform,
+  username: string,
+  signal: AbortSignal,
+  trigger: ImportTrigger = "user",
+): Promise<StartImportResult> {
+  const body = await getJson<{ jobId?: string; upToDate?: boolean }>(`${playerPath(platform, username)}/import?trigger=${trigger}`, {
     method: "POST",
     signal,
   });

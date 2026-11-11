@@ -115,7 +115,7 @@ export function createQueue({
     // Clears the error left by an earlier failed attempt: a done job has no error to show.
     const job = await change(
       owned(jobId, workerId),
-      { $set: { status: "done" }, $unset: { leaseUntil: 1, workerId: 1, error: 1 } },
+      { $set: { status: "done", finishedAt: now() }, $unset: { leaseUntil: 1, workerId: 1, error: 1 } },
       "done",
     );
     return job !== null;
@@ -140,7 +140,7 @@ export function createQueue({
     }
     const failed = await change(
       owned(job._id, workerId),
-      { $set: { status: "failed", error: errorInfo(err) }, $unset: { leaseUntil: 1, workerId: 1 } },
+      { $set: { status: "failed", error: errorInfo(err), finishedAt: now() }, $unset: { leaseUntil: 1, workerId: 1 } },
       "failed",
     );
     return failed ? "failed" : "lost";
@@ -174,6 +174,7 @@ export function createQueue({
               $set: {
                 status: "failed",
                 error: { code: "lease_expired", message: "The job stopped responding too many times." },
+                finishedAt: cutoff,
               },
               $unset: { leaseUntil: 1, workerId: 1 },
             }
@@ -191,6 +192,19 @@ export function createQueue({
   }
 
   return { enqueue, claimNext, renewLease, saveProgress, complete, fail, release, reapExpired, depth };
+}
+
+// Jobs that finished before finishedAt existed (Stage 6) would never expire: date them from
+// their last change (updatedAt). Run once at startup; a no-op once every finished job has one.
+// The pipeline-style update ([{ $set }]) lets the new field copy another field of the document.
+export async function backfillFinishedAt(): Promise<number> {
+  const res = await Job.updateMany(
+    { status: { $in: ["done", "failed"] }, finishedAt: { $exists: false } },
+    [{ $set: { finishedAt: "$updatedAt" } }],
+    // Mongoose 9 refuses pipeline updates unless asked; timestamps off: this isn't a change to the job.
+    { updatePipeline: true, timestamps: false },
+  );
+  return res.modifiedCount;
 }
 
 export type Queue = ReturnType<typeof createQueue>;

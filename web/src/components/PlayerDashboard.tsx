@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchGames, fetchPlayer, isValidUsername, PLATFORM_NAMES, type GameRow, type Platform, type Player } from "@/lib/api";
-import { startDashboard, type Start } from "@/lib/dashboardStart";
+import { isImportRefusal, startDashboard, type Start } from "@/lib/dashboardStart";
 import { apiQuery, parseFilters } from "@/lib/filters";
 import { demoLine, relativeTime } from "@/lib/format";
 import { useJobStream, type JobEventType } from "@/lib/useJobStream";
@@ -37,6 +37,9 @@ function Dashboard({ platform, username }: Props) {
   // games and the coach button render from it at once (on the demo dashboard that took one
   // round trip off LCP). If the import check then starts an import, it's followed as before.
   const [foundPlayer, setFoundPlayer] = useState<Player | null>(null);
+  // The import check on load is automatic; once the visitor clicks Try again / Retry, the
+  // following checks are theirs (they count toward their import limit, Stage 6).
+  const byUser = useRef(false);
   const start = useWakingRequest<Start>((signal) =>
     startDashboard(
       platform,
@@ -44,8 +47,14 @@ function Dashboard({ platform, username }: Props) {
       apiQuery(parseFilters(new URLSearchParams(window.location.search)), new Date()),
       signal,
       setFoundPlayer,
+      undefined,
+      byUser.current ? "user" : "auto",
     ),
   );
+  const retryByUser = useCallback(() => {
+    byUser.current = true;
+    start.retry();
+  }, [start]);
 
   const started = start.state.kind === "done" ? start.state.value : null;
   // The player as of the start request, until an import finishes and we fetch it again.
@@ -175,7 +184,19 @@ function Dashboard({ platform, username }: Props) {
     if (error.status === 400) {
       return <Notice title="Not a valid username">That isn&apos;t a valid {PLATFORM_NAMES[platform]} username.</Notice>;
     }
-    return <Notice title="Couldn't load this player" action={{ label: "Retry", onClick: start.retry }}>{error.message}</Notice>;
+    // A guard refused a NEW player's import (Stage 6): the API's message says why and when.
+    if (isImportRefusal(error)) {
+      return error.code === "busy" ? (
+        <Notice title="Can't import this player right now" action={{ label: "Try again", onClick: retryByUser }}>
+          {error.message}
+        </Notice>
+      ) : (
+        <Notice title="Can't import this player right now" link>
+          {error.message}
+        </Notice>
+      );
+    }
+    return <Notice title="Couldn't load this player" action={{ label: "Retry", onClick: retryByUser }}>{error.message}</Notice>;
   }
 
   if (job?.status === "failed") {
@@ -187,7 +208,7 @@ function Dashboard({ platform, username }: Props) {
       );
     }
     return (
-      <Notice title="The import failed" action={{ label: "Try again", onClick: start.retry }}>
+      <Notice title="The import failed" action={{ label: "Try again", onClick: retryByUser }}>
         {job.error?.message ?? "Something went wrong on our side."}
       </Notice>
     );
@@ -216,8 +237,14 @@ function Dashboard({ platform, username }: Props) {
             </p>
           )
         )}
+        {/* A stored player whose refresh a guard refused: the stored games still show. */}
+        {started?.importRefused && !importing && (
+          <p className="text-sm text-graphite/70" role="status">
+            Not checked for new games: {started.importRefused.message}
+          </p>
+        )}
         {stream.connection === "lost" && importing && (
-          <Notice title="Lost the connection to the import" action={{ label: "Retry", onClick: start.retry }}>
+          <Notice title="Lost the connection to the import" action={{ label: "Retry", onClick: retryByUser }}>
             The import may still be running on the server.
           </Notice>
         )}

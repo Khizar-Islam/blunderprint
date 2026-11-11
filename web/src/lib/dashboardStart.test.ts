@@ -77,3 +77,40 @@ test("the stored player is handed over as soon as the lookup answers, before the
   assert.deepEqual(await done, { player, jobId: null });
   assert.equal(shown.length, 1);
 });
+
+test("a stored player whose refresh is refused by a guard (Stage 6) still loads, with the refusal as a note", async () => {
+  const { deps, playerReq, importReq } = fakes();
+  const done = startDashboard("lichess", "alice", "", new AbortController().signal, undefined, deps);
+  playerReq.resolve({ player, activeJob: null } as never);
+  await new Promise((r) => setTimeout(r, 0));
+  importReq.reject(new ApiError(429, "You've started a lot of imports…", "limit_imports"));
+  assert.deepEqual(await done, { player, jobId: null, importRefused: { code: "limit_imports", message: "You've started a lot of imports…" } });
+});
+
+test("a NEW player's refused import is thrown (nothing stored to show), and so is a refusal without a code", async () => {
+  const first = fakes();
+  const done = startDashboard("lichess", "newbie", "", new AbortController().signal, undefined, first.deps);
+  first.playerReq.reject(new ApiError(404, "Player not found"));
+  await new Promise((r) => setTimeout(r, 0));
+  first.importReq.reject(new ApiError(503, "The database is full", "storage_full"));
+  await assert.rejects(done, (err: unknown) => err instanceof ApiError && err.code === "storage_full");
+
+  const second = fakes();
+  const done2 = startDashboard("lichess", "alice", "", new AbortController().signal, undefined, second.deps);
+  second.playerReq.resolve({ player, activeJob: null } as never);
+  await new Promise((r) => setTimeout(r, 0));
+  second.importReq.reject(new ApiError(503, "Bad gateway")); // Render waking: no code, retried
+  await assert.rejects(done2, /Bad gateway/);
+});
+
+test("the import check on load says trigger auto; after a click it says user (Stage 6: only clicks count)", async () => {
+  const seen: unknown[] = [];
+  const deps: StartDeps = {
+    prefetchSummary: () => {},
+    fetchPlayer: async () => ({ player, activeJob: null }) as never,
+    startImport: async (_p, _u, _s, trigger) => (seen.push(trigger), { kind: "upToDate" }),
+  };
+  await startDashboard("lichess", "alice", "", new AbortController().signal, undefined, deps);
+  await startDashboard("lichess", "alice", "", new AbortController().signal, undefined, deps, "user");
+  assert.deepEqual(seen, ["auto", "user"]);
+});

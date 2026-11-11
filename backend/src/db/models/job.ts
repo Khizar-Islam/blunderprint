@@ -31,6 +31,8 @@ const jobSchema = new Schema(
     // Revision: +1 on every change a viewer can see (claim, progress, retry, done, failed).
     // SSE uses it as the event id, so a stream can drop events older than its snapshot.
     rev: { type: Number, default: 0 },
+    // When the job reached done or failed (Stage 6). The TTL index below deletes it 7 days later.
+    finishedAt: Date,
   },
   { timestamps: true, minimize: false },
 );
@@ -47,6 +49,12 @@ jobSchema.index(
   { key: 1 },
   { unique: true, partialFilterExpression: { status: { $in: [...ACTIVE_JOB_STATUSES] } } },
 );
+
+// Finished jobs clean themselves up: MongoDB's TTL monitor deletes a job 7 days after finishedAt
+// (it runs about once a minute). Queued and running jobs have no finishedAt, so they're never
+// touched. 7 days is plenty: a finished job is only read by a page that is still following it.
+export const FINISHED_JOB_TTL_SECONDS = 7 * 24 * 60 * 60;
+jobSchema.index({ finishedAt: 1 }, { expireAfterSeconds: FINISHED_JOB_TTL_SECONDS });
 
 export type JobFields = InferSchemaType<typeof jobSchema>;
 export type JobDoc = HydratedDocument<JobFields>;

@@ -9,7 +9,9 @@ import { Job } from "./db/models/job.js";
 import { Player } from "./db/models/player.js";
 import { Report } from "./db/models/report.js";
 import { Usage } from "./db/models/usage.js";
+import { backfillFinishedAt } from "./jobs/queue.js";
 import { createJobSystem } from "./jobs/setup.js";
+import { guardsFromEnv } from "./lib/guards.js";
 import { startWorker, type Worker } from "./jobs/worker.js";
 import { logger } from "./lib/logger.js";
 import { VERSION } from "./lib/version.js";
@@ -32,6 +34,10 @@ if (env.isRender && env.TRUST_PROXY_HOPS === 0) {
 const { queue, handlers, coach, lanes } = createJobSystem(env);
 logger.info("Coach", { model: coach.modelName, available: coach.available, dailyBudget: env.AI_DAILY_CALL_BUDGET });
 
+// The Stage 6 guards: visitor hash (IP_HASH_SALT), per-visitor limits, flood guard, storage gate.
+const guards = guardsFromEnv(env);
+logger.info("Guards", { limits: guards.limits, storageLimitMb: guards.storage.limitMb });
+
 const app = createApp({
   corsOrigins: env.corsOrigins,
   trustProxyHops: env.TRUST_PROXY_HOPS,
@@ -40,6 +46,7 @@ const app = createApp({
   version: VERSION,
   coach,
   isDemo: demoChecker(env.demoPlayers),
+  guards,
 });
 
 // Startup order: listen → connect → indexes → worker.
@@ -67,6 +74,14 @@ void (async () => {
     .then((result) => logger.info("Run expiry synced", { demoPlayers: env.demoPlayers, ...result }))
     .catch((err: unknown) =>
       logger.warn("Run expiry sync failed", { error: err instanceof Error ? err.message : String(err) }),
+    );
+  if (shuttingDown) return;
+  // Finished jobs from before the 7-day TTL get a finishedAt, so the TTL can delete them too.
+  // Not fatal: worst case they live on until the next start.
+  await backfillFinishedAt()
+    .then((dated) => logger.info("Finished jobs dated for the TTL", { dated }))
+    .catch((err: unknown) =>
+      logger.warn("Finished-job backfill failed", { error: err instanceof Error ? err.message : String(err) }),
     );
   if (shuttingDown) return;
   // Expired leases from a previous run (crash, Render sleep) are reaped on the first loop turn.

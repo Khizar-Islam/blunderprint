@@ -130,7 +130,8 @@ blunderprint/
 │  │  ├─ middleware/         (requestId.ts, errorHandler.ts, rateLimit.ts, budget.ts)
 │  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
 │  │                          validate.ts zod → 400, sleep.ts, version.ts, explain.ts explain summaries,
-│  │                          demo.ts frozen demo players)
+│  │                          demo.ts frozen demo players; Stage 6: visitor.ts IP hash, quota.ts atomic
+│  │                          counting windows, storage.ts storage gate, guards.ts limits from env)
 │  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
 │  │                          importOnce, explainGames, explainSummary, extractFeatures (backfill),
 │  │                          fetchDivisionFixture; coach: coachTools, coachCli, coachFixture, fakeModel;
@@ -216,8 +217,10 @@ Field names in camelCase. Every collection gets `createdAt`/`updatedAt` unless n
   lastViewedAt,           // used by the storage guard (LRU eviction)
   importMeta: {           // what a re-import needs to fetch only what's new
     monthEtags: { "YYYY/MM": etag },  // Chess.com month ETags; a 304 means that month is unchanged
-    newestGameAt } }      // newest stored game in platform time (Chess.com end_time, Lichess createdAt,
+    newestGameAt,         // newest stored game in platform time (Chess.com end_time, Lichess createdAt,
                           // because Lichess's `since` filters on createdAt); set only when an import finishes
+    lastAutoRefreshAt } } // Stage 6: when the dashboard last started an uncounted automatic refresh
+                          // (one per player per 6 h, §11 POST import); never sent to the browser
 ```
 Indexes: unique `{ platform, usernameLower }`; `{ lastViewedAt: 1 }`.
 
@@ -264,9 +267,12 @@ Keep only the **most recent N games per player** (env `MAX_GAMES_PER_PLAYER`, de
   attempts, maxAttempts, runAfter, leaseUntil, workerId,
   progress: { done, total, message },
   checkpoint?,           // handler's resume point, e.g. Chess.com months done / oldest Lichess createdAt
-  error? }               // { code, message }, safe to show the user
+  error?,                // { code, message }, safe to show the user
+  finishedAt? }          // Stage 6: set when the job becomes done or failed (complete, final fail, reaper)
 ```
-Indexes: `{ status: 1, runAfter: 1 }`; unique partial index on `key` where status is queued or running, so the same job can't be queued twice.
+Indexes: `{ status: 1, runAfter: 1 }`; unique partial index on `key` where status is queued or running, so the same job can't be queued twice; TTL `{ finishedAt: 1 }` with `expireAfterSeconds` 7 days (`FINISHED_JOB_TTL_SECONDS`), so finished jobs are deleted a week later.
+- **Startup backfill** (`backfillFinishedAt`, non-fatal): finished jobs from before Stage 6 get `finishedAt = updatedAt` (a pipeline update, `updatePipeline: true`, timestamps off), so the old ones expire too.
+- Safe because nothing treats a finished job as a state marker (checked 11 Nov 2026): every read of jobs is for queued/running ones, except the job SSE stream by id (a deleted job is a 404) and the dev script `importOnce`. "Done" lives elsewhere: `Player.lastImportedAt`, `features.version`, `analysis.status`, the AgentRun. And no transition revives a finished job: every move back to queued/running (`claimNext`, retry in `fail`, `release`, the reaper) filters on queued or running, and `enqueue` always inserts a new document.
 
 ### positionStats (the big dataset)
 ```
@@ -296,7 +302,8 @@ agentRuns: { playerId, kind: "report", jobId, status: "queued"|"running"|"done"|
 - `agentRuns`: TTL index on `expiresAt` (`expireAfterSeconds: 0`, Stage 7; it replaced a 14-day TTL on `createdAt`). Every run is created with `expiresAt` = created + 14 days; only the run behind a **demo player's current report** has none, so the demo's "How this report was made" never expires. `agent/runExpiry.ts` `syncRunExpiry` keeps those runs and dates every other run without one (createdAt + 14 days), at startup and after each saved report.
 
 ### usage (limits and AI budget)
-`{ _id: "<scope>|<yyyy-mm-dd>", count, expiresAt }`. The date is a **Pacific-time** day (Google's daily quota resets at midnight Pacific). Scopes: `global:ai` (real model calls), `dev:scripted` (the local scripted model, so dev runs never use the real budget), and `ip:<hash>` in Stage 6 (hash the IP, don't store it raw). TTL index on `expiresAt` (3 days after the day ends).
+`{ _id: "<scope>|<window>", count, expiresAt }`. A day window is a **Pacific-time** date (`<yyyy-mm-dd>`; Google's daily quota resets at midnight Pacific), an hour window a UTC hour (`<yyyy-mm-ddTHH>`). Scopes: `global:ai` (real model calls), `dev:scripted` (the local scripted model, so dev runs never use the real budget), `global:new-players`, and per visitor `ip:<hash>|imports` (hour + day) and `ip:<hash>|reports` (day). TTL index on `expiresAt` (a day window: 3 days after it ends; an hour window: 1 hour after).
+- All counting goes through `lib/quota.ts`: one atomic `findOneAndUpdate` with upsert per take (`count < limit → $inc 1`), duplicate-key (11000) retried once; `take(rules)` is all-or-none (refunds what it took when a later rule refuses or the DB errors); `refund` is `$inc -1` while `count > 0`. `agent/budget.ts` uses the same code.
 
 ### Storage budget (enforced, not hoped for)
 
@@ -306,7 +313,9 @@ agentRuns: { playerId, kind: "report", jobId, status: "queued"|"running"|"done"|
 | players + games + reports + runs | ≤ 150 MB |
 | Headroom | ~60 MB |
 
-A **storage guard** job runs after imports. It reads `dbStats`, and over the threshold it evicts the least-recently-viewed players (their games, reports and runs), never the demo players (`DEMO_PLAYERS` env). Atlas M0 storage limits must be confirmed in Stage 0. The guard keeps us safe either way.
+**Storage gate (Stage 6, built):** no NEW player is imported once `dataSize + indexSize` (`dbStats`) reaches `STORAGE_NEW_PLAYER_LIMIT_MB` (120 MB): 503 `storage_full`. Stored players can still be refreshed. `lib/storage.ts` caches the reading for 5 minutes and fails open (a failed `dbStats` logs a warning and isn't cached). `/api/health` shows `storageMb` and `storageLimitMb`.
+
+A **storage guard** job (Stage 4) runs after imports. It reads `dbStats`, and over the threshold it evicts the least-recently-viewed players (their games, reports and runs), never the demo players (`DEMO_PLAYERS` env). Atlas M0 storage limits must be confirmed in Stage 0. The guard keeps us safe either way.
 
 ---
 
@@ -416,13 +425,18 @@ All tools take the player from the server context, never from the model, so the 
 - Shutdown mid-run: the run goes back to `queued`, the job is released (attempt refunded), and the next process starts the run **from scratch** (the conversation lived in memory; the calls already made are lost). A hard kill: the reaper requeues; out of attempts → `coach_interrupted`.
 
 ### Friendly errors (`agent/friendly.ts`)
-Every failure a visitor can see is a fixed `{ code, message }`; the real error only goes to the logs. Codes: `player_not_found`, `not_enough_games`, `ai_disabled`, `ai_budget_exhausted`, `ai_busy` (429s), `ai_unavailable` (timeout / 5xx / network), `coach_timeout`, `coach_too_long` (token/call limit), `coach_no_answer`, `coach_interrupted`, `coach_config` (400/auth: our side), `run_not_found`, `internal`. A run with no surviving pattern shows a fixed "no weakness clearly stood out" message; the model's own `notEnoughData` text is only logged.
+Every failure a visitor can see is a fixed `{ code, message }`; the real error only goes to the logs. Codes: `player_not_found`, `not_enough_games`, `ai_disabled`, `ai_budget_exhausted`, `ai_busy` (429s), `ai_unavailable` (timeout / 5xx / network), `coach_timeout`, `coach_too_long` (token/call limit), `coach_no_answer`, `coach_interrupted`, `coach_config` (400/auth: our side), `run_not_found`, `internal`; Stage 6: `limit_imports`, `limit_reports`, `limit_requests` (429), `limit_new_players`, `storage_full`, `busy` (503). `sendFriendly` sets `Retry-After` (seconds, ≥ 1) when the wait is known, and the message says how long ("in about 40 minutes"). A run with no surviving pattern shows a fixed "no weakness clearly stood out" message; the model's own `notEnoughData` text is only logged.
 
 ### "Ask the coach" (Stage 6)
 Follow-up questions use the same tools, capped at 6 steps, with the same evidence rules.
 
 ### Guards
-- Per-IP limits (hashed IP, Stage 6): e.g. 5 imports/hour, 3 reports/day, 20 questions/day.
+- **Per-visitor limits (Stage 6 chunk A, built):** 5 imports/hour and 15/day (`LIMIT_IMPORTS_PER_HOUR`, `LIMIT_IMPORTS_PER_DAY`), 3 reports/day (`LIMIT_REPORTS_PER_DAY`); questions come with chunk B. Only work that really starts counts: a cached report, a rejoined job, an up-to-date or frozen player are free, and a count is refunded if the enqueue fails or someone else's identical job was rejoined.
+  - **Visitor = HMAC-SHA256 of the IP** with `IP_HASH_SALT` (first 32 hex chars, `lib/visitor.ts`); IPv6 is reduced to its /64 first (`ipKeyGenerator(ip, 64)`, which also folds IPv4-mapped addresses). Raw IPs are never stored or logged; refusal logs carry only the first 8 chars of the hash. Changing the salt resets everyone's counters. Production refuses to start without a salt of ≥ 32 characters; locally an empty one means a random salt per process.
+  - **POST import check order** (cheapest and global first, the visitor's own counters last, so a refusal for a full database doesn't use up their imports): storage gate (new players only, 503 `storage_full`) → queue cap (`IMPORT_QUEUE_MAX` 10 queued imports, 503 `busy`, Retry-After 60 s) → the visitor's import limits (429 `limit_imports`) → the global new-player cap (`NEW_PLAYERS_PER_DAY` 40 per Pacific day, 503 `limit_new_players`; refunds the visitor's count). Demo players skip all of it.
+  - **Automatic refreshes don't count:** `?trigger=auto|user` (query string, so no CORS preflight; default `user`, unknown values 400). `auto` for an already STORED, non-demo player skips the visitor's import counters but is held to one per player per 6 h by `importMeta.lastAutoRefreshAt`, claimed atomically (of two tabs, one starts it; the other gets 200 `upToDate`). A refusal (queue full) or a failed enqueue hands the slot back. New players always count, whatever the trigger. The dashboard sends `auto` on load and `user` after a Try again / Retry click.
+  - **POST report:** the visitor's report limit is taken after the budget check (429 `limit_reports`) and refunded if the run doesn't start.
+  - **Flood guard** (`middleware/rateLimit.ts`, express-rate-limit 8.7.4 pinned): `LIMIT_REQUESTS_PER_MINUTE` (300) per visitor on `/api`, in memory, `/api/health` exempt, 429 `limit_requests` + Retry-After.
 - Global daily AI call budget (`AI_DAILY_CALL_BUDGET`, default 400, under the 500/day free limit, Pacific-time days) and a kill switch (`AI_ENABLED=false`) that shows a friendly message (built in Stage 5, `agent/budget.ts`):
   - Checked before a run starts (POST refuses below one worst-case run: `COACH_MAX_REQUESTS` = 16 requests) AND before every model request, retries and fallback included (`guardedModel`).
   - One atomic `findOneAndUpdate` with upsert per request: `{ _id: day, count < budget } → $inc 1`. A duplicate-key error (11000) is retried **once**: at the start of a day two first inserts can race, and only a second miss really means the budget is used up.
@@ -434,8 +448,8 @@ Follow-up questions use the same tools, capped at 6 steps, with the same evidenc
 ## 11. API routes
 
 ```
-GET  /api/health                                   → { ok, db, queueDepth, version }
-POST /api/players/:platform/:username/import       → 202 { jobId } or 200 { upToDate: true } (idempotent: returns the running job)
+GET  /api/health                                   → { ok, db, queueDepth, version, storageMb, storageLimitMb }
+POST /api/players/:platform/:username/import       → 202 { jobId } or 200 { upToDate: true } (idempotent: returns the running job) (?trigger=auto|user, §10 Guards)
 GET  /api/players/:platform/:username              → { player, activeJob } (player: profile + importState + counts; no summary)
 GET  /api/players/:platform/:username/summary      → { summary, cached, extracting } (?color=&speed=&from=&to=)
 GET  /api/players/:platform/:username/games        → cursor pagination (?cursor=&limit=&speed=&color=&result=)
@@ -458,7 +472,7 @@ Rules:
 - **Cursor pagination,** not skip/limit.
 - The SSE endpoints send a heartbeat comment every 15 s and close cleanly.
 - **CORS also applies to EventSource,** so the allowlist must include the Vercel site.
-- **POST import:** 202 `{ jobId }` starts (or rejoins) an import. 200 `{ upToDate: true }` when the last successful import is under **6 h** old and none is active (Chess.com only refreshes every 12–24 h anyway). Repeating the call is safe: while an import is queued or running, the same job comes back.
+- **POST import:** 202 `{ jobId }` starts (or rejoins) an import. 200 `{ upToDate: true }` when the last successful import is under **6 h** old and none is active (Chess.com only refreshes every 12–24 h anyway). Repeating the call is safe: while an import is queued or running, the same job comes back. Stage 6 guards and `?trigger` in §10 Guards.
 - **Demo players** (`DEMO_PLAYERS`, `lib/demo.ts`) are **frozen** so a visit can never change the demo: once imported, POST import is 200 `{ upToDate: true, frozen: true }` however old the import (their first import still runs, to seed them); the claim hands out no games; GET player and GET game carry `demo: true`, and the UI shows "Demo player · games as of <date>" with no analysis bar (the review page doesn't start the engine). Their data is completed by hand (all games analysed, a fresh report) before they are added.
 - **GET summary:** no filters → the cached `players.summary` (built and stored on the first view of a version); any filter → computed live. Filters are strict: unknown keys are 400; `from` is inclusive and `to` exclusive, each a date or a full ISO timestamp.
   - `extracting: true` while analysed games lack features **or** the player's extract job is queued or running (the cached summary is only rebuilt at the end of that job). The dashboard keeps refetching while it's true.
@@ -547,7 +561,7 @@ Render's free API sleeps after 15 minutes. The first request can take up to abou
 ## 13. Security and operations (lessons from my last four projects, apply from day 1)
 
 - **Error handler:** 5xx responses send a fixed message and log the real error. Only `err.statusCode` sets a 4xx, never `err.status` (SDK errors carry their own). If `res.headersSent`, call `next(err)`. Body-parser errors get fixed messages. Unknown `/api` routes return 404 JSON. Set an explicit body size limit.
-- **Trust proxy:** read `TRUST_PROXY_HOPS` (0–5, default 0, invalid values warn and fall back to 0). On Render it must be **3** (visitor → Cloudflare → Render proxy). Set it before the rate limiters. Log a warning on Render when it's 0. Use express-rate-limit's `ipKeyGenerator` for IPv6.
+- **Trust proxy:** read `TRUST_PROXY_HOPS` (0–5, default 0, invalid values warn and fall back to 0). On Render it must be **3** (visitor → Cloudflare → Render proxy). Set it before the rate limiters. Log a warning on Render when it's 0. Use express-rate-limit's `ipKeyGenerator` for IPv6. Tested (`routes/guards.test.ts`): with 3 hops the visitor is the third address from the right of X-Forwarded-For (a faked leftmost address is ignored); with 0 hops the header is ignored.
 - **CORS:** a fixed allowlist (localhost + the live Vercel URL) plus an optional `CORS_ORIGINS` env list, parsed strictly (no `*`, no paths). Ledger broke on this when the Vercel address changed.
 - **Outbound politeness:** the global serial queues for Chess.com and Lichess, the User-Agent with contact, backoff, and timeouts on every fetch.
 - **Logs:** structured one-line JSON logs with a request ID, the job ID and timings. `/api/health` reports the queue depth.
@@ -585,6 +599,10 @@ TRUST_PROXY_HOPS=       # 3 on Render, unset locally
 CONTACT_EMAIL=          # used in the User-Agent for Chess.com/Lichess
 MAX_GAMES_PER_PLAYER=200
 DEMO_PLAYERS=           # e.g. lichess:DrNykterstein: frozen (no re-import, no claims), trace kept, never evicted; invalid entry stops startup
+IP_HASH_SALT=           # Stage 6: secret key of the visitor hash; ≥ 32 random chars, required in production
+LIMIT_IMPORTS_PER_HOUR=5 LIMIT_IMPORTS_PER_DAY=15 LIMIT_REPORTS_PER_DAY=3
+LIMIT_REQUESTS_PER_MINUTE=300   # flood guard
+STORAGE_NEW_PLAYER_LIMIT_MB=120 NEW_PLAYERS_PER_DAY=40 IMPORT_QUEUE_MAX=10
 PORT=5000
 ```
 **web/.env.local**: `NEXT_PUBLIC_API_URL=`
@@ -605,9 +623,9 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | **3. Patterns dashboard** ✅ done 3 Nov 2026 (a6ab232, 4417b71, d458f56, 54cf13f) | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
 | **4. The big dataset** ⏸ deferred until after Stage 5 (4 Nov 2026: not enough free disk space on the laptop for the parquet shards). Plan kept: a DuckDB pipeline on the laptop, bullet included, 400-point bands per mover (each move counted in the band of the player who made it), prune locally, publish only the pruned result to Atlas | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
 | **5. Coach agent** ✅ done 6 Nov 2026 (tools d2c510c; loop + verifier 3af51cb, a0e7f4f; API 7286ca4; overload fix cf4d685; coach page 6a065a5; wrap-up docs) | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
-| **6. Ask + guards** | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
+| **6. Ask + guards** (chunk A guards ✅ built 11 Nov 2026; chunk B ask next) | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
 | **7. Landing + animation pass** ✅ done 7 Nov 2026 (frozen demo players 62c9a96, landing 97cf88e, animation pass c721a72, perf probe + parallel summary 2f2456f, perf fixes in the "perf: no layout shift on the dashboard…" commit) | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
-| **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences: final check of the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), **verify the licence of react-chessboard's piece set**, and **decide the repo's own licence** | Portfolio-ready | Everything in section 16 has a fallback in place |
+| **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences: final check of the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), **verify the licence of react-chessboard's piece set**, and **decide the repo's own licence**. Load the games list in one request | Portfolio-ready | Everything in section 16 has a fallback in place |
 
 ---
 

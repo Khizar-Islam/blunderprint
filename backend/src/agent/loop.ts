@@ -7,7 +7,7 @@ import type { Pacer } from "./pacer.js";
 import { buildSystemPrompt, FINAL_PROMPT, FORMAT_RETRY_PROMPT, repairPrompt, TASK_PROMPT } from "./prompts.js";
 import { parseReport, REPORT_JSON_SCHEMA, type DraftReport } from "./schema.js";
 import { declaredTools, runTool, summarizeResult } from "./tools/index.js";
-import { verifyReport, type DroppedPattern, type ToolLog, type VerifiedPattern } from "./verifier.js";
+import { verifyReport, type DroppedPattern, type ToolLog, type VerifiedPattern, type VerificationIssue } from "./verifier.js";
 
 // The coach agent (CLAUDE.md §10). One run, in two phases plus a check:
 //
@@ -23,6 +23,10 @@ import { verifyReport, type DroppedPattern, type ToolLog, type VerifiedPattern }
 //   3. Verify (verifier.ts). If anything fails, ONE repair round: the model hears exactly what
 //      failed and answers again (no tools: it already has every result). The repaired report
 //      is verified again, and what still fails is dropped or trimmed.
+//
+// WHAT the run produces is a task (AgentTask below): its prompts, its answer schema and its
+// verifier. The report (reportTask) is the default; an "Ask the coach" question (ask.ts, Stage 6)
+// is the other. The loop itself (phases, retries, limits, trace) is the same for both.
 //
 // Limits: maxCalls model calls for 1-2 (two of them kept back for the answer), maxRepairCalls
 // more for 3, a total token budget, a per-call timeout (in the model) and a deadline for the
@@ -92,6 +96,17 @@ export interface AgentReport {
   trimmed: DroppedPattern[];
 }
 
+export interface TaskResult<Output> {
+  status: "done" | "failed";
+  output?: Output;
+  error?: AgentError;
+  usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
+  durationMs: number;
+  trace: TraceStep[];
+  // The model that wrote the answer the run ended with (the fallback, if the run switched).
+  answerModel?: string;
+}
+
 export interface AgentResult {
   status: "done" | "failed";
   report?: AgentReport;
@@ -101,6 +116,31 @@ export interface AgentResult {
   trace: TraceStep[];
   // The model that wrote the report the run ended with (the fallback, if the run switched).
   answerModel?: string;
+}
+
+// One kind of run: what the model is told, the shape of its answer, and how code checks it.
+//   verify(final=false) lists every problem (for the repair round) and the output to use if
+//   there are none; verify(final=true) is the last word: it removes what still fails.
+export interface AgentTask<Draft, Output> {
+  system: string;
+  // The first user message, and the one that starts the answer phase.
+  taskPrompt: string;
+  finalPrompt: string;
+  formatRetryPrompt(error: string): string;
+  responseSchema: Record<string, unknown>;
+  parse(text: string): { ok: true; draft: Draft } | { ok: false; error: string };
+  verify(draft: Draft, log: ToolLog, opts: { final: boolean }): Promise<TaskVerification<Output>>;
+  repairPrompt(issues: string[]): string;
+  // Trace wording: "wrote the report" / "wrote the answer", and "no usable report: ...".
+  noun: string;
+}
+
+export interface TaskVerification<Output> {
+  // One line per problem, for the trace and the repair prompt.
+  issues: string[];
+  output: Output;
+  // The verifier's trace line.
+  detail: string;
 }
 
 export interface RunAgentOptions {
@@ -157,8 +197,64 @@ export function summarizeArgs(args: unknown): string {
   return text.length > 80 ? `${text.slice(0, 79)}…` : text;
 }
 
+// The coach report as a task: the Stage 5 prompts, schema and verifier, unchanged.
+export function reportTask(ctx: AgentContext): AgentTask<DraftReport, AgentReport> {
+  // The weakness rules (gap, minimum sample) come with the player's context, so the prompt and
+  // the candidate scan always state the same ones.
+  return {
+    system: buildSystemPrompt(ctx.rules),
+    taskPrompt: TASK_PROMPT,
+    finalPrompt: FINAL_PROMPT,
+    formatRetryPrompt: FORMAT_RETRY_PROMPT,
+    responseSchema: REPORT_JSON_SCHEMA,
+    noun: "report",
+    parse(text) {
+      const parsed = parseReport(text);
+      return parsed.ok ? { ok: true, draft: parsed.report } : parsed;
+    },
+    // The repair prompt names each issue's pattern, so the issues travel as JSON lines here and
+    // are read back in repairPrompt (the loop only needs them as text for the trace).
+    async verify(draft, log, { final }) {
+      const v = await verifyReport(ctx, draft, log, { final });
+      const n = draft.patterns.length;
+      const detail = final
+        ? `kept ${v.passed.length} of ${n}${v.dropped.length ? `, dropped ${v.dropped.length}` : ""}${v.trimmed.length ? `, trimmed evidence in ${v.trimmed.length}` : ""}`
+        : v.issues.length
+          ? `${n} patterns, ${v.issues.length} issue${v.issues.length === 1 ? "" : "s"}`
+          : `${n} patterns, all checks passed`;
+      return {
+        issues: v.issues.map((i) => JSON.stringify(i)),
+        detail,
+        output: {
+          patterns: v.passed,
+          ...(draft.notEnoughData ? { notEnoughData: draft.notEnoughData } : {}),
+          dropped: final ? v.dropped : [],
+          trimmed: final ? v.trimmed : [],
+        },
+      };
+    },
+    repairPrompt: (issues) => repairPrompt(issues.map((i) => JSON.parse(i) as VerificationIssue)),
+  };
+}
+
+// The repair round's trace line for a report: "#1: problem; #2: problem".
+const issueLine = (issue: string) => {
+  try {
+    const i = JSON.parse(issue) as VerificationIssue;
+    return typeof i.pattern === "number" ? `#${i.pattern + 1}: ${i.problem}` : issue;
+  } catch {
+    return issue;
+  }
+};
+
+// A coach report run (Stage 5's entry point, unchanged for its callers).
 export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
-  const { ctx, pacer, limits, onStep, fallback } = opts;
+  const { output, ...rest } = await runTask({ ...opts, task: reportTask(opts.ctx) });
+  return { ...rest, ...(output ? { report: output } : {}) };
+}
+
+export async function runTask<Draft, Output>(opts: RunAgentOptions & { task: AgentTask<Draft, Output> }): Promise<TaskResult<Output>> {
+  const { ctx, pacer, limits, onStep, fallback, task } = opts;
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realSleep;
   const random = opts.random ?? Math.random;
@@ -170,10 +266,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
   const outer = opts.signal ?? new AbortController().signal;
 
   const tools = declaredTools();
-  // The weakness rules (gap, minimum sample) come with the player's context, so the prompt and
-  // the candidate scan always state the same ones.
-  const SYSTEM_PROMPT = buildSystemPrompt(ctx.rules);
-  const input: Step[] = [userInput(TASK_PROMPT)];
+  const SYSTEM_PROMPT = task.system;
+  const input: Step[] = [userInput(task.taskPrompt)];
   const log: ToolLog = new Map();
   const trace: TraceStep[] = [];
   const usage = { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -226,7 +320,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
         const res = await model.call({
           system: SYSTEM_PROMPT,
           input,
-          ...(withTools ? { tools } : { responseSchema: REPORT_JSON_SCHEMA }),
+          ...(withTools ? { tools } : { responseSchema: task.responseSchema }),
           signal: callSignal,
         });
         slot.settle(res.usage.total);
@@ -237,7 +331,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
         emit({
           kind: "model",
           label: model.name,
-          detail: asked.length ? `asked for ${asked.join(", ")}` : withTools ? "done investigating" : "wrote the report",
+          detail: asked.length ? `asked for ${asked.join(", ")}` : withTools ? "done investigating" : `wrote the ${task.noun}`,
           ms: now() - t0,
           tokens: res.usage.total,
         });
@@ -346,24 +440,24 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     }
   }
 
-  // Phase 2: `prompt`, then one answer call for the JSON report. If it can't be read and the
+  // Phase 2: `prompt`, then one answer call for the JSON answer. If it can't be read and the
   // budget allows, one more call asking for just the JSON.
-  async function answerWithReport(budget: { used: number; max: number }, prompt: string, phase: "answer" | "repair"): Promise<DraftReport | null> {
+  async function answerWithReport(budget: { used: number; max: number }, prompt: string, phase: "answer" | "repair"): Promise<Draft | null> {
     input.push(userInput(prompt));
     let res = await callModel(phase, budget);
     input.push(...res.steps);
-    let parsed = parseReport(textOf(res.steps));
+    let parsed = task.parse(textOf(res.steps));
     if (!parsed.ok && budget.max - budget.used >= 1) {
-      input.push(userInput(FORMAT_RETRY_PROMPT(parsed.error)));
+      input.push(userInput(task.formatRetryPrompt(parsed.error)));
       res = await callModel(phase, budget);
       input.push(...res.steps);
-      parsed = parseReport(textOf(res.steps));
+      parsed = task.parse(textOf(res.steps));
     }
     if (parsed.ok) {
       answerModel = model.name;
-      return parsed.report;
+      return parsed.draft;
     }
-    emit({ kind: "model", label: model.name, detail: `no usable report: ${parsed.error}`, ms: 0 });
+    emit({ kind: "model", label: model.name, detail: `no usable ${task.noun}: ${parsed.error}`, ms: 0 });
     return null;
   }
 
@@ -371,26 +465,19 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     const mainBudget = { used: 0, max: limits.maxCalls };
     // Two calls kept back: the answer, and one format retry if it's needed.
     await investigate(mainBudget, 2);
-    const draft = await answerWithReport(mainBudget, FINAL_PROMPT, "answer");
-    if (!draft) throw new StopRun("no_answer", "The model didn't produce a usable report.", { phase: "answer" });
+    const draft = await answerWithReport(mainBudget, task.finalPrompt, "answer");
+    if (!draft) throw new StopRun("no_answer", `The model didn't produce a usable ${task.noun}.`, { phase: "answer" });
 
     // Verify; one repair round if anything failed.
     let t0 = now();
-    const first = await verifyReport(ctx, draft, log, { final: false });
-    emit({
-      kind: "verify",
-      label: "verifier",
-      detail: first.issues.length
-        ? `${draft.patterns.length} patterns, ${first.issues.length} issue${first.issues.length === 1 ? "" : "s"}`
-        : `${draft.patterns.length} patterns, all checks passed`,
-      ms: now() - t0,
-    });
+    const first = await task.verify(draft, log, { final: false });
+    emit({ kind: "verify", label: "verifier", detail: first.detail, ms: now() - t0 });
 
     let finalDraft = draft;
     if (first.issues.length > 0 && limits.maxRepairCalls > 0) {
-      emit({ kind: "repair", label: "repair round", detail: first.issues.map((i) => `#${i.pattern + 1}: ${i.problem}`).join("; ").slice(0, 300), ms: 0 });
+      emit({ kind: "repair", label: "repair round", detail: first.issues.map(issueLine).join("; ").slice(0, 300), ms: 0 });
       const firstAnswerModel = answerModel;
-      const repaired = await answerWithReport({ used: 0, max: limits.maxRepairCalls }, repairPrompt(first.issues), "repair").catch((err) => {
+      const repaired = await answerWithReport({ used: 0, max: limits.maxRepairCalls }, task.repairPrompt(first.issues), "repair").catch((err) => {
         // A repair that runs out of tokens keeps the first draft: the final verification
         // below still removes whatever fails.
         if (err instanceof StopRun && (err.code === "call_limit" || err.code === "token_limit")) return null;
@@ -401,24 +488,12 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     }
 
     t0 = now();
-    const final = first.issues.length === 0 ? { ...first, dropped: [], trimmed: [] } : await verifyReport(ctx, finalDraft, log, { final: true });
-    if (first.issues.length > 0) {
-      emit({
-        kind: "verify",
-        label: "verifier",
-        detail: `kept ${final.passed.length} of ${finalDraft.patterns.length}${final.dropped.length ? `, dropped ${final.dropped.length}` : ""}${final.trimmed.length ? `, trimmed evidence in ${final.trimmed.length}` : ""}`,
-        ms: now() - t0,
-      });
-    }
+    const final = first.issues.length === 0 ? first : await task.verify(finalDraft, log, { final: true });
+    if (first.issues.length > 0) emit({ kind: "verify", label: "verifier", detail: final.detail, ms: now() - t0 });
 
     return {
       status: "done",
-      report: {
-        patterns: final.passed,
-        ...(finalDraft.notEnoughData ? { notEnoughData: finalDraft.notEnoughData } : {}),
-        dropped: final.dropped,
-        trimmed: final.trimmed,
-      },
+      output: final.output,
       usage,
       durationMs: now() - started,
       trace,

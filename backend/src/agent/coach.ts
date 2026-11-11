@@ -22,7 +22,9 @@ export interface CoachRuntime {
   pacer: Pacer;
   limits: AgentLimits;
   rules: WeaknessRules;
-  // POST /report: below this many analysed games → 409 not_enough_games.
+  // One question's limits (Stage 6 chunk B, ASK_*): smaller than a report's.
+  askLimits: AgentLimits;
+  // POST /report and /ask: below this many analysed games → 409 not_enough_games.
   minAnalysed: number;
   // The most requests one run can make (COACH_MAX_REQUESTS): the budget must have this many
   // left to start one.
@@ -50,7 +52,8 @@ type CoachEnv = Pick<
   | "COACH_MIN_CANDIDATE_GAMES"
   | "COACH_MIN_CANDIDATE_MOVES"
   | "COACH_MIN_ANALYSED_GAMES"
->;
+> &
+  Partial<Pick<Env, "ASK_MAX_MODEL_CALLS" | "ASK_MAX_REPAIR_CALLS" | "ASK_MAX_REQUESTS" | "ASK_RUN_TIMEOUT_MS">>;
 
 // The model can be passed in (tests); otherwise it comes from COACH_MODEL.
 export function createCoachRuntime(
@@ -89,6 +92,14 @@ export function createCoachRuntime(
       maxTokens: env.COACH_MAX_TOKENS,
       runTimeoutMs: env.COACH_RUN_TIMEOUT_MS,
       maxRequests: env.COACH_MAX_REQUESTS,
+    },
+    // Defaults for callers that predate asks (tests, scripts): env.ts's defaults.
+    askLimits: {
+      maxCalls: env.ASK_MAX_MODEL_CALLS ?? 6,
+      maxRepairCalls: env.ASK_MAX_REPAIR_CALLS ?? 1,
+      maxTokens: env.COACH_MAX_TOKENS,
+      runTimeoutMs: env.ASK_RUN_TIMEOUT_MS ?? 120_000,
+      maxRequests: env.ASK_MAX_REQUESTS ?? 10,
     },
     rules: {
       ...DEFAULT_RULES,

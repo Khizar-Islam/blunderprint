@@ -1,6 +1,6 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from "mongoose";
 
-export const JOB_TYPES = ["import", "extract", "report"] as const;
+export const JOB_TYPES = ["import", "extract", "report", "ask"] as const;
 export const JOB_STATUSES = ["queued", "running", "done", "failed"] as const;
 export const ACTIVE_JOB_STATUSES = ["queued", "running"] as const;
 

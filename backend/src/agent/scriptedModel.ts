@@ -1,4 +1,5 @@
 import { sleep } from "../lib/sleep.js";
+import { isAskRequest } from "./ask.js";
 import { ModelError, type Model, type ModelRequest, type ModelResponse, type Step } from "./model.js";
 import { isWithin, type Candidate } from "./tools/candidates.js";
 
@@ -112,6 +113,34 @@ function answer(request: ModelRequest): ModelResponse {
   return respond(request, [text(JSON.stringify(report))], "completed");
 }
 
+// "Ask the coach" (Stage 6 chunk B): the profile and three examples, then a fixed two-sentence
+// answer whose one figure is a slot (the overall error rate), with the examples as evidence.
+function askInvestigate(request: ModelRequest): ModelResponse {
+  if (toolOutputs(request).length === 0) {
+    return respond(request, [call("get_player_profile", {}), call("find_example_mistakes", { filters: {}, limit: 3 })], "requires_action");
+  }
+  return respond(request, [text("I have what I need.")], "completed");
+}
+
+function askAnswer(request: ModelRequest): ModelResponse {
+  const outputs = toolOutputs(request);
+  const profile = outputs.find((o) => o.name === "get_player_profile");
+  const examples = outputs.find((o) => o.name === "find_example_mistakes");
+  const rows = (examples?.result as { examples?: { gameId: string; ply: number }[] } | undefined)?.examples ?? [];
+  const answer = profile
+    ? {
+        kind: "answer",
+        sentences: [
+          "This is a scripted practice answer built from your real games, so the question box can be tried without spending AI calls.",
+          "Across your analysed games your rate is {{a}}, and the positions below are among your costliest errors.",
+        ],
+        slots: [{ name: "a", step: profile.step, path: "errors.per100Moves" }],
+        ...(examples && rows.length ? { evidenceStep: examples.step, evidence: rows.slice(0, 3).map((e) => ({ gameId: e.gameId, ply: e.ply })) } : {}),
+      }
+    : { kind: "cannot_answer", reason: "no_data" };
+  return respond(request, [text(JSON.stringify(answer))], "completed");
+}
+
 export type ScriptedScenario = "ok" | "overload-switch" | "fail-overloaded" | "slow";
 export const SCRIPTED_FALLBACK_NAME = "scripted-fallback";
 
@@ -126,6 +155,7 @@ export function createScriptedModel({ delayMs = 600, name = SCRIPTED_MODEL_NAME,
     async call(request) {
       if (delayMs > 0) await sleep(delayMs, request.signal);
       if (requests++ < failFirst) throw overloaded();
+      if (isAskRequest(request)) return request.tools?.length ? askInvestigate(request) : askAnswer(request);
       return request.tools?.length ? investigate(request) : answer(request);
     },
   };

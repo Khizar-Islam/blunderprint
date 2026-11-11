@@ -9,6 +9,7 @@ import { apiNotFound, errorHandler } from "./middleware/errorHandler.js";
 import { floodGuard } from "./middleware/rateLimit.js";
 import { requestId } from "./middleware/requestId.js";
 import { analysisRouter, type AnalysisRouterOptions } from "./routes/analysis.js";
+import { askRouter } from "./routes/ask.js";
 import { coachRouter } from "./routes/coach.js";
 import { gamesRouter } from "./routes/games.js";
 import { healthRouter } from "./routes/health.js";
@@ -90,6 +91,7 @@ export function createApp({
   app.use("/api", gamesRouter({ isDemo }));
   app.use("/api", analysisRouter(queue, { ...analysis, isDemo }));
   if (coach) app.use("/api", coachRouter({ queue, coach, guards }));
+  if (coach) app.use("/api", askRouter({ queue, coach, guards }));
   app.use("/api", runsRouter({ heartbeatMs: sseHeartbeatMs }));
 
   // 6. Unknown /api routes → 404 JSON, then the error handler last.

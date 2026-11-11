@@ -135,6 +135,15 @@ test("loadEnv: the Stage 6 guard defaults, and the IP hash salt is required in p
   assert.equal(env.STORAGE_NEW_PLAYER_LIMIT_MB, 120);
   assert.equal(env.NEW_PLAYERS_PER_DAY, 40);
   assert.equal(env.IMPORT_QUEUE_MAX, 10);
+  // Chunk B: questions.
+  assert.equal(env.LIMIT_ASKS_PER_HOUR, 6);
+  assert.equal(env.LIMIT_ASKS_PER_DAY, 20);
+  assert.equal(env.COACH_QUEUE_MAX, 5);
+  assert.equal(env.ASK_MAX_MODEL_CALLS, 6);
+  assert.equal(env.ASK_MAX_REPAIR_CALLS, 1);
+  assert.equal(env.ASK_MAX_REQUESTS, 10);
+  assert.equal(env.ASK_RUN_TIMEOUT_MS, 120_000);
+  assert.throws(() => loadEnv({ ...BASE, ASK_MAX_REQUESTS: "6" }), /ASK_MAX_REQUESTS: must be at least/);
 
   assert.throws(() => loadEnv({ ...BASE, RENDER: "true" }), /IP_HASH_SALT: required in production, at least 32 characters/);
   assert.throws(() => loadEnv({ ...BASE, NODE_ENV: "production", IP_HASH_SALT: "x".repeat(31) }), /IP_HASH_SALT/);

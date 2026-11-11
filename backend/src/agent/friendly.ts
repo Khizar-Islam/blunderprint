@@ -23,6 +23,7 @@ export type FriendlyCode =
   // Stage 6 guards
   | "limit_imports"
   | "limit_reports"
+  | "limit_questions"
   | "limit_requests"
   | "limit_new_players"
   | "storage_full"
@@ -39,6 +40,8 @@ export interface FriendlyVars {
   resetsInMs?: number;
   // How long until a limit's window ends (also sent as Retry-After).
   retryAfterMs?: number;
+  // busy: which queue is full (the import route's by default).
+  queue?: "imports" | "coach";
 }
 
 const hoursText = (ms: number | undefined) => {
@@ -78,12 +81,17 @@ export function friendly(code: FriendlyCode, vars: FriendlyVars = {}): FriendlyE
       `You've started a lot of imports in a short time. You can start another ${waitText(vars.retryAfterMs)}. Players already imported can still be opened.`,
     limit_reports: () =>
       `You've started today's coach reports. You can start another ${waitText(vars.retryAfterMs)}. Reports already written are still shown.`,
+    limit_questions: () =>
+      `You've asked the coach a lot of questions. You can ask another ${waitText(vars.retryAfterMs)}. Answers already given are still shown.`,
     limit_requests: () => `Too many requests from your connection. Wait a minute and try again.`,
     limit_new_players: () =>
       `Blunderprint has taken in all the new players it can today. Try again ${waitText(vars.retryAfterMs)}, or explore a player who's already here.`,
     storage_full: () =>
       "Blunderprint's free database is full, so new players can't be imported right now. Players already imported still work.",
-    busy: () => "A lot of imports are waiting right now. Try again in a minute.",
+    busy: () =>
+      vars.queue === "coach"
+        ? "The coach has a lot of questions waiting right now. Try again in a minute."
+        : "A lot of imports are waiting right now. Try again in a minute.",
   };
   return { code, message: messages[code]() };
 }

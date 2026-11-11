@@ -7,6 +7,7 @@ import type { Env } from "../config/env.js";
 import { createChessComImporter } from "../importers/chesscom.js";
 import { createLichessImporter } from "../importers/lichess.js";
 import { createPoliteClient, userAgent } from "../importers/politeFetch.js";
+import { createAskHandler } from "./handlers/ask.js";
 import { createExtractHandler } from "./handlers/extract.js";
 import { createImportHandler } from "./handlers/import.js";
 import { createReportHandler } from "./handlers/report.js";
@@ -36,12 +37,13 @@ export function createJobSystem(env: JobSystemEnv, { model }: { model?: Model } 
     extract: createExtractHandler(),
     // A new report for a demo player: keep its run (the trace) and date the one it replaced.
     report: createReportHandler(coach, { afterSave: () => syncRunExpiry(env.demoPlayers ?? []) }),
+    ask: createAskHandler(coach),
   };
-  // The two worker lanes (server.ts starts one worker per lane). Reports only take jobs for
-  // this process's model (see handlers/report.ts).
+  // The two worker lanes (server.ts starts one worker per lane). The coach lane runs reports and
+  // questions (Stage 6), one at a time, and only for this process's model (see handlers/report.ts).
   const lanes: Record<"main" | "coach", QueryFilter<JobFields>> = {
     main: { type: { $in: ["import", "extract"] as JobType[] } },
-    coach: { type: "report" as JobType, "payload.model": coach.modelName },
+    coach: { type: { $in: ["report", "ask"] as JobType[] }, "payload.model": coach.modelName },
   };
   return { queue, handlers, coach, lanes };
 }

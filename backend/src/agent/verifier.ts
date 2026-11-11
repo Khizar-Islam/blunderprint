@@ -66,7 +66,7 @@ export interface EvidenceFacts {
 }
 
 // One example as find_example_mistakes returns it (tools/examples.ts).
-interface ExampleRow {
+export interface ExampleRow {
   gameId: string;
   ply: number;
   moveNumber?: number;
@@ -78,7 +78,7 @@ interface ExampleRow {
   opening?: { eco: string; name: string | null } | null;
 }
 
-const factsOf = (e: ExampleRow | undefined): EvidenceFacts => ({
+export const factsOf = (e: ExampleRow | undefined): EvidenceFacts => ({
   speed: e?.speed ?? null,
   phase: e?.phase ?? null,
   clockBucket: e?.clockBucket ?? null,
@@ -112,7 +112,7 @@ export interface DroppedPattern {
 }
 
 const MIN_GAMES = 2;
-const JUDGEMENTS = new Set(["inaccuracy", "mistake", "blunder"]);
+export const JUDGEMENTS = new Set(["inaccuracy", "mistake", "blunder"]);
 const EXAMPLES_TOOL = "find_example_mistakes";
 const CANDIDATES_TOOL = "get_weakness_candidates";
 
@@ -297,7 +297,7 @@ export function checkProse(p: { explanation: string; drill: string }, allowed: P
   return problems;
 }
 
-const sentencesOf = (text: string) => text.split(/(?<=[.!?])\s+/).filter((s) => s.trim() !== "");
+export const sentencesOf = (text: string) => text.split(/(?<=[.!?])\s+/).filter((s) => s.trim() !== "");
 
 // The text without the sentences that contain an unbacked number, a number word, or a move that
 // isn't one of the evidence's.
@@ -333,12 +333,12 @@ export function textTooShort(p: { explanation: string; drill: string }): string[
 // ---------------------------------------------------------------------------------------------
 // Evidence in the database (a final safety net: examples come from the database already)
 
-type MistakeDoc = { ply: number; kind: string; san: string; best?: string; fen: string; winDrop: number };
-type GameMistakes = Map<string, Map<number, MistakeDoc>>;
+export type MistakeDoc = { ply: number; kind: string; san: string; best?: string; fen: string; winDrop: number };
+export type GameMistakes = Map<string, Map<number, MistakeDoc>>;
 
 // The player's analysed games among the cited ids, with their mistakes by ply: one query for
 // the whole report. Another player's game simply isn't found.
-async function loadMistakes(ctx: AgentContext, gameIds: string[]): Promise<GameMistakes> {
+export async function loadMistakes(ctx: AgentContext, gameIds: string[]): Promise<GameMistakes> {
   const ids = [...new Set(gameIds)].filter((id) => Types.ObjectId.isValid(id) && /^[0-9a-f]{24}$/i.test(id));
   const games = await Game.find(
     { _id: { $in: ids }, playerId: ctx.playerId, "features.version": FEATURES_VERSION, "features.error": { $exists: false } },

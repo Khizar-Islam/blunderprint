@@ -40,7 +40,7 @@ export function sanToUci(fen: string, san: string | null | undefined): string | 
 }
 
 // The evidence games' colour and move ribbon (one letter per ply, b/g/i/m/x), in one query.
-async function evidenceGames(playerId: Types.ObjectId, gameIds: string[]) {
+export async function evidenceGames(playerId: Types.ObjectId, gameIds: string[]) {
   const ids = [...new Set(gameIds)];
   const games = await Game.find({ _id: { $in: ids }, playerId }, { color: 1, "analysis.classifications": 1 }).lean<
     { _id: unknown; color: string; analysis?: { classifications?: string[] } }[]

@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { QueryFilter, Types, UpdateQuery } from "mongoose";
 import { AgentRun, MAX_RUN_STEPS, type AgentRunDoc, type AgentRunFields, type RunStatus } from "../db/models/agentRun.js";
 import { logger } from "../lib/logger.js";
+import type { PublicAnswer } from "./answerStore.js";
 import type { FriendlyError } from "./friendly.js";
 import type { TraceStep } from "./loop.js";
 import type { PublicReport } from "./reportStore.js";
@@ -23,6 +24,11 @@ export interface PublicRun {
   error?: FriendlyError;
   // Only on a finished run whose report still exists.
   report?: PublicReport;
+  // Ask runs (Stage 6 chunk B) only: the kind, the question, and once done its answer. Report runs
+  // don't carry `kind`, so their shape is unchanged.
+  kind?: "ask";
+  question?: string;
+  answer?: PublicAnswer;
   createdAt?: string;
   startedAt?: string;
   finishedAt?: string;
@@ -36,7 +42,8 @@ export type RunEvent =
 
 type RunLike = AgentRunFields & { _id: unknown; createdAt?: Date };
 
-export function toPublicRun(run: AgentRunDoc | RunLike, report?: PublicReport | null): PublicRun {
+// Never includes tokenHashes.
+export function toPublicRun(run: AgentRunDoc | RunLike, report?: PublicReport | null, answer?: PublicAnswer | null): PublicRun {
   const r = run as RunLike;
   return {
     id: String(r._id),
@@ -48,6 +55,8 @@ export function toPublicRun(run: AgentRunDoc | RunLike, report?: PublicReport | 
     ...(r.usage?.calls != null ? { usage: { calls: r.usage.calls, totalTokens: r.usage.totalTokens ?? 0 } } : {}),
     ...(r.error?.code ? { error: { code: r.error.code, message: r.error.message ?? "" } as FriendlyError } : {}),
     ...(report ? { report } : {}),
+    ...(r.kind === "ask" ? { kind: "ask" as const, question: r.question ?? "" } : {}),
+    ...(answer ? { answer } : {}),
     ...(r.createdAt ? { createdAt: r.createdAt.toISOString() } : {}),
     ...(r.startedAt ? { startedAt: r.startedAt.toISOString() } : {}),
     ...(r.finishedAt ? { finishedAt: r.finishedAt.toISOString() } : {}),
@@ -79,9 +88,10 @@ async function change(
   update: UpdateQuery<AgentRunFields>,
   type: "status" | "done" | "failed",
   report?: PublicReport | null,
+  answer?: PublicAnswer | null,
 ): Promise<AgentRunDoc | null> {
   const run = await AgentRun.findOneAndUpdate(filter, { ...update, $inc: { ...update.$inc, rev: 1 } }, { returnDocument: "after" });
-  if (run) runEvents.emit(String(run._id), { type, rev: run.rev, run: toPublicRun(run, report) });
+  if (run) runEvents.emit(String(run._id), { type, rev: run.rev, run: toPublicRun(run, report, answer) });
   return run;
 }
 
@@ -112,6 +122,17 @@ export const runStore = {
       { $set: { status: "done", reportId: fields.reportId, usage: fields.usage, finishedAt: new Date() } },
       "done",
       report,
+    );
+  },
+
+  // An ask run's end: the answer (or "cannot answer") is saved and goes out with the event.
+  doneAsk(runId: Types.ObjectId, fields: { answerId: unknown; usage: Usage }, answer: PublicAnswer) {
+    return change(
+      { _id: runId, status: ACTIVE },
+      { $set: { status: "done", answerId: fields.answerId, usage: fields.usage, finishedAt: new Date() } },
+      "done",
+      null,
+      answer,
     );
   },
 

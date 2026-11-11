@@ -247,10 +247,27 @@ describe("get_mistake_breakdown", () => {
     const b = (await breakdown({ groupBy: "pieceLost" })) as { totalErrors: number; rows: unknown[] };
     assert.equal(b.totalErrors, 4);
     assert.deepEqual(b.rows, [
-      { pieceLost: "queen", inaccuracy: 0, mistake: 0, blunder: 1, total: 1, shareOfErrorsPct: 25, perGame: 0.5 },
-      { pieceLost: "rook", inaccuracy: 0, mistake: 0, blunder: 1, total: 1, shareOfErrorsPct: 25, perGame: 0.5 },
-      { pieceLost: "none", inaccuracy: 1, mistake: 1, blunder: 0, total: 2, shareOfErrorsPct: 50, perGame: 1 },
+      { pieceLost: "queen", inaccuracy: 0, mistake: 0, blunder: 1, total: 1, shareOfErrorsPct: 25, perGame: 0.5, blunderSharePct: 50, mistakeSharePct: 0, inaccuracySharePct: 0 },
+      { pieceLost: "rook", inaccuracy: 0, mistake: 0, blunder: 1, total: 1, shareOfErrorsPct: 25, perGame: 0.5, blunderSharePct: 50, mistakeSharePct: 0, inaccuracySharePct: 0 },
+      { pieceLost: "none", inaccuracy: 1, mistake: 1, blunder: 0, total: 2, shareOfErrorsPct: 50, perGame: 1, blunderSharePct: 0, mistakeSharePct: 100, inaccuracySharePct: 100 },
     ]);
+  });
+  it("per-kind shares in every grouping: each row's share of that kind; null when the kind has none", async () => {
+    type Shares = { blunderSharePct: number | null; mistakeSharePct: number | null; inaccuracySharePct: number | null };
+    const shares = async (groupBy: string, filters = {}) =>
+      ((await breakdown({ groupBy, filters })) as { rows: Shares[] }).rows.map((r) => [r.blunderSharePct, r.mistakeSharePct, r.inaccuracySharePct]);
+    // Phases: opening 1 inaccuracy + 1 mistake, middlegame 1 blunder, endgame 1 blunder.
+    assert.deepEqual(await shares("phase"), [
+      [0, 100, 100],
+      [50, 0, 0],
+      [50, 0, 0],
+    ]);
+    // Squares: shares over all squares (4 here).
+    const sq = await shares("square");
+    assert.equal(sq.length, 4);
+    assert.equal(sq.reduce((n, r) => n + (r[0] ?? 0), 0), 100);
+    // White only: no mistake at all → mistakeSharePct null in every row.
+    for (const r of await shares("pieceLost", { color: "white" })) assert.equal(r[1], null);
   });
   it("square: worst first by severity, with the colour the player had", async () => {
     const b = (await breakdown({ groupBy: "square" })) as { squaresWithErrors: number; rows: { square: string; playerColor: string; total: number }[] };
@@ -451,7 +468,7 @@ describe("the registry", () => {
     });
     assert.deepEqual(await runTool(ctx, "get_opening_breakdown", { minGames: 3, filters: { color: "white" } }), {
       ok: false,
-      error: 'Invalid arguments. arguments: unknown key "filters" (allowed: color, speed, minGames)',
+      error: 'Invalid arguments. arguments: unknown key "filters" (allowed: color, speed, minGames, name)',
     });
     const ex = await runTool(ctx, "find_example_mistakes", { filters: { phase: "endgame", ply: 40 }, limit: 5 });
     assert.equal(!ex.ok && ex.error, 'Invalid arguments. filters: unknown key "ply" (allowed: color, speed, phase, kind, clockBucket, moveNumberBucket, pieceLost, square, eco)');

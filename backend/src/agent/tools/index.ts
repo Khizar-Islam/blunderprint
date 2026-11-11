@@ -52,14 +52,14 @@ export const TOOLS: ToolDef[] = [
   tool({
     name: "get_opening_breakdown",
     description:
-      "Per opening (ECO code): games, W/D/L, score %, and errors per analysed game. Up to 12 openings with at least minGames games (default 3), most played first. Optional colour and speed filters.",
+      "Per opening (ECO code): games, W/D/L, score %, and errors per analysed game. Up to 12 openings with at least minGames games (default 3), most played first. Optional colour and speed filters. With name (e.g. \"Sicilian\"): every ECO code whose opening family (the name before the colon) contains it, from ALL the player's games, and `matching`, those codes added up (games: 0 = no game in that opening).",
     args: openingArgs,
     run: (ctx, args) => getOpeningBreakdown(ctx, args),
   }),
   tool({
     name: "get_mistake_breakdown",
     description:
-      "The player's inaccuracies, mistakes and blunders grouped one way: phase (opening/middlegame/endgame), speed, clockBucket (share of the starting clock left), moveNumberBucket, pieceLost (piece lost within 2 plies, or none), or square (destination square, worst 12). Each row has counts by kind and, where moves are counted, per100Moves. Optional colour and speed filters.",
+      "The player's inaccuracies, mistakes and blunders grouped one way: phase (opening/middlegame/endgame), speed, clockBucket (share of the starting clock left), moveNumberBucket, pieceLost (piece lost within 2 plies, or none), or square (destination square, worst 12). Each row has counts by kind and, where moves are counted, per100Moves, plus each row's share of every kind (blunderSharePct, mistakeSharePct, inaccuracySharePct: share within that kind). Optional colour and speed filters.",
     args: mistakeArgs,
     run: (ctx, args) => getMistakeBreakdown(ctx, args),
   }),
@@ -130,7 +130,7 @@ export function summarizeResult(name: string, data: unknown): string {
     case "get_weakness_candidates":
       return `${len(d.candidates)} of ${d.qualifying} candidates`;
     case "get_opening_breakdown":
-      return `${len(d.openings)} openings`;
+      return d.matching ? `${(d.matching as { games: number }).games} games in ${(d.matching as { ecoCodes: number }).ecoCodes} codes matching "${(d.filters as { name: string }).name}"` : `${len(d.openings)} openings`;
     case "get_mistake_breakdown":
       return `${len(d.rows)} rows by ${d.groupBy}`;
     case "find_example_mistakes":

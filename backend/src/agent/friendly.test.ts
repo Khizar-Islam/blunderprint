@@ -57,3 +57,9 @@ test("the Stage 6 refusals: fixed messages, waits in words", () => {
     assert.ok(!/\d{3}/.test(f.message), "no status codes or raw numbers in the message");
   }
 });
+
+test("chunk B: the question limit, and busy names the queue that's full", () => {
+  assert.match(friendly("limit_questions", { retryAfterMs: 40 * 60_000 }).message, /ask another in about 40 minutes/);
+  assert.match(friendly("busy").message, /imports are waiting/);
+  assert.match(friendly("busy", { queue: "coach" }).message, /coach has a lot of questions waiting/);
+});

@@ -9,7 +9,16 @@ export type RunStatus = (typeof RUN_STATUSES)[number];
 const agentRunSchema = new Schema(
   {
     playerId: { type: Schema.Types.ObjectId, required: true },
-    kind: { type: String, enum: ["report"], default: "report" },
+    // "ask": an "Ask the coach" question (Stage 6 chunk B), with its question, its answer and
+    // the hashes of its secret tokens below.
+    kind: { type: String, enum: ["report", "ask"], default: "report" },
+    question: String,
+    answerId: Schema.Types.ObjectId,
+    // Ask runs only: SHA-256 hashes of the secret tokens handed out for this run, one per
+    // requester (the asker, and anyone who asked the same question while it ran), at most
+    // MAX_RUN_TOKENS. Streaming an ask run needs one of the tokens; the tokens themselves are
+    // never stored, so reading the database doesn't give them away.
+    tokenHashes: { type: [String], default: undefined },
     jobId: Schema.Types.ObjectId,
     status: { type: String, enum: RUN_STATUSES, default: "queued" },
     // +1 on every change a viewer can see; the SSE event id, like jobs.rev.
@@ -47,6 +56,7 @@ export const RUN_TTL_MS = 14 * 24 * 60 * 60_000;
 export const runExpiresAt = (from = new Date()) => new Date(from.getTime() + RUN_TTL_MS);
 
 export const MAX_RUN_STEPS = 60;
+export const MAX_RUN_TOKENS = 20;
 
 export type AgentRunFields = InferSchemaType<typeof agentRunSchema>;
 export type AgentRunDoc = HydratedDocument<AgentRunFields>;

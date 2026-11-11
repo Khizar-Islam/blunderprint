@@ -99,6 +99,13 @@ const envSchema = z.object({
   COACH_MIN_BASELINE_GAP: z.coerce.number().min(0).max(1).default(0.15),
   COACH_MIN_CANDIDATE_GAMES: z.coerce.number().int().min(2).default(5),
   COACH_MIN_CANDIDATE_MOVES: z.coerce.number().int().min(1).default(100),
+  // One "Ask the coach" run (Stage 6 chunk B): model calls (investigation + answer, two kept for
+  // the answer), repair calls, requests (retries included; also what the daily budget must have
+  // left for POST /ask to start one) and the whole run's time limit.
+  ASK_MAX_MODEL_CALLS: z.coerce.number().int().min(2).max(10).default(6),
+  ASK_MAX_REPAIR_CALLS: z.coerce.number().int().min(0).max(2).default(1),
+  ASK_MAX_REQUESTS: z.coerce.number().int().min(4).max(20).default(10),
+  ASK_RUN_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   // A report needs this many analysed games (with features) before it can start (POST 409 below it).
   COACH_MIN_ANALYSED_GAMES: z.coerce.number().int().min(1).default(20),
   // "gemini" (the real model) or "scripted" (agent/scriptedModel.ts: no AI calls, for local
@@ -124,6 +131,9 @@ const envSchema = z.object({
   LIMIT_IMPORTS_PER_HOUR: z.coerce.number().int().positive().default(5),
   LIMIT_IMPORTS_PER_DAY: z.coerce.number().int().positive().default(15),
   LIMIT_REPORTS_PER_DAY: z.coerce.number().int().positive().default(3),
+  // "Ask the coach" questions that start a run (a cached answer or a joined run is free).
+  LIMIT_ASKS_PER_HOUR: z.coerce.number().int().positive().default(6),
+  LIMIT_ASKS_PER_DAY: z.coerce.number().int().positive().default(20),
   // The in-memory flood guard on /api (per visitor, per minute). Generous: a dashboard with the
   // engine running makes a few requests every ten seconds.
   LIMIT_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(300),
@@ -134,6 +144,9 @@ const envSchema = z.object({
   NEW_PLAYERS_PER_DAY: z.coerce.number().int().positive().default(40),
   // At most this many queued imports: past it, a new import gets 503 busy.
   IMPORT_QUEUE_MAX: z.coerce.number().int().positive().default(10),
+  // At most this many queued coach jobs (reports and questions): past it, a new question gets
+  // 503 busy.
+  COACH_QUEUE_MAX: z.coerce.number().int().positive().default(5),
   PORT: z.coerce.number().int().positive().default(5000),
   NODE_ENV: z.string().default("development"),
   // Render sets RENDER=true on its services; used only for the trust-proxy warning.
@@ -168,6 +181,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   // The ceiling must at least allow every logical call once.
   if (parsed.data.COACH_MAX_REQUESTS < parsed.data.COACH_MAX_MODEL_CALLS + parsed.data.COACH_MAX_REPAIR_CALLS) {
     throw new Error("Invalid environment:\n  COACH_MAX_REQUESTS: must be at least COACH_MAX_MODEL_CALLS + COACH_MAX_REPAIR_CALLS");
+  }
+  if (parsed.data.ASK_MAX_REQUESTS < parsed.data.ASK_MAX_MODEL_CALLS + parsed.data.ASK_MAX_REPAIR_CALLS) {
+    throw new Error("Invalid environment:\n  ASK_MAX_REQUESTS: must be at least ASK_MAX_MODEL_CALLS + ASK_MAX_REPAIR_CALLS");
   }
   // The scripted model fakes the coach: it must never answer real visitors.
   const production = parsed.data.NODE_ENV === "production" || cleaned.RENDER === "true";

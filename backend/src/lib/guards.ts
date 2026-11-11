@@ -13,9 +13,12 @@ export interface GuardLimits {
   importsPerHour: number;
   importsPerDay: number;
   reportsPerDay: number;
+  asksPerHour: number;
+  asksPerDay: number;
   requestsPerMinute: number;
   newPlayersPerDay: number;
   importQueueMax: number;
+  coachQueueMax: number;
 }
 
 export interface Guards {
@@ -31,6 +34,9 @@ type GuardEnv = Pick<
   | "LIMIT_IMPORTS_PER_HOUR"
   | "LIMIT_IMPORTS_PER_DAY"
   | "LIMIT_REPORTS_PER_DAY"
+  | "LIMIT_ASKS_PER_HOUR"
+  | "LIMIT_ASKS_PER_DAY"
+  | "COACH_QUEUE_MAX"
   | "LIMIT_REQUESTS_PER_MINUTE"
   | "NEW_PLAYERS_PER_DAY"
   | "IMPORT_QUEUE_MAX"
@@ -46,9 +52,12 @@ export function guardsFromEnv(env: GuardEnv): Guards {
       importsPerHour: env.LIMIT_IMPORTS_PER_HOUR,
       importsPerDay: env.LIMIT_IMPORTS_PER_DAY,
       reportsPerDay: env.LIMIT_REPORTS_PER_DAY,
+      asksPerHour: env.LIMIT_ASKS_PER_HOUR,
+      asksPerDay: env.LIMIT_ASKS_PER_DAY,
       requestsPerMinute: env.LIMIT_REQUESTS_PER_MINUTE,
       newPlayersPerDay: env.NEW_PLAYERS_PER_DAY,
       importQueueMax: env.IMPORT_QUEUE_MAX,
+      coachQueueMax: env.COACH_QUEUE_MAX,
     },
     storage: createStorageGate({ limitMb: env.STORAGE_NEW_PLAYER_LIMIT_MB }),
   };
@@ -64,6 +73,10 @@ export const importRules = (visitor: string, limits: GuardLimits): QuotaRule[] =
 ];
 export const reportRules = (visitor: string, limits: GuardLimits): QuotaRule[] => [
   { scope: `ip:${visitor}|reports`, limit: limits.reportsPerDay, window: "day" },
+];
+export const askRules = (visitor: string, limits: GuardLimits): QuotaRule[] => [
+  { scope: `ip:${visitor}|asks`, limit: limits.asksPerHour, window: "hour" },
+  { scope: `ip:${visitor}|asks`, limit: limits.asksPerDay, window: "day" },
 ];
 export const newPlayerRules = (limits: GuardLimits): QuotaRule[] => [
   { scope: "global:new-players", limit: limits.newPlayersPerDay, window: "day" },

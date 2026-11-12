@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { dropDoubledNouns, fillSentence, fillSlot, formatSlot, parsePath, placeholdersIn, resolvePath, SLOT_KINDS, type FilledSlot, type SlotKind } from "./slots.js";
+import { dropDoubledNouns, fillSentence, fillSlot, formatSlot, parsePath, placeholdersIn, resolvePath, SLOT_KINDS, unitTail, type FilledSlot, type SlotKind } from "./slots.js";
 import type { ToolLog } from "./verifier.js";
 
 // Number slots (Stage 6 chunk B): the model points at a number, code formats it.
@@ -276,6 +276,69 @@ describe("dropDoubledNouns: a noun repeated after a slot that already says it", 
     ]) {
       assert.deepEqual(drop(t), { template: t, dropped: [] }, t);
     }
+  });
+
+  it("unitTail: the slot's text after its number", () => {
+    assert.deepEqual(unitTail("6.2 errors per 100 moves"), ["errors", "per", "100", "moves"]);
+    assert.deepEqual(unitTail("3.6% of your blunders"), ["%", "of", "your", "blunders"]);
+    assert.deepEqual(unitTail("1.25 errors per game"), ["errors", "per", "game"]);
+    assert.deepEqual(unitTail("18.4 win-chance points"), ["win-chance", "points"]);
+    assert.deepEqual(unitTail("1,234"), []);
+    assert.deepEqual(unitTail("54.2%"), ["%"]);
+    assert.deepEqual(unitTail("move 23"), []);
+  });
+
+  it("the whole unit tail repeated (the demo pre-answer: 'errors per 100 moves errors per 100 moves')", () => {
+    const units = new Map<string, FilledSlot>([
+      ["a", slot("6.2 errors per 100 moves", "per100")],
+      ["b", slot("1.25 errors per game", "perGame")],
+      ["c", slot("88.2% of your blunders", "share")],
+      ["h", slot("6.8 blunders per 100 moves", "per100")],
+      ["w", slot("18.4 win-chance points", "winPoints")],
+      ["s", slot("12 seconds", "seconds")],
+      ["p", slot("54.2%", "percent")],
+    ]);
+    const d = (t: string) => dropDoubledNouns(t, units);
+    const exact = d("In the opening your overall rate is {{a}} errors per 100 moves.");
+    assert.deepEqual(exact, { template: "In the opening your overall rate is {{a}}.", dropped: ["doubled noun after {{a}}"] });
+    assert.equal(fillSentence(exact.template, units), "In the opening your overall rate is 6.2 errors per 100 moves.");
+    assert.equal(fillSentence(d("You make {{b}} errors per game with Black.").template, units), "You make 1.25 errors per game with Black.");
+    assert.equal(fillSentence(d("That is {{c}}% of your blunders.").template, units), "That is 88.2% of your blunders.");
+    assert.equal(fillSentence(d("That is {{c}} % of your Blunders.").template, units), "That is 88.2% of your blunders.");
+    assert.equal(d("Your rate is {{h}} Blunders Per 100 Moves, against {{a}} per 100 moves.").template, "Your rate is {{h}}, against {{a}}.");
+    assert.equal(d("It cost {{w}} win-chance points.").template, "It cost {{w}}.");
+    assert.equal(d("With {{s}} seconds left.").template, "With {{s}} left.");
+    assert.equal(d("You scored {{p}}% with White.").template, "You scored {{p}} with White.");
+  });
+
+  it("the bare noun alone after a rate", () => {
+    const units = new Map<string, FilledSlot>([["a", slot("6.2 errors per 100 moves", "per100")]]);
+    assert.equal(dropDoubledNouns("You make {{a}} errors in the endgame.", units).template, "You make {{a}} in the endgame.");
+    assert.equal(dropDoubledNouns("You make {{a}} in the endgame.", units).dropped.length, 0);
+    // Only the first word of the tail on its own: "errors per" + something else is left as written.
+    assert.equal(dropDoubledNouns("You make {{a}} errors per game.", units).template, "You make {{a}} per game.");
+  });
+
+  it('a word repeated BEFORE a slot that starts with it: "on move {{e}}", e = "move 59"', () => {
+    const moves = new Map<string, FilledSlot>([
+      ["e", slot("move 59", "moveNumber")],
+      ["f", slot("move 61", "moveNumber")],
+    ]);
+    const d = (t: string) => dropDoubledNouns(t, moves);
+    assert.deepEqual(d("You lost it on move {{e}}."), { template: "You lost it on {{e}}.", dropped: ["doubled noun before {{e}}"] });
+    assert.equal(fillSentence(d("You lost it on Move {{e}}.").template, moves), "You lost it on move 59.");
+    assert.equal(d("Between moves {{e}} and {{f}}.").template, "Between {{e}} and {{f}}.");
+    assert.equal(d("Move {{e}} cost you.").template, "{{e}} cost you.");
+    // Only the whole word: "remove {{e}}" isn't "move".
+    assert.deepEqual(d("Then remove {{e}}."), { template: "Then remove {{e}}.", dropped: [] });
+    assert.deepEqual(d("On {{e}} you blundered."), { template: "On {{e}} you blundered.", dropped: [] });
+  });
+
+  it("a move can't be a slot: the problem names it", () => {
+    assert.deepEqual(resolvePath({ examples: [{ played: "Ke3", betterMove: "Kf2" }] }, "examples[0].played"), {
+      ok: false,
+      problem: `path "examples[0].played" is a move (Ke3), not a number: write the move itself in the sentence and cite its position as evidence`,
+    });
   });
 
   it("several slots in one sentence", () => {

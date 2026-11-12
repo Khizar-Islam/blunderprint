@@ -19,7 +19,7 @@ export const SUGGESTED_QUESTIONS = [
 // makes them stale (the answer cache key includes the prompt version), so the first visitor to
 // click a chip would spend real AI calls. suggestions.test.ts fails until this is updated, as a
 // reminder: re-run `npm run demo:answers` against live, THEN set this to the new version.
-export const DEMO_ANSWERS_PROMPT_VERSION = 5;
+export const DEMO_ANSWERS_PROMPT_VERSION = 6;
 
 export interface Suggestion {
   question: string;

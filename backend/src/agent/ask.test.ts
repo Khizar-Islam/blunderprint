@@ -9,6 +9,7 @@ import {
   ASK_JSON_SCHEMA,
   ASK_SYSTEM_PROMPT,
   askTask,
+  autoCite,
   CANNOT_ANSWER_MESSAGES,
   cleanQuestion,
   parseAskDraft,
@@ -59,6 +60,14 @@ async function realLog(): Promise<{ log: ToolLog; profile: Record<string, unknow
   ]);
   const examples = (e.data as { examples: { gameId: string; ply: number }[] }).examples.map((x) => ({ gameId: x.gameId, ply: x.ply }));
   return { log, profile: p.data as Record<string, unknown>, examples };
+}
+
+// Step 1 only: for answers that need no positions (a log with examples and no evidence cited is
+// an issue of its own, tested below).
+async function profileLog(): Promise<ToolLog> {
+  const { log } = await realLog();
+  log.delete(2);
+  return log;
 }
 
 const draft = (d: Partial<AskDraft>): AskDraft => ({ kind: "answer", sentences: [], slots: [], evidence: [], ...d });
@@ -169,7 +178,7 @@ describe("verifyAnswer", () => {
   });
 
   it("final: failing sentences are removed and only used slots are kept; nothing left → cannot_answer (no_data)", async () => {
-    const { log } = await realLog();
+    const log = await profileLog();
     const trimmed = await verifyAnswer(ctx, draft({ sentences: ["Overall you make {{a}}.", "That's 3 times too many."], slots: [SLOT_A, { name: "b", step: 1, path: "games" }] }), log, { final: true });
     assert.equal(trimmed.output.outcome, "answer");
     assert.deepEqual(trimmed.output.sentences, ["Overall you make {{a}}."]);
@@ -184,7 +193,7 @@ describe("verifyAnswer", () => {
   });
 
   it("a doubled noun after a slot is removed by code: no issue, no repair, logged in removed", async () => {
-    const { log } = await realLog();
+    const log = await profileLog();
     const d = draft({ sentences: ["You made {{n}} blunders in total.", "Overall you make {{a}} in your games."], slots: [{ name: "n", step: 1, path: "errors.blunder" }, SLOT_A] });
     for (const final of [false, true]) {
       // final false matters too: with no issues, the first check IS the final answer (loop.ts).
@@ -205,7 +214,7 @@ describe("verifyAnswer", () => {
   });
 
   it("one number, one name: two names for the same field is an issue; the same name twice in a sentence too; reuse across sentences is fine", async () => {
-    const { log } = await realLog();
+    const log = await profileLog();
     // a. Two names, one field (step + path).
     const twins = await verifyAnswer(ctx, draft({ sentences: ["Overall your rate is {{a}}.", "Your rate climbs to {{b}}."], slots: [SLOT_A, { ...SLOT_A, name: "b" }] }), log, { final: true });
     assert.match(twins.issues.join("\n"), /sentence 2: slots \{\{a\}\} and \{\{b\}\} point at the same number \(step 1, errors\.per100Moves\): use the same slot name for the same number/);
@@ -220,15 +229,65 @@ describe("verifyAnswer", () => {
     assert.deepEqual(Object.keys(reused.output.slots), ["a"]);
   });
 
-  it("a move from this run's examples whose position isn't cited: the repair hint says which position to cite", async () => {
+  it("an answer that talks about example positions but cites none: code cites them (one step, at most 3, topped up to 2)", async () => {
     const { log, examples } = await realLog();
-    const r = await verifyAnswer(ctx, draft({ sentences: ["You played Nf3 there."] }), log, { final: false });
-    assert.deepEqual(r.issues, [
-      `sentence 1 names the move Nf3 from step 2's examples (game ${examples[0]!.gameId} ply ${examples[0]!.ply}), but that position isn't cited: add it to evidence (with evidenceStep 2; all evidence comes from one step) or remove the move`,
-    ]);
-    // A move from nowhere keeps the plain message.
-    const nowhere = await verifyAnswer(ctx, draft({ sentences: ["Play Bd3 instead."] }), log, { final: false });
+    const keys = (ev: { gameId: string; ply: number }[]) => ev.map((e) => `${e.gameId}:${e.ply}`);
+    // A move of an example: that position, plus the step's next example (topped up to 2).
+    const byMove = await verifyAnswer(ctx, draft({ sentences: ["You played Nf3 there."] }), log, { final: false });
+    assert.deepEqual(byMove.issues, []);
+    assert.deepEqual(keys(byMove.output.evidence), keys(examples.slice(0, 2)));
+    // Slots into the examples (the demo pre-answer's shape): those positions, in that order.
+    const bySlots = await verifyAnswer(
+      ctx,
+      draft({
+        sentences: ["Here you lost {{d}} on {{e}}.", "And here {{f}}."],
+        slots: [
+          { name: "d", step: 2, path: "examples[2].winPctLost" },
+          { name: "e", step: 2, path: "examples[2].moveNumber" },
+          { name: "f", step: 2, path: "examples[0].winPctLost" },
+        ],
+      }),
+      log,
+      { final: true },
+    );
+    assert.deepEqual(bySlots.issues, []);
+    assert.deepEqual(keys(bySlots.output.evidence), keys([examples[2]!, examples[0]!]));
+    // A slot that's defined but never used in a sentence doesn't count.
+    assert.equal(autoCite(draft({ sentences: ["Overall you make {{a}}."], slots: [SLOT_A, { name: "z", step: 2, path: "examples[1].winPctLost" }] }), log), null);
+    // A move from nowhere keeps the plain message, and no evidence.
+    const nowhere = await verifyAnswer(ctx, draft({ sentences: ["Play Bd3 instead."] }), await profileLog(), { final: false });
     assert.deepEqual(nowhere.issues, ["sentence 1 names the move Bd3, which isn't a played or better move of the evidence"]);
+  });
+
+  it("a move as a slot: the repair message names the move and says what to do", async () => {
+    const { log } = await realLog();
+    const r = await verifyAnswer(ctx, draft({ sentences: ["You played {{d}}."], slots: [{ name: "d", step: 2, path: "examples[0].played" }] }), log, { final: false });
+    assert.ok(r.issues.includes(`sentence 1: slot {{d}} (step 2): path "examples[0].played" is a move (Nf3), not a number: write the move itself in the sentence and cite its position as evidence`), r.issues.join("\n"));
+  });
+
+  it('"on move {{e}}" where e is "move 45": the word before the slot is removed too', async () => {
+    const { log } = await realLog();
+    const r = await verifyAnswer(
+      ctx,
+      draft({ sentences: ["You lost {{d}} on move {{e}}."], slots: [{ name: "d", step: 2, path: "examples[0].winPctLost" }, { name: "e", step: 2, path: "examples[0].moveNumber" }] }),
+      log,
+      { final: true },
+    );
+    assert.deepEqual(r.output.sentences, ["You lost {{d}} on {{e}}."]);
+    assert.deepEqual(r.output.removed, ["doubled noun before {{e}}"]);
+  });
+
+  it("examples fetched but none cited: an issue naming the step for the repair round; the final answer still stands", async () => {
+    const { log } = await realLog();
+    const d = draft({ sentences: ["Overall you make {{a}}."], slots: [SLOT_A] });
+    const first = await verifyAnswer(ctx, d, log, { final: false });
+    const { examples } = await realLog();
+    const json = examples.slice(0, 2).map((e) => `{"gameId": "${e.gameId}", "ply": ${e.ply}}`).join(", ");
+    assert.deepEqual(first.issues, [`no evidence: cite 2-3 positions from step 2's examples, e.g. "evidenceStep": 2, "evidence": [${json}]`]);
+    const final = await verifyAnswer(ctx, d, log, { final: true });
+    assert.deepEqual(final.output.sentences, ["Overall you make {{a}}."]);
+    // No examples fetched: evidence stays optional.
+    assert.deepEqual((await verifyAnswer(ctx, d, await profileLog(), { final: false })).issues, []);
   });
 
   it("the model's own refusal passes through with its reason", async () => {

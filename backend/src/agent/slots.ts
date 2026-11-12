@@ -138,6 +138,10 @@ export function resolvePath(data: unknown, path: string): Resolved {
     }
   }
   if (node === null) return { ok: false, problem: `path "${path}" has no value in that result` };
+  // The model's habit: a move as a slot ("you played {{d}}", d = examples[0].played).
+  if (typeof node === "string" && (lastKey === "played" || lastKey === "betterMove")) {
+    return { ok: false, problem: `path "${path}" is a move (${node.slice(0, 10)}), not a number: write the move itself in the sentence and cite its position as evidence` };
+  }
   if (typeof node !== "number" || !Number.isFinite(node)) return { ok: false, problem: `path "${path}" isn't a number` };
   if (typeof parts.at(-1) !== "string") return { ok: false, problem: `path "${path}" must end at a named field` };
 
@@ -252,14 +256,22 @@ export function fillSentence(template: string, slots: Map<string, FilledSlot>): 
   return template.replace(/\{\{\s*([^{}]*?)\s*\}\}/g, (_, name: string) => slots.get(name)?.text ?? "");
 }
 
-// A noun the model repeated after a slot that already carries it: "{{a}} blunders" where a is
-// "9 blunders", "{{b}} of your blunders" where b is "3.6% of your blunders". The words right after
-// the placeholder are removed when they repeat the END of the slot's text (its trailing words),
-// case-insensitively and singular or plural alike. The longest repeat wins; words that don't
-// repeat the slot ("{{a}} lose no piece") are left alone. Cosmetic and certain, so it isn't a
-// verifier issue: ask.ts applies it to the answer and logs each one in `removed`.
+// A unit the model repeated after a slot that already carries it: "{{a}} blunders" where a is
+// "9 blunders", "{{b}} of your blunders" where b is "3.6% of your blunders", "{{c}} errors per 100
+// moves" where c is "6.2 errors per 100 moves". The slot's unit tail is its text after the number
+// ("errors per 100 moves", "% of your blunders", "errors per game", "win-chance points",
+// "seconds"); for a text that doesn't start with a number ("move 23") it's the trailing words.
+// Removed, case-insensitively and singular or plural alike:
+//  - the words right after the placeholder when they repeat the END of the unit tail (the whole
+//    tail or its last words: "{{c}} per 100 moves", "{{b}} of your blunders"); the longest wins;
+//  - or the bare noun, the tail's first token, on its own ("{{c}} errors in the endgame", "{{p}}%").
+// Words that don't repeat the slot ("{{a}} lose no piece", "{{b}} of your errors") are left
+// alone. Cosmetic and certain, so it isn't a verifier issue: ask.ts applies it to the answer and
+// logs each one in `removed`.
 const WORD = /^[\p{L}][\p{L}'’-]*$/u;
-const FOLLOWING_WORD = /\s+([\p{L}][\p{L}'’-]*)/uy;
+const LEADING_NUMBER = /^-?\d[\d,]*(?:\.\d+)?/;
+// One token after a placeholder: a "%" (attached or not), a word or a number.
+const FOLLOWING_TOKEN = /\s*(%)|\s+([\p{L}][\p{L}'’-]*|\d+(?:[.,]\d+)*)/uy;
 const SINGULAR_WORD: Record<string, string> = { ...SINGULAR, moves: "move", games: "game", seconds: "second", minutes: "minute", points: "point" };
 const wordKey = (w: string) => {
   const lower = w.toLowerCase();
@@ -271,6 +283,25 @@ const trailingWords = (text: string) => {
   while (i > 0 && WORD.test(tokens[i - 1]!)) i--;
   return tokens.slice(i);
 };
+// "6.2 errors per 100 moves" → ["errors", "per", "100", "moves"]; "3.6% of your blunders" →
+// ["%", "of", "your", "blunders"]; "54.2%" → ["%"]; "37" → []; "move 23" → [].
+export function unitTail(text: string): string[] {
+  const n = LEADING_NUMBER.exec(text);
+  if (!n) return trailingWords(text);
+  return text
+    .slice(n[0].length)
+    .replace(/^%/, "% ")
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+}
+
+// The words a slot's text starts with, before its number: "move 23" → ["move"]; "6.2 errors…" → [].
+const leadingWords = (text: string) => {
+  const tokens = text.split(/\s+/);
+  const i = tokens.findIndex((t) => !WORD.test(t));
+  return i <= 0 ? [] : tokens.slice(0, i);
+};
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function dropDoubledNouns(template: string, slots: Map<string, FilledSlot>): { template: string; dropped: string[] } {
   const dropped: string[] = [];
@@ -278,24 +309,37 @@ export function dropDoubledNouns(template: string, slots: Map<string, FilledSlot
   let last = 0;
   for (const m of template.matchAll(/\{\{\s*([^{}]*?)\s*\}\}/g)) {
     const end = m.index! + m[0].length;
-    out += template.slice(last, end);
-    last = end;
     const slot = slots.get(m[1]!);
-    if (!slot) continue;
-    const tail = trailingWords(slot.text);
-    if (tail.length === 0) continue;
-    const following: { word: string; end: number }[] = [];
-    FOLLOWING_WORD.lastIndex = end;
-    for (let w = FOLLOWING_WORD.exec(template); w && following.length < tail.length; w = FOLLOWING_WORD.exec(template)) {
-      following.push({ word: w[1]!, end: FOLLOWING_WORD.lastIndex });
-    }
-    for (let k = following.length; k >= 1; k--) {
-      const repeats = following.slice(0, k).every((f, i) => wordKey(f.word) === wordKey(tail[tail.length - k + i]!));
-      if (repeats) {
-        last = following[k - 1]!.end;
-        dropped.push(`doubled noun after {{${m[1]}}}`);
-        break;
+    let before = template.slice(last, m.index);
+    // A word repeated BEFORE a slot that starts with it: "on move {{e}}", e = "move 59".
+    const lead = slot ? leadingWords(slot.text) : [];
+    if (lead.length > 0) {
+      const re = new RegExp(`(^|[^\\p{L}])${lead.map((w) => `${escapeRe(w)}s?`).join("\\s+")}\\s+$`, "iu");
+      const hit = re.exec(before);
+      if (hit) {
+        before = before.slice(0, hit.index + hit[1]!.length);
+        dropped.push(`doubled noun before {{${m[1]}}}`);
       }
+    }
+    out += before + m[0];
+    last = end;
+    if (!slot) continue;
+    const tail = unitTail(slot.text);
+    if (tail.length === 0) continue;
+    const following: { token: string; end: number }[] = [];
+    FOLLOWING_TOKEN.lastIndex = end;
+    for (let t = FOLLOWING_TOKEN.exec(template); t && following.length < tail.length; t = FOLLOWING_TOKEN.exec(template)) {
+      following.push({ token: t[1] ?? t[2]!, end: FOLLOWING_TOKEN.lastIndex });
+    }
+    const same = (a: string, b: string) => wordKey(a) === wordKey(b);
+    let drop = 0;
+    for (let k = following.length; k >= 1 && drop === 0; k--) {
+      if (following.slice(0, k).every((f, i) => same(f.token, tail[tail.length - k + i]!))) drop = k;
+    }
+    if (drop === 0 && following.length > 0 && same(following[0]!.token, tail[0]!)) drop = 1;
+    if (drop > 0) {
+      last = following[drop - 1]!.end;
+      dropped.push(`doubled noun after {{${m[1]}}}`);
     }
   }
   return { template: out + template.slice(last), dropped };

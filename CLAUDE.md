@@ -130,15 +130,17 @@ blunderprint/
 │  │  ├─ routes/             (players, games, jobs (SSE stream), analysis, summary, positions,
 │  │  │                       coach (GET/POST report), ask (POST question), runs (SSE stream), health)
 │  │  ├─ middleware/         (requestId.ts, errorHandler.ts, rateLimit.ts, budget.ts)
+│  │  ├─ ops/                (Stage 6 chunk D: status.ts, the read-only ops:status queries + text)
 │  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
-│  │                          validate.ts zod → 400, sleep.ts, version.ts, explain.ts explain summaries,
+│  │                          validate.ts zod → 400, sleep.ts, version.ts (+ deploy commit), explain.ts explain summaries,
 │  │                          demo.ts frozen demo players; Stage 6: visitor.ts IP hash, quota.ts atomic
 │  │                          counting windows, storage.ts storage gate, guards.ts limits from env)
 │  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
 │  │                          importOnce, explainGames, explainSummary, extractFeatures (backfill),
 │  │                          fetchDivisionFixture; coach: coachTools, coachCli, coachFixture, fakeModel;
 │  │                          one-off fixes: backfillClassifications, fixUndefinedOpenings;
-│  │                          Stage 6: askOnce (npm run ask), demoAnswers (npm run demo:answers))
+│  │                          Stage 6: askOnce (npm run ask), demoAnswers (npm run demo:answers),
+│  │                          opsStatus (npm run ops:status))
 │  └─ .env.example
 ├─ docs/explain/             (saved .explain() output for the README)
 ├─ web/
@@ -485,13 +487,16 @@ A follow-up question about the player's own games, answered with the same read-o
   - One atomic `findOneAndUpdate` with upsert per request: `{ _id: day, count < budget } → $inc 1`. A duplicate-key error (11000) is retried **once**: at the start of a day two first inserts can race, and only a second miss really means the budget is used up.
 - Free-tier note: on the free tier Google may use prompts to improve its models. That's fine here, because all the data is public games.
 - When the budget runs out, show cached reports and an honest message. Never show a raw error.
+- **Ops status** (Stage 6 chunk D, `npm run ops:status -- https://blunderprint-api.onrender.com` from `backend/`; `scripts/opsStatus.ts`, `ops/status.ts`): one read-only look at the live system. From the database (`backend/.env`): today's AI budget (used / left, the reset at Pacific midnight in my local time; the limit is the local `.env`'s), the scripted counter, `dataSize + indexSize` against the 120 MB gate and Atlas's 512 MB with the biggest collections, the queue per type (queued / running, oldest queued, running jobs with an expired lease), failed jobs and coach runs of the last 24 h, and visitors at each cap today (counts, never a hash). From the live API: `/api/health` (incl. the deploy's commit) and GET /report per demo player, whose `ai.*` and `ask.suggestions` are Render's real AI state and model (GET /report writes nothing for a frozen demo player: checked 12 Nov 2026, its report has every ribbon, so `withRibbons` doesn't save). Ends with "Needs attention" (AI off or resting, storage ≥ 80% of the gate, expired leases, a job queued > 15 min, stale demo answers, the new-player cap reached, the API or its DB down) or "Nothing needs attention".
+  - **Refusals aren't countable** without new storage: a counter only goes up while under its limit, so the script shows visitors AT a cap, not refusals. The refusals are Render's `limit_refused` / `storage_refused` log lines.
+  - First live run (12 Nov 2026): 50 of 400 calls used, 9.3 MB stored (games 8.6), queue empty, 12 ask runs in 24 h, demo answers all answered, nothing needing attention.
 
 ---
 
 ## 11. API routes
 
 ```
-GET  /api/health                                   → { ok, db, queueDepth, version, storageMb, storageLimitMb }
+GET  /api/health                                   → { ok, db, queueDepth, version, commit, storageMb, storageLimitMb }
 POST /api/players/:platform/:username/import       → 202 { jobId } or 200 { upToDate: true } (idempotent: returns the running job) (?trigger=auto|user, §10 Guards)
 GET  /api/players/:platform/:username              → { player, activeJob } (player: profile + importState + counts; no summary)
 GET  /api/players/:platform/:username/summary      → { summary, cached, extracting } (?color=&speed=&from=&to=)
@@ -696,6 +701,8 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 
 - **Gemini model names** get deprecated faster than published dates suggest. `gemini-3.5-flash` was retired on 8 Oct 2026. Keep the model in env and verify it before Stage 5. Don't confuse the retired `gemini-3.5-flash` with `gemini-3.5-flash-lite` (current; no shutdown date announced as of 30 Oct 2026). `gemini-3.1-flash-lite` shuts down on 7 May 2027. Google's Gemini docs moved to aistudio.google.com/docs (the old ai.google.dev/gemini-api/docs pages redirect), and the free-tier limits are no longer published there: read them in AI Studio.
 - **Local dev and the shared Atlas DB:** a local API with `COACH_MODEL=scripted` writes reports under model `scripted` and counts its budget under `dev:scripted`, and its coach lane only claims `scripted` report jobs, so it never touches the live coach's reports, budget or jobs.
+- **`/api/health` `version` never changes** (it's package.json's 0.1.0). The deploy is `commit`: the first 7 characters of `RENDER_GIT_COMMIT`, which Render sets at build time AND runtime ("The commit SHA for a service or deploy", render.com/docs/environment-variables, checked 12 Nov 2026); `"dev"` when unset.
+- **Known quirk: "resting" for reports while questions still work.** GET /report's `ai.canStart` compares the budget with one worst-case REPORT (`COACH_MAX_REQUESTS`, 16), but POST /ask only needs `ASK_MAX_REQUESTS` (10). With 10-15 calls left the coach button says the coach is resting while the question box still sends. Correct on both sides, just inconsistent to look at; the question box isn't disabled by the budget (a refused question shows "The coach is resting").
 - **Demo pre-answers go stale** on every `ASK_PROMPT_VERSION` bump or `GEMINI_MODEL` change (both are in the answer cache key): re-run `npm run demo:answers` against live with `GEMINI_MODEL` set explicitly, then update `DEMO_ANSWERS_PROMPT_VERSION` (§10). Until then a visitor's demo chip click spends real AI calls.
 - Next 16: check node_modules/next/dist/docs/ for version-matched API docs before using Next APIs.
 - **Stockfish:** use the *lite single-threaded* build. The multi-threaded builds need `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers, which would also break other things on the page. Serve `.wasm` with the `application/wasm` MIME type, from `web/public/engine/`.

@@ -37,8 +37,15 @@ test("GET /api/health reports db up", async () => {
   await withServer(options(), async (baseUrl) => {
     const res = await fetch(`${baseUrl}/api/health`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: true, db: true, queueDepth: 2, version: "9.9.9" });
+    assert.deepEqual(await res.json(), { ok: true, db: true, queueDepth: 2, version: "9.9.9", commit: "dev" });
     assert.ok(res.headers.get("x-request-id"));
+  });
+});
+
+test("GET /api/health names the deploy's short commit", async () => {
+  await withServer(options({ commit: "3fd4384" }), async (baseUrl) => {
+    const body = (await (await fetch(`${baseUrl}/api/health`)).json()) as { commit: string };
+    assert.equal(body.commit, "3fd4384");
   });
 });
 
@@ -46,7 +53,7 @@ test("GET /api/health still returns 200 when the db is down", async () => {
   await withServer(options({ getDbStatus: () => false }), async (baseUrl) => {
     const res = await fetch(`${baseUrl}/api/health`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: false, db: false, queueDepth: null, version: "9.9.9" });
+    assert.deepEqual(await res.json(), { ok: false, db: false, queueDepth: null, version: "9.9.9", commit: "dev" });
   });
 });
 

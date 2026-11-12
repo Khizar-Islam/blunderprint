@@ -24,7 +24,8 @@
     "coach:cli": "tsx --env-file=.env scripts/coachCli.ts",
     "coach:probe": "tsx --env-file=.env scripts/coachProbe.ts",
     "ask": "tsx --env-file=.env scripts/askOnce.ts",
-    "demo:answers": "tsx --env-file=.env scripts/demoAnswers.ts"
+    "demo:answers": "tsx --env-file=.env scripts/demoAnswers.ts",
+    "ops:status": "tsx --env-file=.env scripts/opsStatus.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

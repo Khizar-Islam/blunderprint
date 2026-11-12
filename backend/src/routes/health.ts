@@ -5,6 +5,8 @@ export interface HealthDeps {
   getDbStatus: () => boolean;
   getQueueDepth: () => Promise<number>;
   version: string;
+  // The deploy's short commit (lib/version.ts COMMIT), "dev" locally.
+  commit?: string;
   cacheMs?: number;
   now?: () => number;
   // The storage gate (lib/storage.ts): its own 5-minute cache, so this costs no extra reads.
@@ -13,7 +15,7 @@ export interface HealthDeps {
 
 // Always 200: Render's health check uses this route, and a 503 during a short Atlas hiccup
 // would make Render restart a perfectly healthy API. The body says what is actually up.
-export function healthRouter({ getDbStatus, getQueueDepth, version, cacheMs = 5_000, now = Date.now, storage }: HealthDeps): Router {
+export function healthRouter({ getDbStatus, getQueueDepth, version, commit = "dev", cacheMs = 5_000, now = Date.now, storage }: HealthDeps): Router {
   const router = Router();
 
   // Health is polled often (Render, uptime pings, the web app), so the count query runs at most
@@ -35,6 +37,7 @@ export function healthRouter({ getDbStatus, getQueueDepth, version, cacheMs = 5_
       db,
       queueDepth: depth,
       version,
+      commit,
       // dataSize + indexSize in MB, and the size at which new players stop being imported.
       ...(storage ? { storageMb, storageLimitMb: storage.limitMb } : {}),
     });

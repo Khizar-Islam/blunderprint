@@ -16,7 +16,7 @@ import { createJobSystem } from "./jobs/setup.js";
 import { guardsFromEnv } from "./lib/guards.js";
 import { startWorker, type Worker } from "./jobs/worker.js";
 import { logger } from "./lib/logger.js";
-import { VERSION } from "./lib/version.js";
+import { COMMIT, VERSION } from "./lib/version.js";
 import { demoChecker } from "./lib/demo.js";
 import { createShutdown } from "./shutdown.js";
 
@@ -46,6 +46,7 @@ const app = createApp({
   getDbStatus: isDbConnected,
   queue,
   version: VERSION,
+  commit: COMMIT,
   coach,
   isDemo: demoChecker(env.demoPlayers),
   guards,
@@ -55,7 +56,7 @@ const app = createApp({
 // Listen first: /api/health answers (db:false) while Atlas is still connecting, so Render
 // sees a live service during a slow cold start.
 const server = app.listen(env.PORT, () => {
-  logger.info(`API listening on :${env.PORT}`, { version: VERSION, corsOrigins: env.corsOrigins });
+  logger.info(`API listening on :${env.PORT}`, { version: VERSION, commit: COMMIT, corsOrigins: env.corsOrigins });
 });
 
 const workers: Worker[] = [];

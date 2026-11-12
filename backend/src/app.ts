@@ -28,6 +28,8 @@ export interface AppOptions {
   getDbStatus: () => boolean;
   queue: Pick<Queue, "enqueue" | "depth">;
   version: string;
+  // The deploy's short commit for /api/health (lib/version.ts COMMIT). "dev" when left out.
+  commit?: string;
   // The coach (report routes). Tests that don't need it leave it out.
   coach?: CoachRuntime;
   // Frozen demo players (lib/demo.ts, env DEMO_PLAYERS). None by default.
@@ -49,6 +51,7 @@ export function createApp({
   getDbStatus,
   queue,
   version,
+  commit,
   coach,
   isDemo = noDemoPlayers,
   guards,
@@ -91,7 +94,7 @@ export function createApp({
   // 5. Routes.
   app.use(
     "/api",
-    healthRouter({ getDbStatus, getQueueDepth: () => queue.depth(), version, cacheMs: healthCacheMs, storage: guards?.storage }),
+    healthRouter({ getDbStatus, getQueueDepth: () => queue.depth(), version, commit, cacheMs: healthCacheMs, storage: guards?.storage }),
   );
   app.use("/api", playersRouter({ queue, isDemo, guards }));
   app.use("/api", summaryRouter({ queue }));

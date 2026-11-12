@@ -25,6 +25,7 @@ import { createQueue } from "../jobs/queue.js";
 import { startWorker, type Worker } from "../jobs/worker.js";
 import { testGuards } from "../../scripts/testGuards.js";
 import type { Guards } from "../lib/guards.js";
+import { SUGGESTED_QUESTIONS } from "../agent/suggestions.js";
 
 // The whole coach chain with no AI calls: the routes, the report job on its own worker lane,
 // the agent loop with the real tools and verifier, the run stream, the cache and the guards.
@@ -168,6 +169,7 @@ describe("the coach chain", () => {
       eligibility: { analysed: 10, needed: 10, ok: true },
       activeRun: null,
       ai: { enabled: true, budgetLeft: 400, canStart: true },
+      ask: { suggestions: SUGGESTED_QUESTIONS.map((question) => ({ question, answered: false })) },
     });
 
     const res = await post(reportUrl(s));

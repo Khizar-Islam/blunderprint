@@ -60,6 +60,14 @@ const DAY = 24 * 60 * 60_000;
 const storedPlayer = (username: string, importedAgoMs = 2 * DAY) =>
   Player.create({ platform: "lichess", username, usernameLower: username.toLowerCase(), importState: "ready", lastImportedAt: new Date(Date.now() - importedAgoMs) });
 
+// Access-Control-Expose-Headers as a sorted, lower-case list.
+const exposed = (res: Response) =>
+  (res.headers.get("access-control-expose-headers") ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+
 async function body(res: Response): Promise<{ code: string; error: string }> {
   return (await res.json()) as { code: string; error: string };
 }
@@ -247,6 +255,15 @@ describe("the import queue cap", () => {
       assert.equal(refused.status, 503);
       assert.equal(refused.headers.get("retry-after"), "60");
       assert.equal((await body(refused)).code, "busy");
+      // From the site's origin: the 503 is readable, Retry-After included (the "Try again" waits for it).
+      const fromSite = await postImport(api, "a3", { Origin: "http://localhost:3000" });
+      assert.equal(fromSite.status, 503);
+      assert.equal(fromSite.headers.get("access-control-allow-origin"), "http://localhost:3000");
+      assert.ok(exposed(fromSite).includes("retry-after"));
+      // Another origin gets no CORS headers at all: nothing is exposed to it.
+      const elsewhere = await postImport(api, "a3", { Origin: "https://evil.example" });
+      assert.equal(elsewhere.headers.get("access-control-allow-origin"), null);
+      assert.equal(elsewhere.headers.get("access-control-expose-headers"), null);
       // A running import doesn't count: only the queue's backlog does.
       await Job.updateOne({ key: "import:lichess:a1" }, { $set: { status: "running" } });
       assert.equal((await postImport(api, "a3")).status, 202);
@@ -263,6 +280,9 @@ describe("the flood guard", () => {
       assert.equal(refused.status, 429);
       assert.ok(Number(refused.headers.get("retry-after")) > 0);
       assert.equal(refused.headers.get("access-control-allow-origin"), "http://localhost:3000");
+      // A cross-origin page can read Retry-After and the RateLimit headers only if they're exposed.
+      assert.deepEqual(exposed(refused), ["ratelimit", "ratelimit-policy", "retry-after"]);
+      assert.ok(refused.headers.get("ratelimit"));
       const b = await body(refused);
       assert.equal(b.code, "limit_requests");
       for (let i = 0; i < 5; i++) assert.equal((await fetch(`${api}/health`)).status, 200);

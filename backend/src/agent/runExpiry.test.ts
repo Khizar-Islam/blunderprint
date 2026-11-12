@@ -2,12 +2,14 @@ import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { Types } from "mongoose";
 import { AgentRun, RUN_TTL_MS } from "../db/models/agentRun.js";
+import { Answer, ANSWER_TTL_MS } from "../db/models/answer.js";
 import { Player } from "../db/models/player.js";
 import { Report } from "../db/models/report.js";
 import { startReportRun } from "../jobs/handlers/report.js";
 import { createQueue } from "../jobs/queue.js";
 import { clearDb, startTestDb } from "../../scripts/testDb.js";
-import { syncRunExpiry } from "./runExpiry.js";
+import { keepAnswer } from "./answerStore.js";
+import { syncAnswerExpiry, syncRunExpiry } from "./runExpiry.js";
 
 let db: Awaited<ReturnType<typeof startTestDb>>;
 before(async () => {
@@ -119,4 +121,73 @@ test("dating a run leaves its updatedAt alone", async () => {
   const updatedAt = (await AgentRun.findById(run).lean())?.updatedAt;
   await syncRunExpiry([]);
   assert.equal((await AgentRun.findById(run).lean())?.updatedAt?.getTime(), updatedAt?.getTime());
+});
+
+// Stage 6 chunk C: the demo player's kept answers (no expiresAt) and their runs.
+async function makeAnswer(playerId: Types.ObjectId, runId: Types.ObjectId, question = "Do I play worse with Black?") {
+  const answer = await Answer.create({
+    playerId,
+    questionKey: question.toLowerCase(),
+    question,
+    analysedGamesHash: "h",
+    promptVersion: 5,
+    model: "m",
+    runId,
+    outcome: "answer",
+    analysedGames: 20,
+    expiresAt: new Date(Date.now() + ANSWER_TTL_MS),
+  });
+  await Answer.collection.updateOne({ _id: answer._id }, { $set: { createdAt: CREATED } });
+  return answer._id;
+}
+const answerExpiryOf = async (id: Types.ObjectId) => (await Answer.findById(id).lean())?.expiresAt;
+
+test("keepAnswer removes the expiry of the answer and of its run, without touching updatedAt", async () => {
+  const demo = await makePlayer("DemoGuy");
+  const { runId } = await startReportRun(createQueue(), demo._id, "m"); // any run with an expiresAt
+  const run = new Types.ObjectId(runId);
+  const answer = await makeAnswer(demo._id, run);
+  const updatedAt = (await Answer.findById(answer).lean())?.updatedAt;
+
+  assert.equal(await keepAnswer(answer), true);
+  assert.equal(await answerExpiryOf(answer), undefined);
+  assert.equal(await expiryOf(run), undefined);
+  assert.equal((await Answer.findById(answer).lean())?.updatedAt?.getTime(), updatedAt?.getTime());
+  assert.equal(await keepAnswer(new Types.ObjectId()), false);
+});
+
+test("the run behind a demo player's kept answer is kept; an expiring answer's run and a non-demo kept answer's run are dated", async () => {
+  const demo = await makePlayer("DemoGuy");
+  const alice = await makePlayer("Alice");
+  const keptRun = await makeOldRun(demo._id);
+  const expiringRun = await makeOldRun(demo._id);
+  const aliceRun = await makeOldRun(alice._id);
+  await keepAnswer(await makeAnswer(demo._id, keptRun));
+  await makeAnswer(demo._id, expiringRun, "Am I worse in the opening or the endgame?"); // a visitor's: 30 days
+  await keepAnswer(await makeAnswer(alice._id, aliceRun));
+
+  assert.deepEqual(await syncRunExpiry(DEMO), { kept: 0, dated: 2 });
+  assert.equal(await expiryOf(keptRun), undefined);
+  assert.equal((await expiryOf(expiringRun))?.getTime(), CREATED.getTime() + RUN_TTL_MS);
+  assert.equal((await expiryOf(aliceRun))?.getTime(), CREATED.getTime() + RUN_TTL_MS);
+  assert.deepEqual(await syncRunExpiry(DEMO), { kept: 0, dated: 0 });
+});
+
+test("syncAnswerExpiry: a demo player's kept answers stay kept; a non-demo player's get createdAt + 30 days", async () => {
+  const demo = await makePlayer("DemoGuy");
+  const alice = await makePlayer("Alice");
+  const demoAnswer = await makeAnswer(demo._id, await makeOldRun(demo._id));
+  const aliceAnswer = await makeAnswer(alice._id, await makeOldRun(alice._id));
+  await keepAnswer(demoAnswer);
+  await keepAnswer(aliceAnswer);
+
+  assert.deepEqual(await syncAnswerExpiry(DEMO), { dated: 1 });
+  assert.equal(await answerExpiryOf(demoAnswer), undefined);
+  assert.equal((await answerExpiryOf(aliceAnswer))?.getTime(), CREATED.getTime() + ANSWER_TTL_MS);
+  assert.deepEqual(await syncAnswerExpiry(DEMO), { dated: 0 });
+
+  // The demo player leaves DEMO_PLAYERS: their kept answer gets its 30 days back (its run gets
+  // its 14 days back from syncRunExpiry, as in the test above).
+  assert.deepEqual(await syncAnswerExpiry([]), { dated: 1 });
+  assert.equal((await answerExpiryOf(demoAnswer))?.getTime(), CREATED.getTime() + ANSWER_TTL_MS);
 });

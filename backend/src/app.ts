@@ -18,6 +18,10 @@ import { playersRouter } from "./routes/players.js";
 import { runsRouter } from "./routes/runs.js";
 import { summaryRouter } from "./routes/summary.js";
 
+// Response headers a cross-origin page may read (CORS step 3 below). RateLimit + RateLimit-Policy
+// are the flood guard's draft-8 headers (middleware/rateLimit.ts).
+export const EXPOSED_HEADERS = ["Retry-After", "RateLimit", "RateLimit-Policy"];
+
 export interface AppOptions {
   corsOrigins: string[];
   trustProxyHops: number;
@@ -67,9 +71,13 @@ export function createApp({
 
   // 3. CORS allowlist. No Origin header (curl, Render's health check) is allowed;
   //    a disallowed origin gets no CORS headers, so the browser blocks the response.
+  //    exposedHeaders: a cross-origin page can only read a few "safe" response headers unless
+  //    the server names more in Access-Control-Expose-Headers. Retry-After (429/503: when to try
+  //    again) and the flood guard's RateLimit headers are named, so the site on Vercel can read them.
   app.use(
     cors({
       origin: (origin, callback) => callback(null, !origin || corsOrigins.includes(origin)),
+      exposedHeaders: EXPOSED_HEADERS,
     }),
   );
 

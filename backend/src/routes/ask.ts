@@ -7,7 +7,9 @@ import { analysedBasis } from "../agent/basis.js";
 import type { CoachRuntime } from "../agent/coach.js";
 import { sendFriendly } from "../agent/friendly.js";
 import { addRunToken } from "../agent/runTokens.js";
-import { Answer } from "../db/models/answer.js";
+import { toPublicRun, type PublicRun } from "../agent/runs.js";
+import { AgentRun } from "../db/models/agentRun.js";
+import { Answer, type AnswerDoc } from "../db/models/answer.js";
 import { ACTIVE_JOB_STATUSES, Job } from "../db/models/job.js";
 import { Player } from "../db/models/player.js";
 import { askJobKey, startAskRun, type AskPayload } from "../jobs/handlers/ask.js";
@@ -23,7 +25,10 @@ import { parsePlayerParams } from "./players.js";
 //   1. a bad body (not 3-300 characters, control characters, unknown keys)  400
 //   2. no such player                                    404 player_not_found
 //   3. under COACH_MIN_ANALYSED_GAMES                     409 not_enough_games
-//   4. this exact question already answered for this data 200 { answer, cached: true } (no AI call)
+//   4. this exact question already answered for this data 200 { answer, cached: true, trace }
+//      (no AI call). trace = the finished run that wrote the answer ("How this answer was made"),
+//      or null once it has expired: whoever asks the exact question already knows what the run
+//      token protects, so the trace comes with the answer and no token is needed (chunk C).
 //   5. the same question is running right now              202 { runId, token } (joined: free, a
 //      token of the visitor's own; 503 busy once the run has MAX_RUN_TOKENS)
 //   6. AI switched off / no model                         503 ai_disabled
@@ -35,6 +40,18 @@ import { parsePlayerParams } from "./players.js";
 // The token is the only way to stream the run (routes/runs.ts): it isn't stored, only its hash.
 
 const BUSY_RETRY_MS = 60_000;
+
+export interface CachedAskBody {
+  answer: ReturnType<typeof publicAnswerOf>;
+  cached: true;
+  trace: PublicRun | null;
+}
+
+// The 200 body for a cached answer: the answer and its run's trace (one findById; ≤ 60 steps).
+export async function cachedAskBody(doc: AnswerDoc): Promise<CachedAskBody> {
+  const run = await AgentRun.findOne({ _id: doc.runId, kind: "ask", status: "done" }, { tokenHashes: 0 });
+  return { answer: publicAnswerOf(doc), cached: true, trace: run ? toPublicRun(run) : null };
+}
 
 const askBody = z
   .object({
@@ -76,7 +93,7 @@ export function askRouter({ queue, coach, guards }: AskRouterOptions): Router {
     const cacheKey = { playerId: player._id, questionKey: qKey, analysedGamesHash: basis.hash, promptVersion: ASK_PROMPT_VERSION, model: coach.modelName };
     const cached = await Answer.findOne(cacheKey);
     if (cached) {
-      res.status(200).json({ answer: publicAnswerOf(cached), cached: true });
+      res.status(200).json(await cachedAskBody(cached));
       return;
     }
 
@@ -88,7 +105,7 @@ export function askRouter({ queue, coach, guards }: AskRouterOptions): Router {
         // answer is in the cache now: serve that instead of a needless "busy".
         const justSaved = await Answer.findOne(cacheKey);
         if (justSaved) {
-          res.status(200).json({ answer: publicAnswerOf(justSaved), cached: true });
+          res.status(200).json(await cachedAskBody(justSaved));
           return;
         }
         logRefusal(res, "run_tokens", { runId });

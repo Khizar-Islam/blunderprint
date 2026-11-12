@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { syncRunExpiry } from "./agent/runExpiry.js";
+import { syncAnswerExpiry, syncRunExpiry } from "./agent/runExpiry.js";
+import { staleDemoAnswers } from "./agent/suggestions.js";
 import { createApp } from "./app.js";
 import { loadEnv, type Env } from "./config/env.js";
 import { connectWithRetry, disconnectDb, isDbConnected } from "./db/connect.js";
 import { AgentRun } from "./db/models/agentRun.js";
+import { Answer } from "./db/models/answer.js";
 import { Game } from "./db/models/game.js";
 import { Job } from "./db/models/job.js";
 import { Player } from "./db/models/player.js";
@@ -65,16 +67,30 @@ void (async () => {
   // Build any missing indexes before the worker runs: the job queue's idempotency relies on the
   // unique partial index on jobs.key, imports rely on the unique { playerId, sourceId }, and the
   // report cache on the unique report key. Already-built indexes make this a quick no-op.
-  await Promise.all([Player.init(), Game.init(), Job.init(), Report.init(), AgentRun.init(), Usage.init()]);
+  await Promise.all([Player.init(), Game.init(), Job.init(), Report.init(), AgentRun.init(), Usage.init(), Answer.init()]);
   if (shuttingDown) return;
-  // Runs expire 14 days after they were created, except the run behind each demo player's
-  // current report. Also dates runs saved before expiresAt existed. Not fatal: worst case a
-  // demo trace expires, or an old run lives on until the next start.
-  await syncRunExpiry(env.demoPlayers)
-    .then((result) => logger.info("Run expiry synced", { demoPlayers: env.demoPlayers, ...result }))
+  // Runs expire 14 days after they were created, except the runs behind each demo player's
+  // current report and kept answers. Also dates runs saved before expiresAt existed, and kept
+  // answers of players who are no longer demo players. Not fatal: worst case a demo trace
+  // expires, or an old run lives on until the next start.
+  await Promise.all([syncRunExpiry(env.demoPlayers), syncAnswerExpiry(env.demoPlayers)])
+    .then(([runs, answers]) => logger.info("Run expiry synced", { demoPlayers: env.demoPlayers, ...runs, answersDated: answers.dated }))
     .catch((err: unknown) =>
       logger.warn("Run expiry sync failed", { error: err instanceof Error ? err.message : String(err) }),
     );
+  // The demo player's suggested questions should all be pre-answered (npm run demo:answers).
+  // After an ASK_PROMPT_VERSION bump or a model change they aren't, and the first visitor to click
+  // a chip would spend real AI calls: say so in the logs. Skipped for the local scripted coach
+  // (its answers are never pre-written). Not fatal.
+  if (env.COACH_MODEL !== "scripted") {
+    await staleDemoAnswers(env.demoPlayers, coach.modelName)
+      .then((stale) => {
+        if (stale.length) logger.warn("demo_answers_stale: run npm run demo:answers", { stale });
+      })
+      .catch((err: unknown) =>
+        logger.warn("Demo answers check failed", { error: err instanceof Error ? err.message : String(err) }),
+      );
+  }
   if (shuttingDown) return;
   // Finished jobs from before the 7-day TTL get a finishedAt, so the TTL can delete them too.
   // Not fatal: worst case they live on until the next start.

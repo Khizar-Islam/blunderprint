@@ -12,6 +12,7 @@ import { pacificDay } from "../agent/budget.js";
 import { createCoachRuntime, type CoachRuntime } from "../agent/coach.js";
 import type { Model } from "../agent/model.js";
 import { hashToken, tokenMatches } from "../agent/runTokens.js";
+import { SUGGESTED_QUESTIONS } from "../agent/suggestions.js";
 import { createScriptedModel } from "../agent/scriptedModel.js";
 import { createApp } from "../app.js";
 import { AgentRun, MAX_RUN_TOKENS } from "../db/models/agentRun.js";
@@ -174,13 +175,56 @@ describe("POST /ask end to end", () => {
     // The same question in other words of case/spacing: the cached answer, no new run, no count.
     const again = await ask(s, "  why do I blunder in the ENDGAME ");
     assert.equal(again.status, 200);
-    const body = (await again.json()) as { cached: boolean; answer: { id: string; question: string } };
+    const body = (await again.json()) as { cached: boolean; answer: { id: string; question: string }; trace: { id: string; kind: string; status: string; steps: unknown[]; question: string } | null };
     assert.equal(body.cached, true);
     assert.equal(body.answer.question, QUESTION);
+    // The run that wrote it comes along ("How this answer was made"), with no token needed.
+    assert.ok(body.trace);
+    assert.equal(body.trace.id, runId);
+    assert.equal(body.trace.kind, "ask");
+    assert.equal(body.trace.status, "done");
+    assert.ok(body.trace.steps.length > 0);
+    assert.equal(body.trace.question, QUESTION);
+    assert.ok(!JSON.stringify(body).includes("tokenHashes"));
+    assert.ok(!JSON.stringify(body).includes(token));
     assert.equal(await AgentRun.countDocuments(), 1);
     assert.equal(await Answer.countDocuments(), 1);
     const asks = await Usage.find({ _id: /\|asks\|/ }).lean();
     assert.deepEqual(asks.map((u) => u.count), [1, 1]); // the hour and the day: one question started
+  });
+
+  it("a cached answer whose run has expired comes with trace: null", async () => {
+    const s = await setup();
+    const { runId, token } = await accepted(await ask(s, QUESTION));
+    await streamAll(streamUrl(s, runId, token));
+    await AgentRun.deleteOne({ _id: runId }); // what the 14-day TTL does
+    const res = await ask(s, QUESTION);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { cached: boolean; trace: unknown; answer: { runId: string } };
+    assert.equal(body.cached, true);
+    assert.equal(body.trace, null);
+    assert.equal(body.answer.runId, runId);
+  });
+
+  it("GET report lists the suggested questions; one is marked answered once its answer is cached", async () => {
+    const s = await setup();
+    const reportUrl = `${s.base}/players/lichess/alice/report`;
+    type Info = { ask: { suggestions: { question: string; answered: boolean }[] } };
+    const before = (await (await fetch(reportUrl)).json()) as Info;
+    assert.deepEqual(before.ask.suggestions, SUGGESTED_QUESTIONS.map((question) => ({ question, answered: false })));
+
+    // Asked in other case/spacing: the same cache key.
+    const { runId, token } = await accepted(await ask(s, ` ${SUGGESTED_QUESTIONS[1].toUpperCase()}`));
+    await streamAll(streamUrl(s, runId, token));
+    const after = (await (await fetch(reportUrl)).json()) as Info;
+    assert.deepEqual(after.ask.suggestions.map((x) => x.answered), [false, true, false]);
+
+    // Another model's answer doesn't count (the model is part of the cache key)...
+    await Answer.updateMany({}, { $set: { model: "another-model" } });
+    assert.deepEqual(((await (await fetch(reportUrl)).json()) as Info).ask.suggestions.map((x) => x.answered), [false, false, false]);
+    // ...and neither does an answer from an older prompt version.
+    await Answer.updateMany({}, { $set: { model: s.coach.modelName, promptVersion: ASK_PROMPT_VERSION - 1 } });
+    assert.deepEqual(((await (await fetch(reportUrl)).json()) as Info).ask.suggestions.map((x) => x.answered), [false, false, false]);
   });
 
   it("the answer is stored under the cache key, with a 30-day expiry and nothing secret", async () => {

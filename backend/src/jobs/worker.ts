@@ -29,6 +29,9 @@ export interface WorkerOptions {
   // The worker's lane: which jobs it takes (all of them when absent). server.ts runs two
   // workers: imports and extracts in one lane, coach reports in the other.
   claimFilter?: QueryFilter<JobFields>;
+  // false: never run the lease reaper. For a worker that must touch only its own jobs (the
+  // demo:answers script on the live database): reaping would requeue or fail other jobs.
+  reap?: boolean;
   leaseMs?: number;
   pollMs?: number;
   reapEveryMs?: number;
@@ -60,6 +63,7 @@ export function startWorker({
   handlers,
   workerId = `worker-${randomUUID().slice(0, 8)}`,
   claimFilter = {},
+  reap: reaps = true,
   leaseMs = 60_000,
   pollMs = 1_000,
   reapEveryMs = 15_000,
@@ -173,7 +177,7 @@ export function startWorker({
       try {
         // The reaper only needs to run every ~15 s: leases are 60 s, and a slower sweep
         // means fewer idle queries on the free M0 cluster.
-        if (now() - lastReapAt >= reapEveryMs) {
+        if (reaps && now() - lastReapAt >= reapEveryMs) {
           lastReapAt = now();
           await reap();
         }

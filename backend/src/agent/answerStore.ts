@@ -1,4 +1,5 @@
 import type { Types } from "mongoose";
+import { AgentRun } from "../db/models/agentRun.js";
 import { Answer, ANSWER_TTL_MS, type AnswerDoc } from "../db/models/answer.js";
 import { CANNOT_ANSWER_MESSAGES, type CannotAnswerReason, type VerifiedAnswer } from "./ask.js";
 import { evidenceGames, sanToUci, type StoredEvidence } from "./reportStore.js";
@@ -70,6 +71,18 @@ export async function saveAnswer(input: SaveAnswerInput): Promise<AnswerDoc> {
   );
   await Answer.deleteMany({ playerId: input.playerId, questionKey: input.questionKey, model: input.model, _id: { $ne: saved._id } });
   return saved;
+}
+
+// Keeps an answer for good (the demo player's pre-answers, scripts/demoAnswers.ts): removes the
+// answer's expiresAt (its 30-day TTL) and its run's (14 days), so the answer and "How this answer
+// was made" never expire. timestamps: false: keeping isn't a change to them. syncRunExpiry keeps
+// such runs on every start; syncAnswerExpiry dates the answer again if the player stops being a
+// demo player. Returns false when there's no such answer.
+export async function keepAnswer(answerId: Types.ObjectId | string): Promise<boolean> {
+  const answer = await Answer.findOneAndUpdate({ _id: answerId }, { $unset: { expiresAt: 1 } }, { timestamps: false, returnDocument: "after" });
+  if (!answer) return false;
+  await AgentRun.updateOne({ _id: answer.runId }, { $unset: { expiresAt: 1 } }, { timestamps: false });
+  return true;
 }
 
 // What the page gets. No usage, no removed list.

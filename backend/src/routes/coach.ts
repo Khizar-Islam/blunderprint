@@ -5,6 +5,7 @@ import type { CoachRuntime } from "../agent/coach.js";
 import { sendFriendly } from "../agent/friendly.js";
 import { PROMPT_VERSION } from "../agent/prompts.js";
 import { publicReportOf } from "../agent/reportStore.js";
+import { suggestionsFor } from "../agent/suggestions.js";
 import { AgentRun } from "../db/models/agentRun.js";
 import { ACTIVE_JOB_STATUSES, Job } from "../db/models/job.js";
 import { Player, type Platform } from "../db/models/player.js";
@@ -18,7 +19,8 @@ import { parsePlayerParams } from "./players.js";
 // The coach report (CLAUDE.md §10, §11).
 //
 // GET  /api/players/:platform/:username/report → the latest report at once (or null), whether
-//      it's stale, whether the player has enough analysed games, the active run, the AI state.
+//      it's stale, whether the player has enough analysed games, the active run, the AI state,
+//      and (Stage 6 chunk C) the suggested questions, each marked answered when it's cached.
 // POST /api/players/:platform/:username/report → start one, checked in this order:
 //      1. no such player                       404 player_not_found
 //      2. a run is already going                202 { runId } (the same run: asking twice is safe)
@@ -68,13 +70,17 @@ export function coachRouter({ queue, coach, guards }: CoachRouterOptions): Route
     const player = await findPlayer(platform, username);
     if (!player) return sendFriendly(res, 404, "player_not_found");
 
-    const [basis, latest, active, budgetLeft] = await Promise.all([
-      analysedBasis(player._id),
+    const basisP = analysedBasis(player._id);
+    const [basis, latest, active, budgetLeft, suggestions] = await Promise.all([
+      basisP,
       // Uses { playerId, model, createdAt: -1 }. Per model: a local scripted report never shows
       // on the live site, and the other way round.
       Report.findOne({ playerId: player._id, model: coach.modelName }).sort({ createdAt: -1 }),
       activeRun(player._id),
       coach.available ? coach.budget.remaining() : Promise.resolve(0),
+      // "Ask the coach" chips: answered = a click is served from the answer cache (no AI call,
+      // even with the AI off). Needs the basis hash, so it starts once that's read.
+      basisP.then((b) => suggestionsFor(player._id, b.hash, coach.modelName)),
     ]);
     // Why it's stale, so the page can say it truthfully: a newer prompt or model ("an updated
     // coach is available"), or the analysed games changed ("7 new games since").
@@ -91,6 +97,7 @@ export function coachRouter({ queue, coach, guards }: CoachRouterOptions): Route
       eligibility: { analysed: basis.analysed, needed: coach.minAnalysed, ok: basis.analysed >= coach.minAnalysed },
       activeRun: active,
       ai: { enabled: coach.available, budgetLeft, canStart: coach.available && budgetLeft >= coach.worstCaseCalls },
+      ask: { suggestions },
     });
   });
 

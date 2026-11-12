@@ -47,16 +47,29 @@ export function TypedText({ text, animate }: { text: string; animate: boolean })
       window.clearTimeout(land);
     };
   }, [animate, text]);
-  // The full text is always in the DOM for screen readers; only the visible part changes.
+  // The full text is always in the DOM for screen readers; only the visible part changes. The
+  // part not typed yet is laid out too, just invisible, so the line has its final size from the
+  // start and nothing after it moves while it types (no layout shift).
   return (
     <>
-      <span aria-hidden="true">{text.slice(0, shown)}</span>
+      <span aria-hidden="true">
+        {text.slice(0, shown)}
+        {shown < text.length && <span className="invisible">{text.slice(shown)}</span>}
+      </span>
       <span className="sr-only">{text}</span>
     </>
   );
 }
 
-export function TraceLine({ step, animate }: { step: TraceStep; animate: boolean }) {
+// The blinking cursor of a live trace. It sits at the end of the newest line (not on a line of its
+// own below the list, which every new line would push down: a layout shift each time).
+const Cursor = () => (
+  <span className="ml-1 inline-block animate-pulse text-graphite/50 motion-reduce:animate-none" aria-hidden="true">
+    ▍
+  </span>
+);
+
+export function TraceLine({ step, animate, cursor = false }: { step: TraceStep; animate: boolean; cursor?: boolean }) {
   const isSwitch = step.kind === "switch";
   const muted = step.kind === "retry";
   return (
@@ -76,6 +89,7 @@ export function TraceLine({ step, animate }: { step: TraceStep; animate: boolean
         <span className={`break-words ${isSwitch ? "text-ink" : "text-graphite/75"}`}>
           <TypedText text={`— ${step.detail}`} animate={animate} />
         </span>
+        {cursor && <Cursor />}
       </span>
       <span className="text-right text-graphite/60 tabular-nums">{step.ms > 0 ? seconds(step.ms) : ""}</span>
     </li>
@@ -97,16 +111,20 @@ export function AgentTrace({
   run,
   connection,
   live,
+  subject = "report",
 }: {
   steps: TraceStep[];
   run: PublicRun | null;
   connection: StreamConnection;
   // true while the run streams; false for a finished run's trace ("How this report was made").
   live: boolean;
+  // What the run writes: a report, or an "Ask the coach" answer (Stage 6). Only the labels change.
+  subject?: "report" | "answer";
 }) {
   const reduced = useReducedMotion();
   const status = run?.status ?? "queued";
   const elapsed = useElapsed(run?.startedAt, live && status === "running");
+  const working = live && status !== "done" && status !== "failed";
 
   const listRef = useRef<HTMLOListElement>(null);
   useEffect(() => {
@@ -123,9 +141,11 @@ export function AgentTrace({
             ? connection === "reconnecting" || connection === "lost"
               ? "Reconnecting…"
               : status === "queued"
-                ? "Waiting for another report to finish"
+                ? subject === "answer"
+                  ? "Waiting in the coach's queue"
+                  : "Waiting for another report to finish"
                 : `Investigating · ${Math.floor(elapsed / 1000)} s`
-            : "How this report was made"}
+            : `How this ${subject} was made`}
         </span>
         <span className="hidden sm:inline">step · time</span>
       </div>
@@ -135,12 +155,12 @@ export function AgentTrace({
         aria-live={live ? "polite" : undefined}
         aria-relevant="additions"
       >
-        {steps.map((step) => (
-          <TraceLine key={step.n} step={step} animate={live && !reduced} />
+        {steps.map((step, i) => (
+          <TraceLine key={step.n} step={step} animate={live && !reduced} cursor={working && i === steps.length - 1} />
         ))}
-        {live && status !== "done" && status !== "failed" && (
-          <li className="py-1 pl-12 font-mono text-[13px] text-graphite/50" aria-hidden="true">
-            <span className="inline-block animate-pulse motion-reduce:animate-none">▍</span>
+        {working && steps.length === 0 && (
+          <li className="py-1 pl-12 font-mono text-[13px]" aria-hidden="true">
+            <Cursor />
           </li>
         )}
       </ol>

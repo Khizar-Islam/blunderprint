@@ -9,11 +9,13 @@ import { isFinished } from "@/lib/runStream";
 import { useRunStream } from "@/lib/useRunStream";
 import { useWakingRequest } from "@/lib/useWakingRequest";
 import { AgentTrace, traceSummary } from "./AgentTrace";
+import { AskCoach } from "./AskCoach";
 import { PatternCard } from "./PatternCard";
 
 // The coach page. One GET (the latest report, eligibility, an active run, the AI state), shown
 // at once; a running report is followed live over SSE. The page never starts a run on its own:
 // only a click on Refresh or Try again does (the first report starts from the dashboard).
+// Under the report, for any player with enough analysed games: "Ask the coach" (Stage 6).
 
 export function CoachPage({ platform, username }: { platform: Platform; username: string }) {
   const request = useWakingRequest((signal) => fetchCoachInfo(platform, username, signal));
@@ -109,6 +111,8 @@ export function CoachPage({ platform, username }: { platform: Platform; username
       ) : (
         !runId && !startError && <NoReport info={loaded} dashboard={dashboard} />
       )}
+
+      {loaded.eligibility.ok && <AskCoach platform={platform} username={username} info={loaded} />}
     </div>
   );
 }

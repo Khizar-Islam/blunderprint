@@ -7,6 +7,7 @@
 // ink 85% on dark), resolved in the same page so the comparison is exact. Also saves
 // board-labels-zoom.png, the bottom rank at 4×, to check the text rendering by eye (Windows
 // subpixel smoothing used to fringe these labels blue; Board.tsx explains the fix).
+// Then the "Ask the coach" box's labels and announcements (Stage 6, at the end).
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
@@ -46,5 +47,38 @@ console.log(`\n${result.labels.length} labels, ${bad.length} not in our palette.
 
 const { data } = await page.send("Page.captureScreenshot", { format: "png", clip: { ...result.rank1, scale: 4 } });
 writeFileSync(join(OUT, "board-labels-zoom.png"), Buffer.from(data, "base64"));
+
+// "Ask the coach" (Stage 6): the question box has a visible label and is described by the
+// counter and the privacy note; the counter is announced politely and only near the limit (the
+// live region is empty while typing a short question); the chips are a labelled group; an
+// answered chip says so to screen readers.
+const coach = PAGES.find((p) => p.name === "coach-ask");
+await page.navigate(BASE + coach.path);
+await waitFor(page, "!!document.querySelector('#ask-heading') && document.querySelectorAll('[data-chip]').length === 3", 60_000);
+const ask = JSON.parse(
+  await page.evaluate(`(() => {
+  const box = document.getElementById('ask-question');
+  const label = document.querySelector('label[for="ask-question"]');
+  const described = (box.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+  const live = box.form.querySelector('[aria-live="polite"]');
+  const group = document.querySelector('[role=group][aria-labelledby]');
+  const chips = [...document.querySelectorAll('[data-chip]')];
+  return JSON.stringify({
+    label: label ? label.textContent.trim() : null,
+    describedBy: described.map((id) => !!document.getElementById(id)),
+    liveEmpty: live ? live.textContent.trim() === '' : null,
+    groupLabel: group ? document.getElementById(group.getAttribute('aria-labelledby'))?.textContent.trim() : null,
+    chips: chips.map((c) => ({ state: c.dataset.chip, sr: c.querySelector('.sr-only')?.textContent ?? null })),
+  });
+})()`),
+);
+const askIssues = [];
+if (!ask.label) askIssues.push("the question box has no visible label");
+if (ask.describedBy.length !== 2 || ask.describedBy.includes(false)) askIssues.push("aria-describedby doesn't point at the counter and the privacy note");
+if (ask.liveEmpty !== true) askIssues.push("the counter's live region is missing or not empty for an empty box");
+if (!ask.groupLabel) askIssues.push("the chips aren't a labelled group");
+for (const c of ask.chips) if (c.state === "answered" && c.sr !== "(answer ready)") askIssues.push("an answered chip doesn't say so to screen readers");
+console.log(`\nask: label "${ask.label}", group "${ask.groupLabel}", chips ${ask.chips.map((c) => c.state).join("/")}: ${askIssues.length ? askIssues.join("; ") : "ok"}`);
+
 page.close();
-process.exitCode = bad.length || result.labels.length !== 16 ? 1 : 0;
+process.exitCode = bad.length || result.labels.length !== 16 || askIssues.length ? 1 : 0;

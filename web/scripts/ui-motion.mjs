@@ -16,6 +16,7 @@
 //  - every AnimatedNumber shows the same text as its screen-reader copy;
 //  - every .bar-x has no animation left, so its transform is the one in its style;
 //  - nothing still waiting to be revealed in the viewport (.reveal-wait);
+//  - every "Ask the coach" figure in view has its rule fully drawn (page coach-ask);
 //  - landing: the hero counter reads 200, all notes shown, Replay enabled (= finished);
 //  - every canvas is unchanged over 300 ms (not mid-drawing).
 import { BASE, launch, PAGES, scrollThrough, sleep, waitFor } from "./ui-cdp.mjs";
@@ -32,6 +33,8 @@ const FINAL = `((core) => {
   });
   const vh = innerHeight;
   document.querySelectorAll('.reveal-wait').forEach((e) => { const r = e.getBoundingClientRect(); if (r.top < vh && r.bottom > 0) issues.push('unrevealed in view: ' + e.tagName); });
+  // "Ask the coach" figures: the teal rule under each number fully drawn (globals.css figure-in).
+  document.querySelectorAll('.figure-rule').forEach((e) => { const r = e.getBoundingClientRect(); if (r.top < vh && r.bottom > 0 && getComputedStyle(e).backgroundSize !== '100% 2px') issues.push('figure rule not drawn: ' + e.textContent.trim().slice(0, 30)); });
   const counter = document.querySelector('figure p.font-mono span[aria-hidden="true"]');
   if (location.pathname === '/') {
     if (counter?.textContent.trim() !== '200') issues.push('hero counter ' + counter?.textContent);

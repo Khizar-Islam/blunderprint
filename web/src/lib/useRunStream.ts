@@ -17,12 +17,15 @@ interface Kept {
 // reconnects on its own after a drop, and the server starts every connection with a fresh
 // snapshot, so a reload or a network blip never loses or repeats a trace line. The state is
 // kept with the runId it belongs to, so a new run never shows the previous run's trace.
-export function useRunStream(runId: string | null) {
+// An "Ask the coach" run also needs its secret token (Stage 6): it goes in the stream's URL only
+// (EventSource can't send headers), held in memory by the caller, never in the address bar or
+// storage. EventSource reconnects to the same URL, so a reconnect carries the same token.
+export function useRunStream(runId: string | null, token?: string | null) {
   const [kept, setKept] = useState<Kept | null>(null);
 
   useEffect(() => {
     if (!runId) return;
-    const source = new EventSource(runStreamUrl(runId));
+    const source = new EventSource(runStreamUrl(runId, token));
     const update = (fn: (k: Kept) => Kept) =>
       setKept((prev) => fn(prev?.runId === runId ? prev : { runId, view: EMPTY_RUN, connection: "connecting" }));
 
@@ -44,7 +47,7 @@ export function useRunStream(runId: string | null) {
       });
     }
     return () => source.close();
-  }, [runId]);
+  }, [runId, token]);
 
   const current = kept && kept.runId === runId ? kept : null;
   return { ...(current?.view ?? EMPTY_RUN), connection: current?.connection ?? (runId ? "connecting" : "closed") };

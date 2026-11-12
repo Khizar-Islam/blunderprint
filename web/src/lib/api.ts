@@ -92,9 +92,17 @@ export class ApiError extends Error {
     // A machine-readable reason when the API sends one ({ error, code }), e.g. the coach's
     // "not_enough_games" or "ai_budget_exhausted" (backend agent/friendly.ts).
     readonly code?: string,
+    // From the Retry-After header of a 429/503 (the API exposes it to the site through CORS).
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }
+}
+
+// Retry-After in seconds (the API never sends the date form) → ms; undefined when absent or odd.
+export function retryAfterMsOf(header: string | null): number | undefined {
+  if (!header || !/^\d+$/.test(header.trim())) return undefined;
+  return Number(header.trim()) * 1000;
 }
 
 // Every error body from the API is { error: "<safe message>" }, plus a `code` on the coach
@@ -109,7 +117,7 @@ async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
-    throw new ApiError(res.status, body?.error ?? `The API returned ${res.status}`, body?.code);
+    throw new ApiError(res.status, body?.error ?? `The API returned ${res.status}`, body?.code, retryAfterMsOf(res.headers.get("retry-after")));
   }
   return (await res.json()) as T;
 }
@@ -369,6 +377,37 @@ export interface CoachInfo {
   eligibility: { analysed: number; needed: number; ok: boolean };
   activeRun: { runId: string; status: string } | null;
   ai: { enabled: boolean; budgetLeft: number; canStart: boolean };
+  // "Ask the coach" chips (Stage 6 chunk C). answered: a click is served from the answer cache
+  // at once (no AI call, even with the AI off). Optional: an older API doesn't send it.
+  ask?: { suggestions: AskSuggestion[] };
+}
+
+export interface AskSuggestion {
+  question: string;
+  answered: boolean;
+}
+
+// How code formatted a number slot (backend agent/slots.ts): decides nothing on the page but
+// can be used for styling. The page only ever gets the slot's finished text.
+export type SlotKind = "percent" | "share" | "per100" | "perGame" | "count" | "moveNumber" | "seconds" | "winPoints" | "rating";
+
+// A verified answer (backend agent/answerStore.ts toPublicAnswer).
+export interface CoachAnswer {
+  id: string;
+  runId: string | null;
+  question: string;
+  generatedAt: string;
+  model: string;
+  answeredBy: string;
+  analysedGames: number;
+  outcome: "answer" | "cannot_answer";
+  // cannot_answer only: a fixed message written by code, never the model's words.
+  reason?: "no_data" | "outside_your_games" | "too_few_games";
+  message?: string;
+  // Templates: "You make {{a}} in the endgame." The numbers are only in `slots`.
+  sentences: string[];
+  slots: Record<string, { text: string; kind: SlotKind }>;
+  evidence: CoachEvidence[];
 }
 
 export type TraceKind = "model" | "tool" | "verify" | "repair" | "retry" | "switch";
@@ -394,6 +433,10 @@ export interface PublicRun {
   usage?: { calls: number; totalTokens: number };
   error?: { code: string; message: string };
   report?: CoachReport;
+  // Ask runs only: the question, and once done the answer.
+  kind?: "ask";
+  question?: string;
+  answer?: CoachAnswer;
   createdAt?: string;
   startedAt?: string;
   finishedAt?: string;
@@ -414,7 +457,30 @@ export async function startReport(platform: Platform, username: string, signal?:
   return { kind: "cached", report: body.report! };
 }
 
-export const runStreamUrl = (runId: string) => `${API_URL}/api/runs/${encodeURIComponent(runId)}/stream`;
+// POST /ask (backend routes/ask.ts): 202 { runId, token } (a new run, or a run of the same
+// question already going, joined with a token of our own) or 200 { answer, cached, trace }.
+// The token is the only way to stream an ask run: keep it in memory, never in the URL bar or
+// storage. Refusals (400, 404, 409 not_enough_games, 503 ai_disabled / busy, 429
+// ai_budget_exhausted / limit_questions) arrive as ApiError with code, message and Retry-After.
+export type AskResult =
+  | { kind: "run"; runId: string; token: string }
+  | { kind: "cached"; answer: CoachAnswer; trace: PublicRun | null };
+
+export async function askQuestion(platform: Platform, username: string, question: string, signal?: AbortSignal): Promise<AskResult> {
+  const body = await getJson<{ runId?: string; token?: string; answer?: CoachAnswer; trace?: PublicRun | null }>(`${playerPath(platform, username)}/ask`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question }),
+    signal,
+  });
+  if (body.runId && body.token) return { kind: "run", runId: body.runId, token: body.token };
+  return { kind: "cached", answer: body.answer!, trace: body.trace ?? null };
+}
+
+// An ask run's stream needs its token (?token=): EventSource can't send headers. The API's
+// request logs drop the query string, so the token is never logged.
+export const runStreamUrl = (runId: string, token?: string | null) =>
+  `${API_URL}/api/runs/${encodeURIComponent(runId)}/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
 // A finished run's trace, for "How this report was made". The run stream always starts with a
 // snapshot (for a finished run it's the only event), so we read up to that one message and

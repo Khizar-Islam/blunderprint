@@ -116,6 +116,11 @@ body {
     clip-path: inset(0 100% 0 0);
   }
 }
+@keyframes bp-underline {
+  from {
+    background-size: 0% 2px;
+  }
+}
 
 /* A bar's length is transform: scaleX(f) in its style; it grows from 0 on mount and glides to a
    new length on change. Works on HTML and on SVG rects (origin: the left edge). */
@@ -133,6 +138,21 @@ body {
 }
 @utility anim-wipe {
   animation: bp-wipe 1000ms ease-in-out backwards;
+}
+/* A figure in a coach answer (components/coach/Figure.tsx): a teal rule under the number, drawn
+   as a background so it follows the text when a figure wraps onto two lines (box-decoration-break)
+   and never changes the layout. figure-in draws it in from the left once the sentence is shown. */
+@utility figure-rule {
+  background-image: linear-gradient(var(--color-best), var(--color-best));
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 100% 2px;
+  padding-bottom: 1px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+@utility figure-in {
+  animation: bp-underline 600ms var(--ease-out-quint) backwards;
 }
 /* Waits for a reveal (useReveal): invisible until it's in view, then anim-rise takes over. */
 @utility reveal-wait {
@@ -159,6 +179,7 @@ body {
   .anim-fade,
   .anim-rise,
   .anim-wipe,
+  .figure-in,
   .seg-indicator,
   .motion-slide {
     animation: none !important;

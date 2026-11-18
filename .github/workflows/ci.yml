@@ -1,0 +1,60 @@
+# CI: on every push and pull request to main, check both packages.
+#   backend: typecheck + tests (the tests start their own in-memory MongoDB: no secrets, no network
+#            beyond downloading the MongoDB binary once per run)
+#   web:     typecheck + lint + tests
+# No job needs a secret, so pull requests from forks run safely with a read-only token.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The workflow's token can only read the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run that is still going for the older one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (typecheck, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22 # backend/package.json "engines": >=22.13 <23
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  web:
+    name: Web (typecheck, lint, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # "next typegen" writes the route types (PageProps, LayoutProps) that "tsc" then checks against.
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test

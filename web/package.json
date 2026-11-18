@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "snapshot:demo": "node scripts/snapshot-demo.mjs"
   },

@@ -1,5 +1,7 @@
 # Blunderprint
 
+[![CI](https://github.com/Khizar-Islam/blunderprint/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Khizar-Islam/blunderprint/actions/workflows/ci.yml)
+
 **An AI chess coach that shows its work.** Type any Chess.com or Lichess username. Blunderprint imports the player's newest 200 games, finds the mistakes with a chess engine running in your browser, and then an AI coach agent investigates the data with tools and explains the mistakes that keep *recurring*, with positions from the player's own games. Code, not the AI, writes every number and checks every claim.
 
 **Live:** [blunderprint.vercel.app](https://blunderprint.vercel.app) · no sign-in · [open the demo dashboard](https://blunderprint.vercel.app/p/lichess/DrNykterstein) · [read the demo coach report](https://blunderprint.vercel.app/p/lichess/DrNykterstein/coach)
@@ -285,11 +287,11 @@ In `web/.env.local`, set `NEXT_PUBLIC_API_URL=http://localhost:5000`.
 ## Tests and checks
 
 ```
-cd backend && npm test          593 tests
-cd web && npm test              195 tests
+cd backend && npm run typecheck && npm test                    611 tests
+cd web && npm run typecheck && npm run lint && npm test        195 tests
 ```
 
-All passing on 18 Nov 2026. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.
+All passing on 18 Nov 2026. GitHub Actions runs the same commands on every push and pull request to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); no job needs a secret. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.
 
 `web/scripts/ui-*.mjs` are checks over headless Chrome: hover, press and focus feedback on every control (`ui-audit`), reduced motion and no-animation-frame browsers at 390 px (`ui-motion`), layout shift (`ui-cls`), long frames (`ui-frames`) and screen-reader labels (`ui-labels`). `ui-readme-shots.mjs` takes this README's screenshots from the live demo pages.
 

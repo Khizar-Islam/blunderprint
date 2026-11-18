@@ -107,6 +107,8 @@ There is a **separate companion document**, `blunderprint-chat-companion.md`, fo
 blunderprint/
 ├─ CLAUDE.md
 ├─ README.md                 (architecture diagram, demo GIF, decisions, numbers)
+├─ .github/workflows/ci.yml  (Stage 8 chunk G: on push and pull request to main; backend typecheck + tests,
+│                             web typecheck + lint + tests; Node 22, no secrets, read-only token)
 ├─ backend/
 │  ├─ src/
 │  │  ├─ app.ts              (createApp(): middleware order, routes, error handler)
@@ -736,6 +738,7 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 - **cmd QuickEdit freezes the API:** clicking inside the cmd window running the API selects text and pauses the process (logs, requests and the job all stop until you press a key). Disable it: cmd window → Properties → Options → untick "QuickEdit Mode".
 - **Render's free CPU is ~15–20× slower than my laptop** (measured: chess.js replay 8 ms vs 110–160 ms a game; the text ply count 0.1 ms vs ~2 ms). Anything CPU-heavy in a request or job must be measured on Render, not just locally.
 - **Atlas writes from my home connection can be 10× slower than from Render** (import batches: 6–44 s from the laptop on 31 Oct vs 0.9–2.5 s from Render, both to the Singapore cluster). Time database-heavy work on Render, not locally.
+- **CI (GitHub Actions, `.github/workflows/ci.yml`):** `actions/checkout@v7` and `actions/setup-node@v7` (the latest majors, read from their release pages on 18 Nov 2026); `ubuntu-latest` is Ubuntu 24.04, which MongoDB 8.x supports (the tests download MongoDB 8.0.34 for mongodb-memory-server). setup-node only caches npm when asked (`cache: npm` + `cache-dependency-path`, because there is no root package.json). The web typecheck is `next typegen && tsc --noEmit`: `PageProps`/`LayoutProps` are generated types (`.next/types`, `next-env.d.ts`, both gitignored), so a plain `tsc` fails on a fresh checkout. The backend has no linter (only `web/` has ESLint).
 - **Never commit `.claude/`.**
 
 ---

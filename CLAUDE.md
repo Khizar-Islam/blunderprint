@@ -143,6 +143,7 @@ blunderprint/
 │  │                          opsStatus (npm run ops:status))
 │  └─ .env.example
 ├─ docs/explain/             (saved .explain() output for the README)
+├─ docs/img/                 (the README's screenshots, from web/scripts/ui-readme-shots.mjs; demo.gif recorded by hand)
 ├─ web/
 │  ├─ src/app/               (/, /p/[platform]/[username], /p/.../game/[id] (?ply=N), /p/.../coach;
 │  │                          /dev/engine: engine timing lab used for the Stage 2 measurements, dev only (404 in production))
@@ -171,7 +172,9 @@ blunderprint/
 │  ├─ scripts/snapshot-demo.mjs (by hand, npm run snapshot:demo: live API → src/data/demo.json)
 │  ├─ scripts/ui-*.mjs       (Stage 7 checks over headless Chrome, run comments at the top of each:
 │  │                          ui-audit hover/press/focus, ui-motion reduced motion + no frames + 390 px,
-│  │                          ui-cls layout shift, ui-frames long frames, ui-labels, ui-shots)
+│  │                          ui-cls layout shift, ui-frames long frames, ui-labels, ui-shots;
+│  │                          ui-readme-shots: the README's screenshots → docs/img/, takes the site URL,
+│  │                          safe on live: clicks only a pre-answered chip, never types a question)
 │  ├─ public/engine/         (gitignored, copied at build: stockfish-19-lite-single.js + .wasm,
 │  │                          Copying.txt GPL text, SOURCE.txt where the source is)
 │  └─ .env.example
@@ -490,6 +493,10 @@ A follow-up question about the player's own games, answered with the same read-o
 - **Ops status** (Stage 6 chunk D, `npm run ops:status -- https://blunderprint-api.onrender.com` from `backend/`; `scripts/opsStatus.ts`, `ops/status.ts`): one read-only look at the live system. From the database (`backend/.env`): today's AI budget (used / left, the reset at Pacific midnight in my local time; the limit is the local `.env`'s), the scripted counter, `dataSize + indexSize` against the 120 MB gate and Atlas's 512 MB with the biggest collections, the queue per type (queued / running, oldest queued, running jobs with an expired lease), failed jobs and coach runs of the last 24 h, and visitors at each cap today (counts, never a hash). From the live API: `/api/health` (incl. the deploy's commit) and GET /report per demo player, whose `ai.*` and `ask.suggestions` are Render's real AI state and model (GET /report writes nothing for a frozen demo player: checked 12 Nov 2026, its report has every ribbon, so `withRibbons` doesn't save). Ends with "Needs attention" (AI off or resting, storage ≥ 80% of the gate, expired leases, a job queued > 15 min, stale demo answers, the new-player cap reached, the API or its DB down) or "Nothing needs attention".
   - **Refusals aren't countable** without new storage: a counter only goes up while under its limit, so the script shows visitors AT a cap, not refusals. The refusals are Render's `limit_refused` / `storage_refused` log lines.
   - First live run (12 Nov 2026): 50 of 400 calls used, 9.3 MB stored (games 8.6), queue empty, 12 ask runs in 24 h, demo answers all answered, nothing needing attention.
+- **Drills on live** (Stage 6 chunk D, 12 Nov 2026, both passed; I changed one Render env var each time and restored it):
+  - **(a) Kill switch, `AI_ENABLED=false`:** the question box was disabled with "New questions are paused right now" and the switched-off note; the cached report still showed; a chip served its cached answer at once; a direct POST /ask got 503 `ai_disabled` with the friendly message. Restored.
+  - **(b) Budget used up, `AI_DAILY_CALL_BUDGET=1`** (live `ai.budgetLeft` 0, `enabled` true): a typed question got "The coach is resting" with the reset time ("about 15 hours from now"), no Try again button, and the chips stayed enabled; it was refused before any AI call. Restored to 400 (live: 350 left, `canStart` true).
+  - Neither state can be shown again without changing Render's env, so the README describes the drills in text (no screenshots of them).
 
 ---
 
@@ -674,7 +681,7 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | **3. Patterns dashboard** ✅ done 3 Nov 2026 (a6ab232, 4417b71, d458f56, 54cf13f) | Feature extraction, aggregation pipelines, Blunderprint ribbons + heat board, filters | The dashboard with the signature visual | `.explain()` shows index use for the main queries |
 | **4. The big dataset** ⏸ deferred until after Stage 5 (4 Nov 2026: not enough free disk space on the laptop for the parquet shards). Plan kept: a DuckDB pipeline on the laptop, bullet included, 400-point bands per mover (each move counted in the band of the player who made it), prune locally, publish only the pruned result to Atlas | `import-positions` script, positionStats + openings, "players at your level play…" panel, storage guard | Your move vs. millions of games | Size report inside budget; storage guard evicts correctly in a test |
 | **5. Coach agent** ✅ done 6 Nov 2026 (tools d2c510c; loop + verifier 3af51cb, a0e7f4f; API 7286ca4; overload fix cf4d685; coach page 6a065a5; wrap-up docs) | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
-| **6. Ask + guards** (chunk A guards ✅ 11 Nov 2026, 259eca3; chunk B ask backend ✅ 12 Nov 2026, 37d6d0e; chunk C ask UI + demo pre-answers ✅ 12 Nov 2026, 7b869f8, 3fd4384, 877db29) | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
+| **6. Ask + guards** (chunk A guards ✅ 11 Nov 2026, 259eca3; chunk B ask backend ✅ 12 Nov 2026, 37d6d0e; chunk C ask UI + demo pre-answers ✅ 12 Nov 2026, 7b869f8, 3fd4384, 877db29; chunk D: ops:status 6d83254, live drills 12 Nov 2026, README rewrite 18 Nov 2026) | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
 | **7. Landing + animation pass** ✅ done 7 Nov 2026 (frozen demo players 62c9a96, landing 97cf88e, animation pass c721a72, perf probe + parallel summary 2f2456f, perf fixes in the "perf: no layout shift on the dashboard…" commit) | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
 | **8. Hardening + README** | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences: final check of the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), **verify the licence of react-chessboard's piece set**, and **decide the repo's own licence**. Load the games list in one request. Update the Ask privacy note once the paid Gemini tier is on (paid data isn't used for training). The model may still add unverifiable colour to an answer ("cost you the game"): consider a rule or verifier check | Portfolio-ready | Everything in section 16 has a fallback in place |
 

@@ -131,7 +131,7 @@ blunderprint/
 │  │  │                       coach (GET/POST report), ask (POST question), runs (SSE stream), health)
 │  │  ├─ middleware/         (requestId.ts, errorHandler.ts, rateLimit.ts, budget.ts)
 │  │  ├─ ops/                (Stage 6 chunk D: status.ts, the read-only ops:status queries + text)
-│  │  └─ lib/                (logger.ts, sse.ts helpers, cursor.ts pagination cursors,
+│  │  └─ lib/                (logger.ts + log context, processErrors.ts uncaught errors (Stage 8), sse.ts helpers, cursor.ts pagination cursors,
 │  │                          validate.ts zod → 400, sleep.ts, version.ts (+ deploy commit), explain.ts explain summaries,
 │  │                          demo.ts frozen demo players; Stage 6: visitor.ts IP hash, quota.ts atomic
 │  │                          counting windows, storage.ts storage gate, guards.ts limits from env)
@@ -616,11 +616,18 @@ Render's free API sleeps after 15 minutes. The first request can take up to abou
 
 ## 13. Security and operations (lessons from my last four projects, apply from day 1)
 
-- **Error handler:** 5xx responses send a fixed message and log the real error. Only `err.statusCode` sets a 4xx, never `err.status` (SDK errors carry their own). If `res.headersSent`, call `next(err)`. Body-parser errors get fixed messages. Unknown `/api` routes return 404 JSON. Set an explicit body size limit.
+- **Error handler:** 5xx responses send a fixed message and log the real error. Only `err.statusCode` sets a 4xx, never `err.status` (SDK errors carry their own). If `res.headersSent` (an SSE stream failing midway), log one line (`response_failed_after_headers`, with the request ID) and cut the connection (`req.socket.destroy()`): that is what Express's default handler does after `next(err)`, but it also prints the raw stack with `console.error`, so we don't call it (Stage 8). Body-parser errors get fixed messages. Unknown `/api` routes return 404 JSON. Set an explicit body size limit.
 - **Trust proxy:** read `TRUST_PROXY_HOPS` (0–5, default 0, invalid values warn and fall back to 0). On Render it must be **3** (visitor → Cloudflare → Render proxy). Set it before the rate limiters. Log a warning on Render when it's 0. Use express-rate-limit's `ipKeyGenerator` for IPv6. Tested (`routes/guards.test.ts`): with 3 hops the visitor is the third address from the right of X-Forwarded-For (a faked leftmost address is ignored); with 0 hops the header is ignored.
 - **CORS:** a fixed allowlist (localhost + the live Vercel URL) plus an optional `CORS_ORIGINS` env list, parsed strictly (no `*`, no paths). Ledger broke on this when the Vercel address changed.
 - **Outbound politeness:** the global serial queues for Chess.com and Lichess, the User-Agent with contact, backoff, and timeouts on every fetch.
-- **Logs:** structured one-line JSON logs with a request ID, the job ID and timings. `/api/health` reports the queue depth.
+- **Logs:** structured one-line JSON logs with a request ID, the job ID and timings. `/api/health` reports the queue depth. **Conventions (Stage 8 chunk A, `lib/logger.ts`):**
+  - `msg` is a fixed snake_case event name (`job_started`, `report_done`, `ask_done`, `coach_model_error`, `fetch_retry`, `limit_refused`); values are always fields, never part of the name. `error` is the error's message (`errorMessage`), `stack` only for unexpected errors. A field named `level`, `time` or `msg` is dropped.
+  - **Log context:** `withLogContext(fields, fn)` uses Node's `AsyncLocalStorage` (one value per chain of async calls): every line logged inside `fn`, however deep, gets those fields. The worker wraps each job (and its `onFailed`) in `{ jobId }`; the report and ask handlers wrap the agent run in `{ runId }`. So the importers', the agent loop's and the tools' lines carry their job and run without being handed the ids. Tested through the polite client's serial queue and with jobs running at the same time.
+  - **Lines that must not carry a job's id** use `withoutLogContext`: an event's listeners run in the context of whoever emits it, so the request line of an SSE stream that a job's own `done` event ends, and Mongoose's connection events (the pool can open a socket during a job), would otherwise be stamped with that job. Every long-lived queue, timer and cache (pacer, polite clients, storage gate, flood guard store) is created at startup, outside any job; per-job timers end with the job (checked 18 Nov 2026).
+  - **Requests don't use the context** (Express's body parser continues from socket events outside it): a log inside a request handler passes `requestId: res.locals.requestId` itself.
+  - **The request line** is written on `finish`, or on `close` with `aborted: true` when the visitor closed the connection first (a closed SSE stream used to leave no line). The query string is never logged (an ask run's token travels in it).
+  - **Uncaught errors** (`lib/processErrors.ts`): an unhandled promise rejection or an uncaught exception logs one line (`unhandled_rejection` / `uncaught_exception`, with the stack) and runs the graceful shutdown below with exit code 1, so the running job is released and Render restarts the service. A server `error` (port taken) logs `server_error` and exits 1. Mongoose connection errors log `mongo_error`.
+  - Still free text in the logs, on purpose: Google's error message (200 characters) and the model's unshown `notEnoughData` text (200 characters). Public chess usernames appear in request paths, job keys and importer URLs.
 - **Engine results are untrusted input:** validate their shape and bounds. The worst a faked result can do is mislabel one player's own games.
 - **Graceful shutdown** (`src/shutdown.ts`; SIGTERM on a Render redeploy, Ctrl+C locally), in this order:
   1. Stop accepting new connections (`server.close()`).

@@ -117,7 +117,7 @@ export function createImportHandler({
         async onBatch({ games, checkpoint, month }) {
           const started = Date.now();
           await upsertGames(player._id, platform, games);
-          logger.info("Import batch stored", { jobId: String(job._id), games: games.length, ms: Date.now() - started });
+          logger.info("import_batch_stored", { jobId: String(job._id), games: games.length, ms: Date.now() - started });
           if (month?.etag) {
             await Player.updateOne({ _id: player._id }, { $set: { [`importMeta.monthEtags.${month.key}`]: month.etag } });
           }

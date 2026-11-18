@@ -45,7 +45,7 @@ type GuardEnv = Pick<
 
 export function guardsFromEnv(env: GuardEnv): Guards {
   // config/env.ts refuses to start in production without a salt; locally a random one is fine.
-  if (!env.IP_HASH_SALT) logger.warn("IP_HASH_SALT is not set: using a random salt for this process (development only)");
+  if (!env.IP_HASH_SALT) logger.warn("ip_salt_missing", { detail: "IP_HASH_SALT is not set: using a random salt for this process (development only)" });
   return {
     visitorKey: createVisitorKey(env.IP_HASH_SALT || randomSalt()),
     limits: {

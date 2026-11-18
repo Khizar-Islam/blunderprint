@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { QueryFilter, Types, UpdateQuery } from "mongoose";
 import { AgentRun, MAX_RUN_STEPS, type AgentRunDoc, type AgentRunFields, type RunStatus } from "../db/models/agentRun.js";
-import { logger } from "../lib/logger.js";
+import { errorMessage, logger } from "../lib/logger.js";
 import type { PublicAnswer } from "./answerStore.js";
 import type { FriendlyError } from "./friendly.js";
 import type { TraceStep } from "./loop.js";
@@ -165,7 +165,7 @@ export function createStepWriter(runId: Types.ObjectId) {
     push(step: TraceStep): void {
       chain = chain.then(() =>
         runStore.pushStep(runId, step).catch((err: unknown) => {
-          logger.warn("Run step write failed", { runId: String(runId), error: err instanceof Error ? err.message : String(err) });
+          logger.warn("run_step_write_failed", { runId: String(runId), error: errorMessage(err) });
         }),
       );
     },

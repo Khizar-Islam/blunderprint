@@ -343,12 +343,12 @@ export async function runTask<Draft, Output>(opts: RunAgentOptions & { task: Age
           if (now() > deadline) throw new StopRun("time_limit", `The run passed its ${Math.round(limits.runTimeoutMs / 1000)} s limit.`, { phase });
           throw err;
         }
-        logger.warn("Coach model error", {
+        logger.warn("coach_model_error", {
           phase,
           model: model.name,
           kind: err.kind,
           status: err.details.status,
-          request: usage.calls,
+          call: usage.calls,
           error: err.message,
         });
         overloadStreak = err.kind === "overloaded" ? overloadStreak + 1 : 0;
@@ -370,7 +370,7 @@ export async function runTask<Draft, Output>(opts: RunAgentOptions & { task: Age
             model = fallback;
             overloadStreak = 0;
             emit({ kind: "switch", label: model.name, detail: `switched to ${model.name}: ${from} overloaded twice in a row`, ms: now() - t0 });
-            logger.warn("Coach switched to the fallback model", { phase, from, to: model.name });
+            logger.warn("coach_fallback_switch", { phase, from, to: model.name });
             continue;
           }
           const base = OVERLOAD_BACKOFF_MS[overloaded - 1]!;

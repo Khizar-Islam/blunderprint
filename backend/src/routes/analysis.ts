@@ -8,7 +8,7 @@ import { PLATFORMS, Player } from "../db/models/player.js";
 import { enqueueExtract } from "../jobs/handlers/extract.js";
 import type { Queue } from "../jobs/queue.js";
 import { noDemoPlayers, type IsDemo } from "../lib/demo.js";
-import { logger } from "../lib/logger.js";
+import { errorMessage, logger } from "../lib/logger.js";
 import { parseOr400 } from "../lib/validate.js";
 import { HttpError } from "../middleware/errorHandler.js";
 
@@ -183,7 +183,8 @@ export function analysisRouter(
       if (result.matchedCount === 0) return recheck();
       // Worth a look: either the platform sent a PGN chess.js rejects, or our text ply count
       // (importers/normalize.ts) disagreed with a real replay.
-      logger.warn("Game marked unanalysable", {
+      logger.warn("game_unanalysable", {
+        requestId: res.locals.requestId,
         gameId: String(game._id),
         platform: game.platform,
         sourceId: game.sourceId,
@@ -234,7 +235,7 @@ export function analysisRouter(
     try {
       await enqueueExtract(queue, game.playerId);
     } catch (err) {
-      logger.warn("Could not enqueue feature extraction", { gameId: String(game._id), error: String(err) });
+      logger.warn("extract_enqueue_failed", { requestId: res.locals.requestId, source: "result", gameId: String(game._id), error: errorMessage(err) });
     }
     res.json({ ok: true, classifications, accuracy });
   });

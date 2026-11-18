@@ -15,7 +15,8 @@ import { backfillFinishedAt } from "./jobs/queue.js";
 import { createJobSystem } from "./jobs/setup.js";
 import { guardsFromEnv } from "./lib/guards.js";
 import { startWorker, type Worker } from "./jobs/worker.js";
-import { logger } from "./lib/logger.js";
+import { errorMessage, logger } from "./lib/logger.js";
+import { installProcessErrorHandlers } from "./lib/processErrors.js";
 import { COMMIT, VERSION } from "./lib/version.js";
 import { demoChecker } from "./lib/demo.js";
 import { createShutdown } from "./shutdown.js";
@@ -24,21 +25,21 @@ let env: Env;
 try {
   env = loadEnv();
 } catch (err) {
-  logger.error(err instanceof Error ? err.message : String(err));
+  logger.error("env_invalid", { error: errorMessage(err) });
   process.exit(1);
 }
 
-logger.info(`Trust proxy hops: ${env.TRUST_PROXY_HOPS}`);
+logger.info("trust_proxy", { hops: env.TRUST_PROXY_HOPS });
 if (env.isRender && env.TRUST_PROXY_HOPS === 0) {
-  logger.warn("Running on Render with TRUST_PROXY_HOPS=0: every visitor will share one IP. Set it to 3.");
+  logger.warn("trust_proxy_zero_on_render", { detail: "TRUST_PROXY_HOPS=0 on Render: every visitor will share one IP. Set it to 3." });
 }
 
 const { queue, handlers, coach, lanes } = createJobSystem(env);
-logger.info("Coach", { model: coach.modelName, available: coach.available, dailyBudget: env.AI_DAILY_CALL_BUDGET });
+logger.info("coach_ready", { model: coach.modelName, available: coach.available, dailyBudget: env.AI_DAILY_CALL_BUDGET });
 
 // The Stage 6 guards: visitor hash (IP_HASH_SALT), per-visitor limits, flood guard, storage gate.
 const guards = guardsFromEnv(env);
-logger.info("Guards", { limits: guards.limits, storageLimitMb: guards.storage.limitMb });
+logger.info("guards_ready", { limits: guards.limits, storageLimitMb: guards.storage.limitMb });
 
 const app = createApp({
   corsOrigins: env.corsOrigins,
@@ -56,7 +57,7 @@ const app = createApp({
 // Listen first: /api/health answers (db:false) while Atlas is still connecting, so Render
 // sees a live service during a slow cold start.
 const server = app.listen(env.PORT, () => {
-  logger.info(`API listening on :${env.PORT}`, { version: VERSION, commit: COMMIT, corsOrigins: env.corsOrigins });
+  logger.info("listening", { port: env.PORT, version: VERSION, commit: COMMIT, corsOrigins: env.corsOrigins });
 });
 
 const workers: Worker[] = [];
@@ -75,9 +76,9 @@ void (async () => {
   // answers of players who are no longer demo players. Not fatal: worst case a demo trace
   // expires, or an old run lives on until the next start.
   await Promise.all([syncRunExpiry(env.demoPlayers), syncAnswerExpiry(env.demoPlayers)])
-    .then(([runs, answers]) => logger.info("Run expiry synced", { demoPlayers: env.demoPlayers, ...runs, answersDated: answers.dated }))
+    .then(([runs, answers]) => logger.info("run_expiry_synced", { demoPlayers: env.demoPlayers, ...runs, answersDated: answers.dated }))
     .catch((err: unknown) =>
-      logger.warn("Run expiry sync failed", { error: err instanceof Error ? err.message : String(err) }),
+      logger.warn("run_expiry_sync_failed", { error: errorMessage(err) }),
     );
   // The demo player's suggested questions should all be pre-answered (npm run demo:answers).
   // After an ASK_PROMPT_VERSION bump or a model change they aren't, and the first visitor to click
@@ -86,19 +87,19 @@ void (async () => {
   if (env.COACH_MODEL !== "scripted") {
     await staleDemoAnswers(env.demoPlayers, coach.modelName)
       .then((stale) => {
-        if (stale.length) logger.warn("demo_answers_stale: run npm run demo:answers", { stale });
+        if (stale.length) logger.warn("demo_answers_stale", { stale, fix: "npm run demo:answers" });
       })
       .catch((err: unknown) =>
-        logger.warn("Demo answers check failed", { error: err instanceof Error ? err.message : String(err) }),
+        logger.warn("demo_answers_check_failed", { error: errorMessage(err) }),
       );
   }
   if (shuttingDown) return;
   // Finished jobs from before the 7-day TTL get a finishedAt, so the TTL can delete them too.
   // Not fatal: worst case they live on until the next start.
   await backfillFinishedAt()
-    .then((dated) => logger.info("Finished jobs dated for the TTL", { dated }))
+    .then((dated) => logger.info("finished_jobs_dated", { dated }))
     .catch((err: unknown) =>
-      logger.warn("Finished-job backfill failed", { error: err instanceof Error ? err.message : String(err) }),
+      logger.warn("finished_jobs_backfill_failed", { error: errorMessage(err) }),
     );
   if (shuttingDown) return;
   // Expired leases from a previous run (crash, Render sleep) are reaped on the first loop turn.
@@ -109,7 +110,7 @@ void (async () => {
 })().catch((err: unknown) => {
   // Reaching here means the indexes couldn't be built: running without them isn't safe.
   // Exit so Render restarts us instead of serving with a broken queue.
-  logger.error("Startup failed", { error: err instanceof Error ? err.message : String(err) });
+  logger.error("startup_failed", { error: errorMessage(err) });
   process.exit(1);
 });
 
@@ -118,5 +119,13 @@ function onSignal(signal: string): void {
   shuttingDown = true; // stops a startup that's still connecting from starting the worker
   void shutdown(signal);
 }
+// Uncaught errors: one log line, then the same graceful shutdown with exit code 1.
+installProcessErrorHandlers({
+  server,
+  shutdown: (reason, code) => {
+    shuttingDown = true;
+    return shutdown(reason, code);
+  },
+});
 process.on("SIGTERM", () => onSignal("SIGTERM"));
 process.on("SIGINT", () => onSignal("SIGINT"));

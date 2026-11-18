@@ -85,3 +85,23 @@ test("a request that never finishes can't hold the shutdown: its connection is c
   assert.ok(ms >= 100 && ms < 1_000, `took ${ms} ms`);
   assert.ok((await hanging) instanceof Error); // the client saw its connection cut
 });
+
+// lib/processErrors.ts shuts down the same way after an uncaught error, but must exit with 1
+// so Render sees a crash and restarts the service.
+test("a shutdown asked for with code 1 runs the same steps and exits 1", async () => {
+  const { createServer } = await import("node:http");
+  const server = createServer((_req, res) => res.end("ok"));
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+
+  const exits: number[] = [];
+  let disconnected = false;
+  await createShutdown({
+    server,
+    getWorkers: () => [],
+    disconnect: async () => void (disconnected = true),
+    drainMs: 100,
+    exit: (c) => void exits.push(c),
+  })("uncaughtException", 1);
+  assert.equal(disconnected, true);
+  assert.deepEqual(exits, [1]);
+});

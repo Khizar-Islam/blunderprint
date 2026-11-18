@@ -11,7 +11,7 @@ import { AgentRun, runExpiresAt } from "../../db/models/agentRun.js";
 import { Answer } from "../../db/models/answer.js";
 import type { JobDoc } from "../../db/models/job.js";
 import { Player } from "../../db/models/player.js";
-import { logger } from "../../lib/logger.js";
+import { errorMessage, logger, withLogContext } from "../../lib/logger.js";
 import { sleep } from "../../lib/sleep.js";
 import { FatalError } from "../errors.js";
 import type { Queue } from "../queue.js";
@@ -108,27 +108,30 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
       const cached = await Answer.findOne({ playerId: player._id, questionKey: qKey, analysedGamesHash: basis.hash, promptVersion: ASK_PROMPT_VERSION, model: coach.modelName });
       if (cached) {
         await runStore.doneAsk(runId, { answerId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 } }, publicAnswerOf(cached));
-        logger.info("Ask run served from cache", log);
+        logger.info("ask_cached", log);
         return;
       }
 
       const ctx = { playerId: player._id, platform: player.platform, rules: coach.rules };
       const steps = createStepWriter(runId);
-      const result = await runTask({
-        ctx,
-        task: askTask(ctx, question),
-        model: coach.model,
-        ...(coach.fallback ? { fallback: coach.fallback } : {}),
-        pacer: coach.pacer,
-        limits: coach.askLimits,
-        signal,
-        onStep: (step) => steps.push(step),
-      });
+      // Everything the loop and the tools log during the run carries this run's id (lib/logger.ts).
+      const result = await withLogContext({ runId: String(runId) }, () =>
+        runTask({
+          ctx,
+          task: askTask(ctx, question),
+          model: coach.model,
+          ...(coach.fallback ? { fallback: coach.fallback } : {}),
+          pacer: coach.pacer,
+          limits: coach.askLimits,
+          signal,
+          onStep: (step) => steps.push(step),
+        }),
+      );
       await steps.flush();
 
       if (signal.aborted) {
         if ((signal.reason as Error | undefined)?.name === "ShuttingDown") await runStore.requeue(runId).catch(() => undefined);
-        logger.info("Ask run stopped", { ...log, reason: (signal.reason as Error | undefined)?.name, calls: result.usage.calls });
+        logger.info("ask_stopped", { ...log, reason: (signal.reason as Error | undefined)?.name, calls: result.usage.calls });
         return;
       }
 
@@ -156,12 +159,12 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
           } catch (err) {
             const error = err instanceof Error ? err.message : String(err);
             if (attempt >= saveRetryDelaysMs.length) {
-              logger.error("Ask answer could not be saved", { ...log, saveAttempts: attempt + 1, error, calls: result.usage.calls });
+              logger.error("ask_save_failed", { ...log, saveAttempt: attempt + 1, error, calls: result.usage.calls });
               const f = friendly("internal");
               await runStore.fail(runId, f, result.usage);
               throw new FatalError(f.code, f.message);
             }
-            logger.warn("Ask answer save failed, retrying", { ...log, saveAttempt: attempt + 1, error });
+            logger.warn("ask_save_retry", { ...log, saveAttempt: attempt + 1, error });
             await sleep(saveRetryDelaysMs[attempt]!);
           }
         }
@@ -183,7 +186,7 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
       }
 
       const f = friendlyFromAgent(result.error, { resetsInMs: coach.budget.resetsInMs() });
-      logger.warn("Ask run failed", {
+      logger.warn("ask_failed", {
         ...log,
         code: result.error?.code,
         phase: result.error?.phase,
@@ -201,7 +204,7 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
     async onFailed(job) {
       const f = friendly(job.error?.code === "lease_expired" ? "coach_interrupted" : "internal");
       await runStore.fail(runIdOf(job), f).catch((err: unknown) => {
-        logger.warn("Could not mark the ask run failed", { jobId: String(job._id), error: err instanceof Error ? err.message : String(err) });
+        logger.warn("ask_mark_failed_error", { runId: String(runIdOf(job)), jobId: String(job._id), error: errorMessage(err) });
       });
     },
   };

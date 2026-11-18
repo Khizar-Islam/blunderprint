@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { logger } from "../../lib/logger.js";
+import { errorMessage, logger } from "../../lib/logger.js";
 import type { AgentContext } from "../context.js";
 import { candidateArgs, getWeaknessCandidates } from "./candidates.js";
 import { findExampleMistakes, exampleArgs } from "./examples.js";
@@ -164,10 +164,10 @@ export async function runTool(ctx: AgentContext, name: string, rawArgs: unknown)
   try {
     const data = await def.run(ctx, parsed.data as never);
     const chars = JSON.stringify(data).length;
-    if (chars > MAX_RESULT_CHARS) logger.warn("Coach tool result over budget", { tool: name, chars });
+    if (chars > MAX_RESULT_CHARS) logger.warn("coach_tool_over_budget", { tool: name, chars });
     return { ok: true, data, chars };
   } catch (err) {
-    logger.error("Coach tool failed", { tool: name, error: String(err) });
+    logger.error("coach_tool_failed", { tool: name, error: errorMessage(err) });
     return { ok: false, error: "The tool failed on the server. Try a different query." };
   }
 }

@@ -27,13 +27,15 @@ export function createShutdown({
 }: ShutdownDeps) {
   let started = false;
 
-  return async function shutdown(signal: string): Promise<void> {
+  // code: 0 for a signal; 1 when we stop because of an unexpected error (lib/processErrors.ts),
+  // so Render sees a crash and restarts us.
+  return async function shutdown(signal: string, code = 0): Promise<void> {
     if (started) return; // a second Ctrl+C while we're already stopping
     started = true;
     const t0 = Date.now();
-    logger.info("Shutting down", { signal });
+    logger.info("shutdown_started", { signal });
     const force = setTimeout(() => {
-      logger.error("Shutdown took too long, forcing exit", { ms: Date.now() - t0 });
+      logger.error("shutdown_forced", { ms: Date.now() - t0 });
       exit(1);
     }, forceExitMs);
     force.unref();
@@ -58,7 +60,7 @@ export function createShutdown({
     // 4. Only now close the DB: the release above needed it.
     await disconnect();
     clearTimeout(force);
-    logger.info("Shutdown complete", { signal, sseClosed, ms: Date.now() - t0 });
-    exit(0);
+    logger.info("shutdown_done", { signal, sseClosed, ms: Date.now() - t0 });
+    exit(code);
   };
 }

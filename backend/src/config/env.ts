@@ -13,7 +13,7 @@ const MIN_SALT_LENGTH = 32;
 // because a too-high value would let visitors fake their IP via X-Forwarded-For.
 export function parseTrustProxyHops(
   raw: string | undefined,
-  warn: (msg: string) => void = (msg) => logger.warn(msg),
+  warn: (msg: string) => void = (msg) => logger.warn("trust_proxy_invalid", { detail: msg }),
 ): number {
   if (raw === undefined || raw.trim() === "") return 0;
   const value = raw.trim();
@@ -199,7 +199,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   }
   // Our own daily budget must leave headroom under Google's: past RPD every call is a 429.
   if (parsed.data.AI_DAILY_CALL_BUDGET > parsed.data.GEMINI_RPD) {
-    logger.warn("AI_DAILY_CALL_BUDGET is above GEMINI_RPD: the coach will hit Google's daily limit first", {
+    // The coach would hit Google's daily limit before our own budget.
+    logger.warn("ai_budget_above_rpd", {
       budget: parsed.data.AI_DAILY_CALL_BUDGET,
       rpd: parsed.data.GEMINI_RPD,
     });

@@ -400,7 +400,11 @@ describe("the guards and errors", () => {
 
       const seen = [JSON.stringify(events), JSON.stringify(await (await fetch(reportUrl(s))).json() as any), JSON.stringify(await AgentRun.find().lean()), JSON.stringify(await Job.find().lean())];
       for (const text of seen) assert.ok(!text.includes("SECRET"), text);
-      assert.ok(lines.some((l) => l.includes(SECRET) && l.includes("Coach run failed")), "the real error is logged");
+      const failed = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.msg === "report_failed");
+      assert.ok(failed && String(failed.error).includes(SECRET), "the real error is logged");
+      // ...on a line that can be tied to its run and job.
+      assert.equal(failed.runId, runId);
+      assert.equal(typeof failed.jobId, "string");
     } finally {
       log.mock.restore();
       err.mock.restore();
@@ -417,13 +421,30 @@ describe("the guards and errors", () => {
         throw new ModelError("server", "Gemini 503 UNAVAILABLE: internal upstream detail");
       },
     };
-    const s = await setup({ model });
-    const { runId } = await (await post(reportUrl(s))).json() as any;
-    const events = await streamAll(s, runId);
+    const lines: string[] = [];
+    const log = mock.method(console, "log", (line: string) => void lines.push(String(line)));
+    let runId: string;
+    let events: Awaited<ReturnType<typeof streamAll>>;
+    try {
+      const s = await setup({ model });
+      ({ runId } = await (await post(reportUrl(s))).json() as any);
+      events = await streamAll(s, runId);
+    } finally {
+      log.mock.restore();
+    }
     const data = events.at(-1)!.data as { error: { code: string; message: string } };
     assert.equal(data.error.code, "ai_unavailable");
     assert.ok(!data.error.message.includes("upstream"));
     assert.equal(calls, 2);
+    // The agent loop knows neither its run nor its job, but its log lines carry both: the worker
+    // and the report handler set them as log context (lib/logger.ts).
+    const modelErrors = lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l.msg === "coach_model_error");
+    assert.equal(modelErrors.length, 2);
+    for (const line of modelErrors) {
+      assert.equal(line.runId, runId);
+      assert.equal(typeof line.jobId, "string");
+      assert.equal(line.phase, "investigate");
+    }
     // Each retry was a real request: both were taken from the budget.
     assert.equal((await Usage.findById(today()).lean())!.count, 2);
   });

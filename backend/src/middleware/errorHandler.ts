@@ -1,5 +1,5 @@
 import type { ErrorRequestHandler, RequestHandler } from "express";
-import { logger } from "../lib/logger.js";
+import { errorMessage, logger } from "../lib/logger.js";
 
 // Throw this (or any error with a numeric statusCode) to send a 4xx with a safe message.
 // `code` (optional) is a machine-readable reason the page can switch on, e.g. "not_enough_games".
@@ -28,14 +28,24 @@ export const apiNotFound: RequestHandler = (_req, res) => {
   res.status(404).json({ error: "Not found" });
 };
 
-export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
-  // The response already started (e.g. an SSE stream): let Express close the connection.
+export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
+  const requestId = res.locals.requestId as string | undefined;
+
+  // The response already started (e.g. an SSE stream that failed midway): no status or body can
+  // be sent any more, so the only honest signal left is to cut the connection (EventSource then
+  // reconnects). Express's default handler does exactly that, but it also prints the error with
+  // console.error: a raw multi-line stack with no request ID. So we log our one line and cut
+  // the connection ourselves instead of calling next(err).
   if (res.headersSent) {
-    next(err);
+    logger.error("response_failed_after_headers", {
+      requestId,
+      path: req.originalUrl.split("?")[0],
+      error: errorMessage(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    req.socket.destroy();
     return;
   }
-
-  const requestId = res.locals.requestId as string | undefined;
 
   const bodyError = typeof err?.type === "string" ? BODY_PARSER_ERRORS[err.type] : undefined;
   if (bodyError) {
@@ -52,9 +62,9 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   }
 
   // Everything else is a 5xx: log the real error, send a fixed message.
-  logger.error("Unhandled error", {
+  logger.error("unhandled_error", {
     requestId,
-    error: err instanceof Error ? err.message : String(err),
+    error: errorMessage(err),
     stack: err instanceof Error ? err.stack : undefined,
   });
   res.status(500).json({ error: "Internal server error", requestId });

@@ -193,7 +193,7 @@ export function createChessComImporter(
           if (game) games.push(game);
         }
         // Timings for the README and for comparing Render's CPU with a laptop's.
-        logger.info("Chess.com month", {
+        logger.info("chesscom_month", {
           month: key,
           status: res.status,
           monthGames: res.data?.games.length ?? 0,

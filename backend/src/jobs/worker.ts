@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { QueryFilter } from "mongoose";
 import type { JobDoc, JobFields, JobType } from "../db/models/job.js";
-import { logger } from "../lib/logger.js";
+import { errorMessage, logger, withLogContext } from "../lib/logger.js";
 import { sleep as realSleep, type Sleep } from "../lib/sleep.js";
 import { FatalError, RetryableError } from "./errors.js";
 import type { Progress, Queue } from "./queue.js";
@@ -78,10 +78,10 @@ export function startWorker({
 
   async function reap(): Promise<void> {
     const { requeued, failed } = await queue.reapExpired();
-    for (const job of requeued) logger.warn("Requeued job with expired lease", { jobId: String(job._id), key: job.key });
+    for (const job of requeued) logger.warn("job_requeued", { jobId: String(job._id), key: job.key });
     for (const job of failed) {
-      logger.error("Job failed: lease expired too many times", { jobId: String(job._id), key: job.key });
-      await handlers[job.type as JobType]?.onFailed?.(job);
+      logger.error("job_lease_exhausted", { jobId: String(job._id), key: job.key });
+      await withLogContext({ jobId: String(job._id) }, async () => handlers[job.type as JobType]?.onFailed?.(job));
     }
   }
 
@@ -98,7 +98,7 @@ export function startWorker({
         (ok) => {
           if (!ok) controller.abort(new LeaseLost());
         },
-        (err) => logger.warn("Lease renewal failed", { jobId, error: String(err) }),
+        (err) => logger.warn("job_lease_renewal_failed", { jobId, error: errorMessage(err) }),
       );
     }, leaseMs / 3);
 
@@ -133,7 +133,7 @@ export function startWorker({
       );
     });
 
-    logger.info("Job started", { jobId, key: job.key, attempt: job.attempts });
+    logger.info("job_started", { jobId, key: job.key, attempt: job.attempts });
     try {
       const handler = handlers[job.type as JobType];
       if (!handler) throw new FatalError("unknown_job_type", `No handler for job type ${job.type}`);
@@ -143,18 +143,18 @@ export function startWorker({
       await Promise.race([running, graceOver]);
       if (controller.signal.aborted) throw controller.signal.reason;
       await queue.complete(job._id, workerId);
-      logger.info("Job done", { jobId, key: job.key, ms: now() - started });
+      logger.info("job_done", { jobId, key: job.key, ms: now() - started });
     } catch (err) {
       const reason = controller.signal.aborted ? controller.signal.reason : err;
       if (reason instanceof LeaseLost) {
         // Someone else owns the job now. Touch nothing.
-        logger.warn("Job lease lost, stopping", { jobId, key: job.key });
+        logger.warn("job_lease_lost", { jobId, key: job.key });
       } else if (reason instanceof ShuttingDown) {
         const released = await queue.release(job._id, workerId);
-        logger.info("Job released for shutdown", { jobId, key: job.key, released, gaveUpWaiting, ms: now() - started });
+        logger.info("job_released", { jobId, key: job.key, released, gaveUpWaiting, ms: now() - started });
       } else {
         const outcome = await queue.fail(job, workerId, err);
-        logger.warn("Job error", {
+        logger.warn("job_error", {
           jobId,
           key: job.key,
           outcome,
@@ -183,21 +183,23 @@ export function startWorker({
         }
         const job = await queue.claimNext(workerId, leaseMs, claimFilter);
         if (job) {
-          await runJob(job);
+          // Every line logged while this job runs (handler, importers, the coach loop and its
+          // tools) carries its jobId, without passing it down by hand (lib/logger.ts).
+          await withLogContext({ jobId: String(job._id) }, () => runJob(job));
           continue; // there may be more work: look again right away
         }
         await sleep(pollMs, stopController.signal);
       } catch (err) {
         if (stopping) break;
         // Usually the DB is unreachable. Back off and keep going; Mongoose reconnects by itself.
-        logger.error("Worker loop error", { error: err instanceof Error ? err.message : String(err) });
+        logger.error("worker_loop_error", { error: errorMessage(err) });
         await sleep(pollMs * 5, stopController.signal).catch(() => {});
       }
     }
   }
 
   const done = loop();
-  logger.info("Job worker started", { workerId });
+  logger.info("worker_started", { workerId });
 
   return {
     workerId,

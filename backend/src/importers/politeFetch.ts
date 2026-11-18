@@ -1,5 +1,5 @@
 import { RetryableError } from "../jobs/errors.js";
-import { logger } from "../lib/logger.js";
+import { errorMessage, logger } from "../lib/logger.js";
 import { sleep as realSleep, type Sleep } from "../lib/sleep.js";
 
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
@@ -77,7 +77,7 @@ export function createPoliteClient({
         // A job abort (lease lost, shutdown) is not a network error: let it through as is.
         if (options.signal?.aborted) throw options.signal.reason;
         if (errors < errorWaitsMs.length) {
-          logger.warn(`${name}: request failed, retrying`, { url, error: String(err) });
+          logger.warn("fetch_retry", { site: name, url, error: errorMessage(err) });
           await sleep(errorWaitsMs[errors++], options.signal);
           continue;
         }
@@ -88,7 +88,7 @@ export function createPoliteClient({
         await res.body?.cancel();
         const waitMs = Math.max(rateLimitWaitsMs[Math.min(rateLimitHits, rateLimitWaitsMs.length - 1)], retryAfterMs(res));
         blockedUntil = now() + waitMs;
-        logger.warn(`${name}: 429, waiting`, { url, waitMs });
+        logger.warn("fetch_rate_limited", { site: name, url, waitMs });
         if (rateLimitHits++ < rateLimitWaitsMs.length) continue;
         throw new RetryableError(`${name} is rate limiting us`, waitMs);
       }

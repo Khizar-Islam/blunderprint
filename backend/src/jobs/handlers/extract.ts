@@ -136,7 +136,7 @@ export function createExtractHandler({
         }
         // The Render measurement CLAUDE.md asks for: CPU-heavy work must be timed there.
         // Wall time per game, including the DB write and any time given to other work.
-        logger.info("Extract batch", {
+        logger.info("extract_batch", {
           jobId: String(job._id),
           games: games.length,
           mistakes,
@@ -145,7 +145,7 @@ export function createExtractHandler({
         await reportProgress({ done: extracted, message: `Extracted ${extracted} games` });
       }
 
-      if (failed > 0) logger.warn("Games whose PGN didn't replay for features", { jobId: String(job._id), playerId, failed });
+      if (failed > 0) logger.warn("extract_pgn_failed", { jobId: String(job._id), playerId, failed });
       // The dashboard's cached (unfiltered) summary now includes these games. Rebuilt even when
       // nothing was extracted: a run with nothing to do is cheap, and it also repairs a
       // summary from an older SUMMARY_VERSION.

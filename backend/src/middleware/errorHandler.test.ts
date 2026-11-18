@@ -61,3 +61,34 @@ test("errorHandler maps statusCode, ignores status, hides 5xx details", async (t
     }
   });
 });
+
+// Express's own default handler would print the raw error (a multi-line stack, no request ID)
+// with console.error. Ours logs one JSON line and cuts the connection itself.
+test("an error after headers were sent is logged as one JSON line with the request ID", async (t) => {
+  const printed: string[] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => void printed.push(args.map(String).join(" ")));
+  const app = express();
+  app.use((_req, res, next) => {
+    res.locals.requestId = "req-123";
+    next();
+  });
+  app.get("/api/runs/:id/stream", (_req, res, next) => {
+    res.status(200).write("partial");
+    next(new Error("stream broke"));
+  });
+  app.use(errorHandler);
+  const server = await startTestServer(app);
+  t.after(() => server.close());
+
+  const res = await fetch(`${server.baseUrl}/api/runs/abc/stream?token=SECRET-TOKEN`).catch((err: Error) => err);
+  if (res instanceof Response) await res.text().catch(() => "");
+
+  assert.equal(printed.length, 1, "exactly one line, and nothing from Express's default handler");
+  assert.ok(!printed[0]!.includes("\n"));
+  const line = JSON.parse(printed[0]!) as Record<string, unknown>;
+  assert.deepEqual(
+    [line.level, line.msg, line.requestId, line.path, line.error],
+    ["error", "response_failed_after_headers", "req-123", "/api/runs/abc/stream", "stream broke"],
+  );
+  assert.ok(!printed[0]!.includes("SECRET-TOKEN"));
+});

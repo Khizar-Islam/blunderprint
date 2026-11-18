@@ -5,7 +5,7 @@ import { Player } from "../db/models/player.js";
 import { Job } from "../db/models/job.js";
 import { enqueueExtract, extractJobKey, needsExtraction } from "../jobs/handlers/extract.js";
 import type { Queue } from "../jobs/queue.js";
-import { logger } from "../lib/logger.js";
+import { errorMessage, logger } from "../lib/logger.js";
 import { parseOr400 } from "../lib/validate.js";
 import { HttpError } from "../middleware/errorHandler.js";
 import { computeSummary, rebuildCachedSummary, SUMMARY_VERSION, type Summary, type SummaryFilters } from "../stats/summary.js";
@@ -56,7 +56,7 @@ export function summaryRouter({ queue }: { queue: Pick<Queue, "enqueue"> }): Rou
         await enqueueExtract(queue, player._id);
       } catch (err) {
         // The summary is still worth returning; the next view tries again.
-        logger.warn("Summary backstop could not enqueue extraction", { playerId: String(player._id), error: String(err) });
+        logger.warn("extract_enqueue_failed", { requestId: res.locals.requestId, source: "summary_backstop", playerId: String(player._id), error: errorMessage(err) });
       }
     }
 

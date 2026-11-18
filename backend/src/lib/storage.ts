@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { logger } from "./logger.js";
+import { errorMessage, logger } from "./logger.js";
 
 // The storage gate (CLAUDE.md §7 "Storage budget"): new players stop being imported once the
 // database reaches STORAGE_NEW_PLAYER_LIMIT_MB. Players already stored can still refresh (a
@@ -55,7 +55,7 @@ export function createStorageGate({ limitMb, cacheMs = 5 * 60_000, readStats = r
       const used = readStats()
         .then(({ dataSize, indexSize }) => Math.round(((dataSize + indexSize) / MB) * 10) / 10)
         .catch((err: unknown) => {
-          logger.warn("dbStats failed", { error: err instanceof Error ? err.message : String(err) });
+          logger.warn("dbstats_failed", { error: errorMessage(err) });
           // Don't keep a failure for 5 minutes: the next request tries again.
           if (cached?.at === at) cached = null;
           return null;

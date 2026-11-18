@@ -10,7 +10,7 @@ import { AgentRun, runExpiresAt } from "../../db/models/agentRun.js";
 import type { JobDoc } from "../../db/models/job.js";
 import { Player } from "../../db/models/player.js";
 import { Report } from "../../db/models/report.js";
-import { logger } from "../../lib/logger.js";
+import { errorMessage, logger, withLogContext } from "../../lib/logger.js";
 import { sleep } from "../../lib/sleep.js";
 import { FatalError } from "../errors.js";
 import type { Queue } from "../queue.js";
@@ -99,7 +99,7 @@ export function createReportHandler(
       // saved report "stale" afterwards rather than mislabelled.
       const basis = await analysedBasis(player._id);
       await runStore.start(runId, job.attempts, basis.hash);
-      const log = { runId: String(runId), jobId: String(job._id), playerId: String(player._id), attempt: job.attempts };
+      const log = { runId: String(runId), jobId: String(job._id), playerId: String(player._id), attempt: job.attempts, kind: "report" };
 
       // Another run may have produced exactly this report while this one waited in the queue.
       const cached = await Report.findOne({
@@ -110,20 +110,23 @@ export function createReportHandler(
       });
       if (cached) {
         await runStore.done(runId, { reportId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 } }, await publicReportOf(cached));
-        logger.info("Coach run served from cache", log);
+        logger.info("report_cached", log);
         return;
       }
 
       const steps = createStepWriter(runId);
-      const result = await runAgent({
-        ctx: { playerId: player._id, platform: player.platform, rules: coach.rules },
-        model: coach.model,
-        ...(coach.fallback ? { fallback: coach.fallback } : {}),
-        pacer: coach.pacer,
-        limits: coach.limits,
-        signal,
-        onStep: (step) => steps.push(step),
-      });
+      // Everything the loop and the tools log during the run carries this run's id (lib/logger.ts).
+      const result = await withLogContext({ runId: String(runId) }, () =>
+        runAgent({
+          ctx: { playerId: player._id, platform: player.platform, rules: coach.rules },
+          model: coach.model,
+          ...(coach.fallback ? { fallback: coach.fallback } : {}),
+          pacer: coach.pacer,
+          limits: coach.limits,
+          signal,
+          onStep: (step) => steps.push(step),
+        }),
+      );
       await steps.flush();
 
       // Stopped from outside. Shutting down: the run waits in the queue again (the worker
@@ -132,13 +135,13 @@ export function createReportHandler(
         if ((signal.reason as Error | undefined)?.name === "ShuttingDown") {
           await runStore.requeue(runId).catch(() => undefined);
         }
-        logger.info("Coach run stopped", { ...log, reason: (signal.reason as Error | undefined)?.name, calls: result.usage.calls });
+        logger.info("report_stopped", { ...log, reason: (signal.reason as Error | undefined)?.name, calls: result.usage.calls });
         return;
       }
 
       if (result.status === "done" && result.report) {
         // The model's own "not enough data" text is never shown (nothing checks it); log it.
-        if (result.report.notEnoughData) logger.info("Coach notEnoughData (not shown)", { ...log, text: result.report.notEnoughData });
+        if (result.report.notEnoughData) logger.info("report_not_enough_data", { ...log, text: result.report.notEnoughData.slice(0, 200) });
         // The AI work is done and paid for: a failed save must never send the job round again
         // (that would run the whole agent a second time). Only the save is retried, here; if it
         // keeps failing, the run fails for good. (runStore.done failing after a good save is
@@ -163,9 +166,9 @@ export function createReportHandler(
           } catch (err) {
             const error = err instanceof Error ? err.message : String(err);
             if (attempt >= saveRetryDelaysMs.length) {
-              logger.error("Coach report could not be saved", {
+              logger.error("report_save_failed", {
                 ...log,
-                saveAttempts: attempt + 1,
+                saveAttempt: attempt + 1,
                 error,
                 patterns: result.report.patterns.length,
                 calls: result.usage.calls,
@@ -176,17 +179,17 @@ export function createReportHandler(
               await runStore.fail(runId, f, result.usage);
               throw new FatalError(f.code, f.message);
             }
-            logger.warn("Coach report save failed, retrying", { ...log, saveAttempt: attempt + 1, error });
+            logger.warn("report_save_retry", { ...log, saveAttempt: attempt + 1, error });
             await sleep(saveRetryDelaysMs[attempt]!);
           }
         }
         await runStore.done(runId, { reportId: saved._id, usage: result.usage }, toPublicReport(saved));
         if (afterSave) {
           await afterSave().catch((err: unknown) =>
-            logger.warn("After-save step failed", { ...log, error: err instanceof Error ? err.message : String(err) }),
+            logger.warn("report_after_save_failed", { ...log, error: errorMessage(err) }),
           );
         }
-        logger.info("Coach report saved", {
+        logger.info("report_done", {
           ...log,
           reportId: String(saved._id),
           answeredBy: result.answerModel,
@@ -202,7 +205,7 @@ export function createReportHandler(
 
       // A failed run: the visitor gets the friendly pair, the log gets everything.
       const f = friendlyFromAgent(result.error, { resetsInMs: coach.budget.resetsInMs() });
-      logger.warn("Coach run failed", {
+      logger.warn("report_failed", {
         ...log,
         code: result.error?.code,
         phase: result.error?.phase,
@@ -222,7 +225,7 @@ export function createReportHandler(
     async onFailed(job) {
       const f = friendly(job.error?.code === "lease_expired" ? "coach_interrupted" : "internal");
       await runStore.fail(runIdOf(job), f).catch((err: unknown) => {
-        logger.warn("Could not mark the coach run failed", { jobId: String(job._id), error: err instanceof Error ? err.message : String(err) });
+        logger.warn("report_mark_failed_error", { runId: String(runIdOf(job)), jobId: String(job._id), error: errorMessage(err) });
       });
     },
   };

@@ -253,7 +253,7 @@ Lighthouse (mobile, simulated slow 4G and 4× slower CPU):
 | Landing | 100 | 1.3 s | 60 ms | 0 |
 | Demo dashboard | 78–79 | 4.0–4.2 s | 330–340 ms | 0 |
 
-The dashboard waits on the API (Render's free tier) more than on the browser. Loading the games list in one request is the next lever, and is on the roadmap.
+The dashboard waits on the API (Render's free tier) more than on the browser. Its games list now arrives in one request instead of four, one after another (18 Nov 2026): 8 API requests became 5, and the list's bytes went from 71.8 KB on the wire (473 KB of JSON) to about 19 KB (215 KB), because a list row no longer carries the mistake features that only the patterns and the coach use.
 
 The whole page works without animation: with reduced motion, or in a browser that runs no animation frames, every element is simply in its final state.
 
@@ -287,7 +287,7 @@ In `web/.env.local`, set `NEXT_PUBLIC_API_URL=http://localhost:5000`.
 ## Tests and checks
 
 ```
-cd backend && npm run typecheck && npm test                    611 tests
+cd backend && npm run typecheck && npm test                    612 tests
 cd web && npm run typecheck && npm run lint && npm test        195 tests
 ```
 
@@ -298,7 +298,7 @@ All passing on 18 Nov 2026. GitHub Actions runs the same commands on every push 
 ## Roadmap
 
 - **Your move against millions of games.** A position-statistics collection built offline from the Lichess game database (CC0): for a position from your game, what players in your rating band play there and how it scores, shown in the game review and available to the coach as a tool. The plan and the storage budget (300 MB of the 512) are written; the import is waiting on disk space on my laptop. With it, openings will be named by position instead of by ECO code, and a storage guard will evict the least recently viewed players.
-- **Hardening:** the games list in one request, a rule against unverifiable colour in answers (the model can still write "cost you the game"), a paid Gemini tier with a spending cap, and the repository's own licence.
+- **Hardening:** a rule against unverifiable colour in answers (the model can still write "cost you the game"), a paid Gemini tier with a spending cap, and the repository's own licence.
 - **Later ideas, deliberately not in this version:** accounts, saved favourites, puzzles generated from your own mistakes, more languages.
 
 ## Privacy

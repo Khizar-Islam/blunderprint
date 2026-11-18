@@ -161,8 +161,13 @@ export async function startImport(
   return { kind: "upToDate" };
 }
 
+// limit 200 is the API's largest page and the most games a player has stored
+// (MAX_GAMES_PER_PLAYER), so the whole list normally arrives in one request; nextCursor is still
+// followed by the caller in case there is more.
+export const GAMES_PAGE_SIZE = 200;
+
 export function fetchGames(platform: Platform, username: string, cursor: string | null, signal: AbortSignal) {
-  const query = new URLSearchParams({ limit: "50", ...(cursor ? { cursor } : {}) });
+  const query = new URLSearchParams({ limit: String(GAMES_PAGE_SIZE), ...(cursor ? { cursor } : {}) });
   return getJson<GamesPage>(`${playerPath(platform, username)}/games?${query}`, { signal });
 }
 

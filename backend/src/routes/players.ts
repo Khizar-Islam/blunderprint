@@ -39,9 +39,15 @@ const FRESH_IMPORT_MS = 6 * 60 * 60_000;
 // would turn every read into a write.
 const VIEW_TOUCH_MS = 60 * 60_000;
 
+// The biggest page of the games list. 200 = MAX_GAMES_PER_PLAYER's default, so the dashboard gets
+// a player's whole list in ONE request (Stage 8; it used to walk four pages of 50, one after
+// another). Cursor pagination stays: a smaller limit pages as before, and a player stored with a
+// higher MAX_GAMES_PER_PLAYER still pages through nextCursor.
+export const MAX_LIST_LIMIT = 200;
+
 const gamesQuery = z.object({
   cursor: z.string().max(200).optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  limit: z.coerce.number().int().min(1).max(MAX_LIST_LIMIT).default(20),
   speed: z.enum(SPEEDS).optional(),
   color: z.enum(COLORS).optional(),
   result: z.enum(RESULTS).optional(),
@@ -49,15 +55,25 @@ const gamesQuery = z.object({
 
 // The list view doesn't need the heavy fields: PGN, clocks, evals and best moves come with
 // GET /api/games/:id. Rows keep the classifications (their ribbon) and the accuracy.
+// `features` (every mistake with its FEN, for the patterns and the coach) was nearly half of a
+// row and no list row uses it: the dashboard's numbers come from GET /summary. The engine's
+// bookkeeping and the document timestamps aren't shown either.
 export const LIST_PROJECTION = {
   pgn: 0,
   clocks: 0,
   playerId: 0,
   __v: 0,
+  features: 0,
+  createdAt: 0,
+  updatedAt: 0,
   "analysis.evals": 0,
   "analysis.best": 0,
   "analysis.claimedBy": 0,
   "analysis.claimExpiresAt": 0,
+  "analysis.engine": 0,
+  "analysis.depthOrNodes": 0,
+  "analysis.durationMs": 0,
+  "analysis.analysedAt": 0,
 };
 
 // How long a "busy" (full import queue) refusal asks the visitor to wait.

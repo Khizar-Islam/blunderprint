@@ -178,7 +178,7 @@ test("games: cursor pages walk every game exactly once, newest first, ties broke
     pageSizes.push(page.games.length);
     seen.push(...page.games.map((g) => g.id as string));
     // The list view leaves the heavy fields out.
-    for (const hidden of ["pgn", "clocks", "playerId", "_id"]) assert.equal(hidden in page.games[0]!, false, hidden);
+    for (const hidden of ["pgn", "clocks", "playerId", "_id", "features", "createdAt", "updatedAt"]) assert.equal(hidden in page.games[0]!, false, hidden);
     cursor = page.nextCursor;
   } while (cursor);
 
@@ -216,11 +216,75 @@ test("games: filters combine with the cursor", async () => {
 test("games: bad query values and cursors are 400, unknown player is 404", async () => {
   await makePlayer();
   const forged = Buffer.from(JSON.stringify({ t: "soon", id: "x" })).toString("base64url");
-  for (const query of ["?limit=0", "?limit=51", "?speed=hyper", "?cursor=garbage", `?cursor=${forged}`]) {
+  for (const query of ["?limit=0", "?limit=201", "?speed=hyper", "?cursor=garbage", `?cursor=${forged}`]) {
     const res = await api(`/players/lichess/alice/games${query}`);
     assert.equal(res.status, 400, query);
   }
   const valid = encodeCursor({ playedAt: new Date(), id: (await Player.findOne())!._id });
   assert.equal((await api(`/players/lichess/alice/games?cursor=${valid}`)).status, 200);
   assert.equal((await api("/players/lichess/nobody/games")).status, 404);
+});
+
+// Stage 8: the dashboard asks for limit=200 (MAX_GAMES_PER_PLAYER's default), so a player's whole
+// list is one request, and each row carries only what a list row shows.
+test("games: limit=200 returns a 200-game player in one page; a 201st game still pages", async () => {
+  const player = await makePlayer();
+  const base = Date.parse("2026-10-01T00:00:00Z");
+  const game = (i: number) => ({
+    playerId: player._id,
+    platform: "lichess",
+    sourceId: `big${String(i).padStart(3, "0")}`,
+    playedAt: new Date(base - i * 60_000),
+    color: "white",
+    result: "win",
+    speed: "blitz",
+    pgn: "1. e4 e5",
+    plies: 2,
+    analysis: {
+      status: "done",
+      engine: "sf19-lite",
+      depthOrNodes: 100_000,
+      durationMs: 1234,
+      analysedAt: new Date(base),
+      evals: [{ cp: 30 }, { cp: 20 }],
+      best: ["e2e4", "c7c5"],
+      classifications: ["best", "blunder"],
+      accuracy: 61.2,
+    },
+    features: {
+      version: 1,
+      division: {},
+      mistakes: [{ ply: 2, kind: "blunder", phase: "opening", san: "e5", winDrop: 0.31, square: "e5", fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq -" }],
+      moveCounts: { opening: 1, middlegame: 0, endgame: 0 },
+    },
+  });
+  await Game.insertMany(Array.from({ length: 200 }, (_, i) => game(i)));
+
+  const res = await api("/players/lichess/alice/games?limit=200");
+  assert.equal(res.status, 200);
+  const page = (await res.json()) as { games: Array<Record<string, unknown>>; nextCursor: string | null };
+  assert.equal(page.games.length, 200);
+  assert.equal(page.nextCursor, null, "the whole list: nothing to follow");
+  assert.equal(page.games[0]!.sourceId, "big000");
+  assert.equal(page.games[199]!.sourceId, "big199");
+  // A list row: no mistake features, no PGN or evals, no engine bookkeeping, no document timestamps.
+  for (const row of [page.games[0]!, page.games[199]!]) {
+    for (const hidden of ["features", "pgn", "clocks", "createdAt", "updatedAt", "playerId", "_id"]) assert.equal(hidden in row, false, hidden);
+    assert.deepEqual(row.analysis, { status: "done", classifications: ["best", "blunder"], accuracy: 61.2 });
+  }
+  // The stored game still has everything (the review page and the coach read it).
+  const stored = await Game.findOne({ sourceId: "big000" }).lean();
+  assert.equal(stored?.features?.mistakes?.length, 1);
+
+  // One game more than the largest page: the cursor still walks to it.
+  await Game.insertMany([game(200)]);
+  const first = (await (await api("/players/lichess/alice/games?limit=200")).json()) as { games: unknown[]; nextCursor: string | null };
+  assert.equal(first.games.length, 200);
+  assert.ok(first.nextCursor);
+  const second = (await (await api(`/players/lichess/alice/games?limit=200&cursor=${first.nextCursor}`)).json()) as {
+    games: Array<{ sourceId: string }>;
+    nextCursor: string | null;
+  };
+  assert.deepEqual(second.games.map((g) => g.sourceId), ["big200"]);
+  assert.equal(second.nextCursor, null);
 });

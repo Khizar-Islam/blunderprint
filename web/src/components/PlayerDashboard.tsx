@@ -69,10 +69,12 @@ function Dashboard({ platform, username }: Props) {
 
   // ---- Loading games -------------------------------------------------------------------------
   // `pageCursor` is the cursor of the last page we fetched (null = the first page). While an
-  // import runs, new games are older than the ones shown (imports go newest-first), so each
-  // progress event re-reads that last page and follows nextCursor to the end. Re-reading one
-  // page we already have is the price of not knowing a cursor "after the last row" (the API
-  // only hands one out when it knows there are more). Rows are merged by id.
+  // import runs, each progress event syncs from that cursor and follows nextCursor to the end.
+  // A page holds 200 games (GAMES_PAGE_SIZE), so a player's whole list is normally one page with
+  // no nextCursor, and a sync re-reads the whole list from the top (up to ~19 KB on the wire).
+  // That's acceptable: there is one progress event per stored batch, roughly 1-2.5 s apart on
+  // Render, and load() runs one at a time and folds extra events into one follow-up. A player
+  // with more than 200 games still follows nextCursor. Rows are merged by id.
   const pageCursor = useRef<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const busy = useRef(false);

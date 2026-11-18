@@ -18,10 +18,11 @@ import { createApp } from "../app.js";
 import { AgentRun, MAX_RUN_TOKENS } from "../db/models/agentRun.js";
 import { Answer } from "../db/models/answer.js";
 import { Game } from "../db/models/game.js";
-import { Job } from "../db/models/job.js";
+import { Job, type JobDoc } from "../db/models/job.js";
 import { Player } from "../db/models/player.js";
 import { Usage } from "../db/models/usage.js";
-import { createAskHandler } from "../jobs/handlers/ask.js";
+import { saveAnswer } from "../agent/answerStore.js";
+import { askJobKey, createAskHandler, startAskRun, type AskHandlerOptions } from "../jobs/handlers/ask.js";
 import { createReportHandler } from "../jobs/handlers/report.js";
 import { createQueue, type Queue } from "../jobs/queue.js";
 import { createJobSystem } from "../jobs/setup.js";
@@ -81,7 +82,8 @@ const ENV = {
 interface Setup {
   base: string;
   coach: CoachRuntime;
-  startLane(): Worker;
+  queue: Queue;
+  startLane(coach?: CoachRuntime): Worker;
   stop(): Promise<void>;
 }
 
@@ -92,16 +94,18 @@ async function setup({
   worker = true,
   guards,
   queue = createQueue(),
-}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; guards?: Guards; queue?: Pick<Queue, "enqueue" | "depth"> & Partial<Queue> } = {}): Promise<Setup> {
+  handler,
+}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; guards?: Guards; handler?: AskHandlerOptions; queue?: Pick<Queue, "enqueue" | "depth"> & Partial<Queue> } = {}): Promise<Setup> {
   const coach = createCoachRuntime({ ...ENV, ...env }, { model: model ?? createScriptedModel({ delayMs: 10 }) });
   const server = await startTestServer(
     createApp({ corsOrigins: [], trustProxyHops: 0, getDbStatus: () => true, queue, version: "test", coach, sseHeartbeatMs: 1_000, guards }),
   );
   const workers: Worker[] = [];
-  const startLane = () => {
+  // A lane with another runtime stands for "the next process" after a shutdown.
+  const startLane = (laneCoach: CoachRuntime = coach) => {
     const w = startWorker({
       queue: queue as Queue,
-      handlers: { report: createReportHandler(coach), ask: createAskHandler(coach) },
+      handlers: { report: createReportHandler(laneCoach), ask: createAskHandler(laneCoach, handler) },
       claimFilter: { type: { $in: ["report", "ask"] } },
       pollMs: 10,
     });
@@ -112,6 +116,7 @@ async function setup({
   current = {
     base: `${server.baseUrl}/api`,
     coach,
+    queue: queue as Queue,
     startLane,
     async stop() {
       await Promise.all(workers.map((w) => w.stop()));
@@ -443,6 +448,187 @@ describe("POST /ask: the checks, in order", () => {
     assert.equal(res.status, 500);
     const asks = await Usage.find({ _id: /\|asks\|/ }).lean();
     assert.deepEqual(asks.map((u) => u.count), [0, 0]);
+    assert.equal(await AgentRun.countDocuments(), 0);
+  });
+});
+
+// The ask job's failure rules (jobs/handlers/ask.ts), the same ones the report job has: a paid
+// run is never repeated because of our own side, and a run never stays "running" for ever.
+describe("the ask job: shutdown, lost leases and failed saves", () => {
+  // Counts the model's calls, so a test can prove the AI wasn't asked twice.
+  const counting = (inner: Model) => {
+    const counter = { calls: 0 };
+    const model: Model = { name: inner.name, call: (req) => (counter.calls++, inner.call(req)) };
+    return { model, counter };
+  };
+  const askJob = async () => (await Job.findOne({ type: "ask" }).lean())!;
+
+  it("shutdown mid-run: the run goes back to queued with the attempt refunded, and the next worker answers it from scratch", async () => {
+    let started!: () => void;
+    const hanging = new Promise<void>((r) => (started = r));
+    // A model call that never answers until it is aborted: the run is "in the middle" for sure.
+    const stuck: Model = {
+      name: "scripted",
+      call: (req) =>
+        new Promise((_, reject) => {
+          started();
+          req.signal.addEventListener("abort", () => reject(req.signal.reason), { once: true });
+        }),
+    };
+    const s = await setup({ model: stuck, worker: false });
+    const lane = s.startLane();
+    const { runId, token } = await accepted(await ask(s, QUESTION));
+    const client = await openSseClient(streamUrl(s, runId, token));
+    await hanging;
+    await lane.stop();
+
+    assert.equal((await AgentRun.findById(runId).lean())!.status, "queued");
+    const job = await askJob();
+    assert.deepEqual([job.status, job.attempts], ["queued", 0], "released, the attempt refunded");
+    assert.equal(await Answer.countDocuments(), 0);
+    // The viewer saw the run go back to the queue.
+    let m: SseMessage | null;
+    do m = await client.nextEvent(); while (m && !(m.event === "status" && (m.data as { status: string }).status === "queued"));
+    assert.ok(m, "a status: queued event");
+
+    // The next process (a new worker with a working model) picks it up; the visitor's token still works.
+    s.startLane(createCoachRuntime(ENV, { model: createScriptedModel({ delayMs: 0 }) }));
+    do m = await client.nextEvent(10_000); while (m && m.event !== "done" && m.event !== "failed");
+    assert.equal(m!.event, "done");
+    const done = m!.data as { attempt: number; answer: { outcome: string } };
+    assert.equal(done.attempt, 1);
+    assert.equal(done.answer.outcome, "answer");
+    client.close();
+  });
+
+  it("a job the reaper gives up on fails its run with coach_interrupted; any other final failure with internal", async () => {
+    const s = await setup({ worker: false });
+    const handler = createAskHandler(s.coach);
+    const first = await accepted(await ask(s, QUESTION));
+    const job = (await Job.findOne({ type: "ask" })) as JobDoc;
+    job.error = { code: "lease_expired", message: "x" };
+    await handler.onFailed!(job);
+    const run = (await AgentRun.findById(first.runId).lean())!;
+    assert.equal(run.status, "failed");
+    assert.equal(run.error!.code, "coach_interrupted");
+
+    await Job.deleteMany({});
+    const second = await accepted(await ask(s, "Do I play worse with Black?"));
+    const other = (await Job.findOne({ type: "ask" })) as JobDoc;
+    other.error = { code: "handler_crashed", message: "SECRET stack" };
+    await handler.onFailed!(other);
+    const failed = (await AgentRun.findById(second.runId).lean())!;
+    assert.deepEqual(failed.error, { code: "internal", message: "Something went wrong on our side." });
+  });
+
+  // A failed save after a good run must never run the AI again: only the save is retried.
+  it("the save fails twice, then succeeds: the answer is served, with exactly one agent run", async () => {
+    const { model, counter } = counting(createScriptedModel({ delayMs: 0 }));
+    let saves = 0;
+    const s = await setup({
+      model,
+      handler: {
+        saveRetryDelaysMs: [5, 5],
+        save: async (input) => {
+          if (++saves <= 2) throw new Error("Atlas write timed out");
+          return saveAnswer(input);
+        },
+      },
+    });
+    const { runId, token } = await accepted(await ask(s, QUESTION));
+    const last = (await streamAll(streamUrl(s, runId, token))).at(-1)!;
+    assert.equal(last.event, "done");
+    assert.equal(saves, 3);
+    // One run's calls, made once: the model wasn't asked again for the retried saves.
+    assert.ok(counter.calls > 0);
+    assert.equal((last.data as { usage: { calls: number } }).usage.calls, counter.calls);
+    const job = await askJob();
+    assert.deepEqual([job.status, job.attempts], ["done", 1]);
+    assert.equal(await Answer.countDocuments({ playerId: aliceId }), 1);
+  });
+
+  it("the save always fails: the run fails with internal, the job is not retried, the AI is not asked again", async () => {
+    const { model, counter } = counting(createScriptedModel({ delayMs: 0 }));
+    let saves = 0;
+    const s = await setup({
+      model,
+      handler: {
+        saveRetryDelaysMs: [5, 5],
+        save: async () => {
+          saves++;
+          throw new Error("SECRET Atlas write timed out");
+        },
+      },
+    });
+    const { runId, token } = await accepted(await ask(s, QUESTION));
+    const events = await streamAll(streamUrl(s, runId, token));
+    const last = events.at(-1)!;
+    assert.equal(last.event, "failed");
+    assert.deepEqual((last.data as { error: unknown }).error, { code: "internal", message: "Something went wrong on our side." });
+    assert.ok(!JSON.stringify(events).includes("SECRET"), "the real error never reaches the visitor");
+    assert.equal(saves, 3);
+    const callsOfOneRun = counter.calls;
+    // Give the worker a moment: a retried job would be queued again and start a second run.
+    await new Promise((r) => setTimeout(r, 150));
+    const job = await askJob();
+    assert.deepEqual([job.status, job.attempts], ["failed", 1]);
+    assert.equal(counter.calls, callsOfOneRun, "no second run");
+    assert.equal(await Answer.countDocuments(), 0);
+  });
+
+  it("the answer was saved while the job waited in the queue: the run is done from the cache, with no AI call", async () => {
+    // First visitor: a normal run that saves the answer.
+    const { model, counter } = counting(createScriptedModel({ delayMs: 0 }));
+    const s = await setup({ model, worker: false });
+    const lane = s.startLane();
+    const first = await accepted(await ask(s, QUESTION));
+    await streamAll(streamUrl(s, first.runId, first.token));
+    await lane.stop();
+    const callsOfFirstRun = counter.calls;
+
+    // A second run for the same question, queued by hand (the route would have served the cache).
+    const started = await startAskRun(s.queue, aliceId, s.coach.modelName, QUESTION);
+    assert.equal(started.created, true);
+    s.startLane();
+    const token = (started as { token: string }).token;
+    const last = (await streamAll(streamUrl(s, started.runId, token))).at(-1)!;
+    assert.equal(last.event, "done");
+    const run = last.data as { usage: { calls: number }; answer: { id: string } };
+    assert.equal(run.usage.calls, 0);
+    assert.equal(counter.calls, callsOfFirstRun, "the model wasn't called");
+    assert.equal(run.answer.id, String((await Answer.findOne().lean())!._id));
+  });
+
+  it("the player was deleted while the job waited: the run fails with player_not_found, no AI call", async () => {
+    const { model, counter } = counting(createScriptedModel({ delayMs: 0 }));
+    const s = await setup({ model, worker: false });
+    const { runId, token } = await accepted(await ask(s, QUESTION));
+    await Player.deleteOne({ _id: aliceId });
+    s.startLane();
+    const last = (await streamAll(streamUrl(s, runId, token))).at(-1)!;
+    assert.equal(last.event, "failed");
+    assert.equal((last.data as { error: { code: string } }).error.code, "player_not_found");
+    assert.equal(counter.calls, 0);
+  });
+});
+
+describe("startAskRun", () => {
+  it("the same question already queued: our run is deleted and the caller gets the existing run, with no token", async () => {
+    const queue = createQueue();
+    const first = await startAskRun(queue, aliceId, "m", QUESTION);
+    assert.equal(first.created, true);
+    // Same question after cleaning (case, spaces, the trailing "?"): the same job key.
+    const second = await startAskRun(queue, aliceId, "m", "why do I blunder in the  endgame");
+    assert.deepEqual(second, { runId: first.runId, created: false });
+    assert.equal(await AgentRun.countDocuments(), 1);
+    assert.equal(await Job.countDocuments({ key: askJobKey("m", aliceId, questionKey(QUESTION)) }), 1);
+    // Only the first caller's token hash is on the run: a joiner gets their own from the route.
+    assert.equal((await AgentRun.findById(first.runId).lean())!.tokenHashes!.length, 1);
+  });
+
+  it("the enqueue throws: the run it created (holding a token hash) is deleted and the error is passed on", async () => {
+    const failing = { enqueue: async () => Promise.reject(new Error("db down")) };
+    await assert.rejects(startAskRun(failing, aliceId, "m", QUESTION), /db down/);
     assert.equal(await AgentRun.countDocuments(), 0);
   });
 });

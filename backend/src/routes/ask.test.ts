@@ -141,14 +141,32 @@ async function accepted(res: Response): Promise<{ runId: string; token: string }
 
 const streamUrl = (s: Setup, runId: string, token?: string) => `${s.base}/runs/${runId}/stream${token === undefined ? "" : `?token=${encodeURIComponent(token)}`}`;
 
+// The worker marks a job done or failed just AFTER its handler returns, so just after the run's
+// last stream event. A test that goes on at once could still find the job "running": reading it,
+// or asking the route for the next report (an active job means "202, the same run"). On a slow
+// machine (CI) that happened, so a finished stream waits here until the run's job has settled.
+async function jobSettled(runId: string): Promise<void> {
+  for (let i = 0; i < 500; i++) {
+    if (!(await Job.exists({ "payload.runId": runId, status: { $in: ["queued", "running"] } }))) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`the job of run ${runId} never finished`);
+}
+const ended = (m: SseMessage | undefined) => m?.event === "done" || m?.event === "failed";
+
+// Every event of a run's stream, until the server ends it (and, after done or failed, until the
+// run's job has settled).
 async function streamAll(url: string, timeoutMs = 10_000): Promise<SseMessage[]> {
   const client = await openSseClient(url);
   const events: SseMessage[] = [];
   for (;;) {
     const m = await client.nextEvent(timeoutMs);
-    if (!m) return events;
+    if (!m) break;
     events.push(m);
   }
+  const runId = /\/runs\/([0-9a-f]{24})\/stream/.exec(url)?.[1];
+  if (runId && ended(events.at(-1))) await jobSettled(runId);
+  return events;
 }
 
 const today = () => `global:ai|${pacificDay(new Date())}`;

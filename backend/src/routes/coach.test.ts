@@ -132,15 +132,31 @@ after(async () => {
 const reportUrl = (s: Setup, user = "alice") => `${s.base}/players/lichess/${user}/report`;
 const post = (url: string) => fetch(url, { method: "POST" });
 
-// Every event of a run's stream, until the server ends it.
+// The worker marks a job done or failed just AFTER its handler returns, so just after the run's
+// last stream event. A test that goes on at once could still find the job "running": reading it,
+// or asking the route for the next report (an active job means "202, the same run"). On a slow
+// machine (CI) that happened, so a finished stream waits here until the run's job has settled.
+async function jobSettled(runId: string): Promise<void> {
+  for (let i = 0; i < 500; i++) {
+    if (!(await Job.exists({ "payload.runId": runId, status: { $in: ["queued", "running"] } }))) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`the job of run ${runId} never finished`);
+}
+const ended = (m: SseMessage | undefined) => m?.event === "done" || m?.event === "failed";
+
+// Every event of a run's stream, until the server ends it (and, after done or failed, until the
+// run's job has settled).
 async function streamAll(s: Setup, runId: string, timeoutMs = 10_000): Promise<SseMessage[]> {
   const client = await openSseClient(`${s.base}/runs/${runId}/stream`);
   const events: SseMessage[] = [];
   for (;;) {
     const m = await client.nextEvent(timeoutMs);
-    if (!m) return events;
+    if (!m) break;
     events.push(m);
   }
+  if (ended(events.at(-1))) await jobSettled(runId);
+  return events;
 }
 
 async function waitFor<T>(read: () => Promise<T>, ok: (v: T) => boolean, timeoutMs = 5_000): Promise<T> {
@@ -375,7 +391,7 @@ describe("the guards and errors", () => {
     assert.equal(last.event, "failed");
     assert.equal((last.data as { error: { code: string } }).error.code, "ai_budget_exhausted");
     assert.equal(calls, 2);
-    const job = await Job.findOne({ type: "report" }).lean();
+    const job = await jobDone();
     assert.equal(job!.status, "failed");
     assert.equal(job!.error!.code, "ai_budget_exhausted");
   });
@@ -509,12 +525,13 @@ describe("the guards and errors", () => {
     // One run's calls, made once: the model wasn't asked again.
     assert.equal((last.data as { usage: { calls: number } }).usage.calls, counter.calls);
     assert.equal(counter.calls, 4);
-    const job = await Job.findOne({ type: "report" }).lean();
+    const job = await jobDone();
     assert.deepEqual([job!.status, job!.attempts], ["done", 1]);
     assert.equal(await Report.countDocuments({ playerId: aliceId }), 1);
   });
 
-  // The worker marks the job done after the handler (and so afterSave) has returned.
+  // The worker marks the job done or failed after the handler (and so afterSave) has returned,
+  // so after the stream's last event: a test that reads the job waits for it here.
   const jobDone = async () => {
     for (let i = 0; i < 200; i++) {
       const job = await Job.findOne({ type: "report" }).lean();
@@ -570,10 +587,11 @@ describe("the guards and errors", () => {
     assert.ok(!JSON.stringify(events).includes("SECRET"));
     assert.equal(saves, 3);
     assert.equal(counter.calls, 4);
+    const job = await jobDone();
+    assert.deepEqual([job!.status, job!.attempts, job!.error!.code], ["failed", 1, "internal"]);
     // Give the worker a moment: a retried job would be queued again and start a second run.
     await new Promise((r) => setTimeout(r, 100));
-    const job = await Job.findOne({ type: "report" }).lean();
-    assert.deepEqual([job!.status, job!.attempts, job!.error!.code], ["failed", 1, "internal"]);
+    assert.equal((await Job.findOne({ type: "report" }).lean())!.status, "failed");
     assert.equal(counter.calls, 4);
     assert.equal(await Report.countDocuments(), 0);
   });

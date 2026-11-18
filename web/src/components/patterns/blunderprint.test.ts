@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { errorPlies, hitTest, isPlayersPly, layout, loupePly, MARKER_W, moveName, PLY_CAP, stepError, tickAt, truncation } from "./geometry";
+import { drawRows, errorPlies, hitTest, isPlayersPly, layout, loupePly, MARKER_W, moveName, NEUTRAL_MARKER, PLY_CAP, stepError, TICK_COLOR, tickAt, truncation, type Color } from "./geometry";
 
 // Tests for the Blunderprint's geometry (geometry.ts, drawn by Blunderprint.tsx).
 // classes: one letter per ply, b best, g good, i inaccuracy, m mistake, x blunder.
@@ -115,5 +115,129 @@ describe("hitTest", () => {
     assert.equal(hitTest(l, lengths, -1, 0), null);
     assert.equal(hitTest(l, lengths, 0, 12), null);
     assert.equal(hitTest(l, lengths, 606, 0), null);
+  });
+});
+
+// What is actually painted. A fake 2D context records every rectangle with the fill colour and
+// alpha in force when it was drawn, so the picture can be compared with the data tick by tick.
+describe("drawRows", () => {
+  interface Rect {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    fill: string;
+    alpha: number;
+  }
+  function fakeCanvas() {
+    const rects: Rect[] = [];
+    const cleared: number[][] = [];
+    const ctx = {
+      fillStyle: "",
+      globalAlpha: 1,
+      clearRect: (x: number, y: number, w: number, h: number) => void cleared.push([x, y, w, h]),
+      fillRect(x: number, y: number, w: number, h: number) {
+        rects.push({ x, y, w, h, fill: this.fillStyle, alpha: this.globalAlpha });
+      },
+    };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, raw: ctx, rects, cleared };
+  }
+  const row = (classes: string, color: Color = "white") => ({ classes, color });
+  const full = () => 1;
+  // 10 px per ply: the width is the plies shown × 10 plus the marker margin.
+  const widthFor = (columns: number) => columns * 10 + MARKER_W;
+
+  test("one tick per ply at x = (ply − 1) × tick width: the player's errors coloured, the opponent's moves faint", () => {
+    // White: ply 1 good, ply 3 a blunder, ply 5 an inaccuracy. Black's ply 4 is a blunder too, but it's the opponent's.
+    const rows = [row("ggxxig")];
+    const l = layout(widthFor(6), [6], false);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, rows, full);
+    assert.deepEqual(c.cleared, [[0, 0, l.width, l.height]]);
+    assert.deepEqual(
+      c.rects.map((r) => [r.x, r.w, r.fill]),
+      [
+        [0, 10, TICK_COLOR.own],
+        [10, 10, TICK_COLOR.opponent],
+        [20, 10, TICK_COLOR.blunder],
+        [30, 10, TICK_COLOR.opponent],
+        [40, 10, TICK_COLOR.inaccuracy],
+        [50, 10, TICK_COLOR.opponent],
+      ],
+    );
+    assert.ok(c.rects.every((r) => r.y === 0 && r.h === l.rowH && r.alpha === 1));
+  });
+
+  test("the same game seen as Black colours the other plies", () => {
+    const l = layout(widthFor(4), [4], false);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, [row("xmxm", "black")], full);
+    assert.deepEqual(c.rects.map((r) => r.fill), [TICK_COLOR.opponent, TICK_COLOR.mistake, TICK_COLOR.opponent, TICK_COLOR.mistake]);
+  });
+
+  test("each row sits at row × pitch, and a shorter game simply ends earlier", () => {
+    const rows = [row("gggg"), row("gg")];
+    const l = layout(widthFor(4), [4, 2], false);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, rows, full);
+    const second = c.rects.filter((r) => r.y === l.pitch);
+    assert.equal(c.rects.filter((r) => r.y === 0).length, 4);
+    assert.deepEqual(second.map((r) => [r.x, r.w]), [[0, 10], [10, 10]]);
+  });
+
+  test("before the engine pass reaches a ply it is faint stone, and a run of one colour is ONE rectangle", () => {
+    const rows = [row("gxgxgxgx")];
+    const l = layout(widthFor(8), [8], false);
+    const none = fakeCanvas();
+    drawRows(none.ctx, l, rows, full, 0);
+    assert.deepEqual(none.rects.map((r) => [r.x, r.w, r.fill]), [[0, 80, TICK_COLOR.opponent]]);
+
+    // Coloured up to ply 3: three ticks, then the other five plies as one faint run.
+    const some = fakeCanvas();
+    drawRows(some.ctx, l, [row("xgxgxgxg")], full, 3);
+    assert.deepEqual(
+      some.rects.map((r) => [r.x, r.w, r.fill]),
+      [
+        [0, 10, TICK_COLOR.blunder],
+        [10, 10, TICK_COLOR.opponent],
+        [20, 10, TICK_COLOR.blunder],
+        [30, 50, TICK_COLOR.opponent],
+      ],
+    );
+  });
+
+  test("a row cut at the cap gets an end marker in the colour of its worst hidden error, or neutral", () => {
+    // Cap 4: White's hidden plies are 5 (inaccuracy) and 7 (blunder); the second game hides nothing bad.
+    const rows = [row("ggggigxg"), row("gggggggg"), row("gggg")];
+    const l = layout(widthFor(4), [8, 8, 4], false, 4);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, rows, full);
+    const markers = c.rects.filter((r) => r.x === 4 * 10 + 2);
+    assert.deepEqual(
+      markers.map((r) => [r.y, r.w, r.fill]),
+      [
+        [0, MARKER_W - 2, TICK_COLOR.blunder],
+        [l.pitch, MARKER_W - 2, NEUTRAL_MARKER],
+      ],
+    );
+    // Nothing is painted past the cap except the markers.
+    assert.ok(c.rects.every((r) => r.x + r.w <= 40 || r.x === 42));
+  });
+
+  test("while the engine pass is still colouring, no end marker yet", () => {
+    const l = layout(widthFor(4), [8], false, 4);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, [row("ggggigxg")], full, 4);
+    assert.equal(c.rects.filter((r) => r.x >= 40).length, 0);
+  });
+
+  test("rows fade in: alpha 0 draws nothing, a partial alpha applies to the whole row, and alpha is reset to 1 after", () => {
+    const rows = [row("gg"), row("gg"), row("gg")];
+    const l = layout(widthFor(2), [2, 2, 2], false);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, rows, (r) => [1, 0, 0.4][r]!);
+    assert.deepEqual([...new Set(c.rects.map((r) => r.y))], [0, 2 * l.pitch]);
+    assert.ok(c.rects.filter((r) => r.y === 2 * l.pitch).every((r) => r.alpha === 0.4));
+    assert.equal(c.raw.globalAlpha, 1);
   });
 });

@@ -32,7 +32,7 @@ export const demoLine = (lastImportedAt?: string) =>
   lastImportedAt ? `Demo player · games as of ${dayDate(lastImportedAt)}` : "Demo player";
 
 // Both importers store "<initial seconds>+<increment seconds>", or "1/<seconds per move>" for
-// daily games. Shown the way players say it: "3+2", "10+0", "½+0", "3d" (shown as "daily 3d").
+// daily games. Shown the way players say it: "3+2", "10+0", "½+0", "¾+0", "3d" (shown as "daily 3d").
 export function formatTimeControl(tc?: string): string | null {
   if (!tc) return null;
   if (tc.startsWith("1/")) {
@@ -42,7 +42,7 @@ export function formatTimeControl(tc?: string): string | null {
   const [initial, increment = "0"] = tc.split("+");
   const minutes = Number(initial) / 60;
   if (!Number.isFinite(minutes)) return null;
-  const shown = minutes === 0.5 ? "½" : minutes === 0.25 ? "¼" : Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1);
+  const shown = minutes === 0.5 ? "½" : minutes === 0.25 ? "¼" : minutes === 0.75 ? "¾" : Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1);
   return `${shown}+${increment}`;
 }
 

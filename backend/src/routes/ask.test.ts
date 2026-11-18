@@ -264,6 +264,9 @@ describe("POST /ask end to end", () => {
 });
 
 describe("ask run tokens", () => {
+  // The token with its last character changed. Not simply "replace it with 0": one token in 16
+  // already ends in 0, and the "wrong" token was then the right one (the test failed 1 run in 16).
+  const wrongLastChar = (token: string) => token.replace(/.$/, (c) => (c === "0" ? "1" : "0"));
   it("only the token's hash is stored; streaming needs one of the run's tokens (missing or wrong → 404 run_not_found)", async () => {
     const s = await setup({ worker: false });
     const { runId, token } = await accepted(await ask(s, QUESTION));
@@ -271,7 +274,7 @@ describe("ask run tokens", () => {
     assert.deepEqual(run!.tokenHashes, [hashToken(token)]);
     assert.ok(!JSON.stringify(run).includes(token));
 
-    for (const url of [streamUrl(s, runId), streamUrl(s, runId, "wrong"), streamUrl(s, runId, token.replace(/.$/, "0")), streamUrl(s, runId, "")]) {
+    for (const url of [streamUrl(s, runId), streamUrl(s, runId, "wrong"), streamUrl(s, runId, wrongLastChar(token)), streamUrl(s, runId, "")]) {
       const res = await fetch(url);
       assert.equal(res.status, 404, url);
       assert.deepEqual(await res.json(), { error: "That coach run has expired or doesn't exist.", code: "run_not_found" });

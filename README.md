@@ -251,9 +251,9 @@ Lighthouse (mobile, simulated slow 4G and 4× slower CPU):
 | Page | Score | LCP | TBT | CLS |
 |---|---|---|---|---|
 | Landing | 100 | 1.3 s | 60 ms | 0 |
-| Demo dashboard | 78–79 | 4.0–4.2 s | 330–340 ms | 0 |
+| Demo dashboard | 78 | 4.0 s | 379 ms | 0 |
 
-The dashboard waits on the API (Render's free tier) more than on the browser. Its games list now arrives in one request instead of four, one after another (18 Nov 2026): 8 API requests became 5, and the list's bytes went from 71.8 KB on the wire (473 KB of JSON) to about 19 KB (215 KB), because a list row no longer carries the mistake features that only the patterns and the coach use.
+The dashboard row is the median of 5 mobile runs on 18 Nov 2026 (scores 65 to 81). The dashboard waits on the API (Render's free tier) more than on the browser. Its games list now arrives in one request instead of four, one after another (18 Nov 2026): 8 API requests became 5, and the list's bytes went from 71.8 KB on the wire (473 KB of JSON) to about 19 KB (215 KB), because a list row no longer carries the mistake features that only the patterns and the coach use.
 
 The whole page works without animation: with reduced motion, or in a browser that runs no animation frames, every element is simply in its final state.
 
@@ -287,11 +287,11 @@ In `web/.env.local`, set `NEXT_PUBLIC_API_URL=http://localhost:5000`.
 ## Tests and checks
 
 ```
-cd backend && npm run typecheck && npm test                    612 tests
-cd web && npm run typecheck && npm run lint && npm test        195 tests
+cd backend && npm run typecheck && npm test                    645 tests
+cd web && npm run typecheck && npm run lint && npm test        257 tests
 ```
 
-All passing on 18 Nov 2026. GitHub Actions runs the same commands on every push and pull request to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); no job needs a secret. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.
+All passing on 18 Nov 2026. Line coverage of the source files the tests load (test files not counted; Node's built-in coverage): backend 99.2%, web 95.6%. The React components and hooks are not loaded by these tests; the browser checks below cover them. GitHub Actions runs the same commands on every push and pull request to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); no job needs a secret. Its first red runs were timing races in the tests themselves (a test read a job before the worker had marked it finished), found by reading the failed logs and fixed. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.
 
 `web/scripts/ui-*.mjs` are checks over headless Chrome: hover, press and focus feedback on every control (`ui-audit`), reduced motion and no-animation-frame browsers at 390 px (`ui-motion`), layout shift (`ui-cls`), long frames (`ui-frames`) and screen-reader labels (`ui-labels`). `ui-readme-shots.mjs` takes this README's screenshots from the live demo pages.
 

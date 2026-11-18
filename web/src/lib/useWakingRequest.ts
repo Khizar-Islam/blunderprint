@@ -1,23 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError } from "./api";
+import { runWaking, wakingStateOf, type WakingState } from "./waking";
 
 // Render's free API sleeps after 15 minutes; the first request can take up to about a minute.
 export const WAKING_AFTER_MS = 3_000; // show the "waking" counter after this long
 const GIVE_UP_AFTER_MS = 60_000; // then stop and offer Retry
-const RETRY_EVERY_MS = 3_000; // a waking server can also fail fast (e.g. 502) before it is ready
 
-// Worth retrying while the server may still be waking: no answer at all, or a 502/503/504 from
-// Render's proxy. A 4xx is a real answer, so it is returned straight away, and so is a 5xx that
-// carries one of our codes (e.g. 503 storage_full or busy, Stage 6): our API answered it.
-export const isWakingError = (err: unknown) =>
-  err instanceof ApiError && (err.status === 0 || (err.status >= 502 && err.code === undefined));
-
-export type WakingState<T> =
-  | { kind: "loading" }
-  | { kind: "done"; value: T }
-  | { kind: "error"; error: ApiError };
+// The retry rules themselves (which errors, how often) are in waking.ts, tested without React.
+export { isWakingError, type WakingState } from "./waking";
 
 // Runs `task` once on mount, retrying it while the API wakes up, and counts the seconds so the
 // UI can say "Waking the server up… (12s)". `task` must be safe to repeat. The task is read
@@ -49,25 +40,12 @@ export function useWakingRequest<T>(task: (signal: AbortSignal) => Promise<T>) {
     };
 
     async function run() {
-      while (!controller.signal.aborted) {
-        try {
-          const value = await taskRef.current(controller.signal);
-          stopTimers();
-          setState({ kind: "done", value });
-          return;
-        } catch (err) {
-          if (controller.signal.aborted) break;
-          if (!isWakingError(err)) {
-            stopTimers();
-            setState({ kind: "error", error: err instanceof ApiError ? err : new ApiError(0, "Something went wrong") });
-            return;
-          }
-          await new Promise((resolve) => setTimeout(resolve, RETRY_EVERY_MS));
-        }
-      }
+      // The task is read from the ref on every try, so a retry uses the latest closure.
+      const outcome = await runWaking<T>((signal) => taskRef.current(signal), controller.signal);
       stopTimers();
-      // Aborted by the give-up timer (not by unmount): report it.
-      if (timedOut) setState({ kind: "error", error: new ApiError(0, "Can't reach the API") });
+      // Aborted by the give-up timer (not by unmount): reported. By unmount: nothing to show.
+      const next = wakingStateOf(outcome, timedOut);
+      if (next) setState(next);
     }
     void run();
 

@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchGames, fetchPlayer, isValidUsername, PLATFORM_NAMES, type GameRow, type Platform, type Player } from "@/lib/api";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { fetchGames, fetchPlayer, isValidUsername, PLATFORM_NAMES, type GameRow, type Platform, type Player } from "@/lib/api";
 import { isImportRefusal, startDashboard, type Start } from "@/lib/dashboardStart";
 import { apiQuery, parseFilters } from "@/lib/filters";
+import { createGamesLoader, mergeGames, type GamesState, type LoadMode } from "@/lib/gamesLoader";
 import { demoLine, relativeTime } from "@/lib/format";
 import { useJobStream, type JobEventType } from "@/lib/useJobStream";
 import { useWakingRequest } from "@/lib/useWakingRequest";
@@ -25,9 +26,6 @@ export function PlayerDashboard({ platform, username }: Props) {
   }
   return <Dashboard platform={platform} username={username} />;
 }
-
-// Sorted like the API (playedAt desc, then id desc), so merging pages never reorders rows.
-const byNewest = (a: GameRow, b: GameRow) => b.playedAt.localeCompare(a.playedAt) || b.id.localeCompare(a.id);
 
 function Dashboard({ platform, username }: Props) {
   // The summary starts in parallel with GET player → POST import (lib/dashboardStart.ts), for
@@ -62,65 +60,25 @@ function Dashboard({ platform, username }: Props) {
   const player = refreshedPlayer ?? started?.player ?? foundPlayer;
   const hasPlayer = player != null;
   const [games, setGames] = useState<GameRow[]>([]);
-  const [gamesState, setGamesState] = useState<"idle" | "loading" | "error">("idle");
+  const [gamesState, setGamesState] = useState<GamesState>("idle");
   const [lastEventAt, setLastEventAt] = useState(() => Date.now());
   // Bumped when an import finishes: the patterns refetch (new games, trimmed old ones).
   const [importsDone, setImportsDone] = useState(0);
 
   // ---- Loading games -------------------------------------------------------------------------
-  // `pageCursor` is the cursor of the last page we fetched (null = the first page). While an
-  // import runs, each progress event syncs from that cursor and follows nextCursor to the end.
-  // A page holds 200 games (GAMES_PAGE_SIZE), so a player's whole list is normally one page with
-  // no nextCursor, and a sync re-reads the whole list from the top (up to ~19 KB on the wire).
-  // That's acceptable: there is one progress event per stored batch, roughly 1-2.5 s apart on
-  // Render, and load() runs one at a time and folds extra events into one follow-up. A player
-  // with more than 200 games still follows nextCursor. Rows are merged by id.
-  const pageCursor = useRef<string | null>(null);
+  // The paging, the merging and the "one load at a time" rule are in lib/gamesLoader.ts (tested
+  // without React). Each load gets the abort signal of this mount.
   const controller = useRef<AbortController | null>(null);
-  const busy = useRef(false);
-  const again = useRef<"none" | "sync" | "reload">("none");
-
-  const load = useCallback(
-    async (mode: "sync" | "reload") => {
-      // One load at a time; a request that arrives meanwhile runs once the current one ends
-      // (a reload wins over a sync, as it covers it).
-      if (busy.current) {
-        if (again.current !== "reload") again.current = mode;
-        return;
-      }
-      busy.current = true;
-      setGamesState("loading");
-      const signal = controller.current!.signal;
-      try {
-        // reload: from the top, replacing the list. Used when an import finishes, as the server
-        // has then also trimmed the player to the newest games.
-        let cursor = mode === "reload" ? null : pageCursor.current;
-        const fresh = new Map<string, GameRow>();
-        for (;;) {
-          const page = await fetchGames(platform, username, cursor, signal);
-          for (const g of page.games) fresh.set(g.id, g);
-          if (!page.nextCursor) break;
-          cursor = page.nextCursor;
-        }
-        pageCursor.current = cursor;
-        setGames((prev) => {
-          const merged = mode === "reload" ? fresh : new Map([...prev.map((g) => [g.id, g] as const), ...fresh]);
-          return [...merged.values()].sort(byNewest);
-        });
-        setGamesState("idle");
-      } catch (err) {
-        if (signal.aborted) return;
-        // 404 here means the player doesn't exist yet (first import still queued): no games yet.
-        setGamesState(err instanceof ApiError && err.status === 404 ? "idle" : "error");
-      } finally {
-        busy.current = false;
-        const next = again.current;
-        again.current = "none";
-        if (next !== "none" && !signal.aborted) void load(next);
-      }
-    },
+  const loader = useMemo(
+    () =>
+      createGamesLoader({
+        fetchPage: (cursor, signal) => fetchGames(platform, username, cursor, signal),
+        onState: setGamesState,
+        onGames: (fresh, mode) => setGames((prev) => mergeGames(prev, fresh, mode)),
+      }),
     [platform, username],
   );
+  const load = useCallback((mode: LoadMode) => loader.load(mode, controller.current!.signal), [loader]);
 
   useEffect(() => {
     controller.current = new AbortController();

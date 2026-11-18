@@ -23,8 +23,8 @@ concurrency:
 jobs:
   backend:
     name: Backend (typecheck, tests)
-    # Pinned, not ubuntu-latest: that label is moving to Ubuntu 26, and the tests download
-    # MongoDB 8.0.34 (mongodb-memory-server), which MongoDB publishes for Ubuntu 24.04.
+    # Pinned, not ubuntu-latest, only so the runner doesn't change under us (that label is
+    # moving to Ubuntu 26). The tests' MongoDB 8.0.34 (mongodb-memory-server) ran on both.
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:

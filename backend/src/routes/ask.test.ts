@@ -462,6 +462,16 @@ describe("the ask job: shutdown, lost leases and failed saves", () => {
     return { model, counter };
   };
   const askJob = async () => (await Job.findOne({ type: "ask" }).lean())!;
+  // The worker marks the job done or failed AFTER the handler has returned, so after the run's
+  // last stream event: wait for it instead of reading the job at once.
+  const finishedJob = async () => {
+    for (let i = 0; i < 300; i++) {
+      const job = await askJob();
+      if (job.status === "done" || job.status === "failed") return job;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error("the ask job never finished");
+  };
 
   it("shutdown mid-run: the run goes back to queued with the attempt refunded, and the next worker answers it from scratch", async () => {
     let started!: () => void;
@@ -542,7 +552,7 @@ describe("the ask job: shutdown, lost leases and failed saves", () => {
     // One run's calls, made once: the model wasn't asked again for the retried saves.
     assert.ok(counter.calls > 0);
     assert.equal((last.data as { usage: { calls: number } }).usage.calls, counter.calls);
-    const job = await askJob();
+    const job = await finishedJob();
     assert.deepEqual([job.status, job.attempts], ["done", 1]);
     assert.equal(await Answer.countDocuments({ playerId: aliceId }), 1);
   });
@@ -568,10 +578,11 @@ describe("the ask job: shutdown, lost leases and failed saves", () => {
     assert.ok(!JSON.stringify(events).includes("SECRET"), "the real error never reaches the visitor");
     assert.equal(saves, 3);
     const callsOfOneRun = counter.calls;
+    const job = await finishedJob();
+    assert.deepEqual([job.status, job.attempts], ["failed", 1]);
     // Give the worker a moment: a retried job would be queued again and start a second run.
     await new Promise((r) => setTimeout(r, 150));
-    const job = await askJob();
-    assert.deepEqual([job.status, job.attempts], ["failed", 1]);
+    assert.equal((await askJob()).status, "failed");
     assert.equal(counter.calls, callsOfOneRun, "no second run");
     assert.equal(await Answer.countDocuments(), 0);
   });

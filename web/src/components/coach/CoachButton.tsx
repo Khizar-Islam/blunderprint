@@ -46,7 +46,7 @@ export function CoachButton({ info, platform, username }: { info: CoachInfo | nu
     <section aria-label="Coach" className={FRAME}>
       <div key={state.kind} className="anim-fade flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
-          <p className="font-mono text-xs tracking-wide text-graphite/60 uppercase">Coach</p>
+          <p className="font-mono text-xs tracking-wide text-graphite/70 uppercase">Coach</p>
           {state.kind === "locked" && (
             <>
               <p className="font-display text-xl text-ink">The coach unlocks at {state.needed} analysed games</p>
@@ -74,7 +74,7 @@ export function CoachButton({ info, platform, username }: { info: CoachInfo | nu
           {state.kind === "off" && <p className="text-sm text-graphite">The coach is switched off right now. Your dashboard and game reviews still work.</p>}
           {state.kind === "resting" && <p className="text-sm text-graphite">{resting}</p>}
           {error && (
-            <p className="text-sm text-blunder" role="alert">
+            <p className="text-sm text-blunder-text" role="alert">
               {error}
             </p>
           )}

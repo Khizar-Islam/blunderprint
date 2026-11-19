@@ -14,6 +14,15 @@
   --color-mistake: #d9772b;
   --color-blunder: #b3362b;
   --color-best: #3e7c74;
+  /* The same hues, darker, for WORDS only (move names, "Exercise", error messages): the tones
+     above are for ticks, bars, squares and arrows, and as text on bone they are under WCAG AA's
+     4.5:1 (amber 1.8, rust 2.5, teal 3.8). Same hue and chroma in OKLCH, lightness lowered until
+     the contrast is at least 4.5:1 on bone AND on the hover tint (stone at 70 % over bone).
+     There is no amber one: darkened that far it is a brown that reads as the rust, so an
+     inaccuracy's words are ink behind an amber tick (.tick-inaccuracy below). Not for text on ink. */
+  --color-best-text: #28675f;
+  --color-mistake-text: #944902;
+  --color-blunder-text: #ad3026;
 }
 
 /* Fonts are loaded by next/font in layout.tsx, which sets these CSS variables.
@@ -41,6 +50,19 @@ body {
    Tailwind utility (utilities sit in a lower cascade layer). */
 .focus-inset:focus-visible {
   outline-offset: -2px;
+}
+
+/* An inaccuracy's words: ink, with one amber tick in front (the same mark as a move in the
+   Blunderprint). Amber itself can't be text on bone (1.8:1). The tick is a drawn box, not a
+   character, so screen readers and find-in-page don't see it. */
+.tick-inaccuracy::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 0.8em;
+  margin-right: 0.3em;
+  vertical-align: -0.06em;
+  background-color: var(--color-inaccuracy);
 }
 
 /* A small outlined button (Retry, Load more). Hover fills it; press shrinks it slightly. */

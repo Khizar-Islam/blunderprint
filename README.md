@@ -275,9 +275,9 @@ Lighthouse (mobile, simulated slow 4G and 4× slower CPU):
 | Page | Score | LCP | TBT | CLS |
 |---|---|---|---|---|
 | Landing | 100 | 1.3 s | 60 ms | 0 |
-| Demo dashboard | 78 | 4.0 s | 379 ms | 0 |
+| Demo dashboard | 88 | 3.69 s | 98 ms | 0 |
 
-The dashboard row is the median of 5 mobile runs on 18 Nov 2026 (scores 65 to 81). The dashboard waits on the API (Render's free tier) more than on the browser. Its games list now arrives in one request instead of four, one after another (18 Nov 2026): 8 API requests became 5, and the list's bytes went from 71.8 KB on the wire (473 KB of JSON) to about 19 KB (215 KB), because a list row no longer carries the mistake features that only the patterns and the coach use.
+The dashboard row is the median of 5 mobile runs on 19 Nov 2026 (scores 86 to 90). A day earlier it was 78, with 4.0 s LCP and 379 ms TBT: the 200 rows of the games list rendered in one long frame, and they now skip off-screen layout and paint and render the first 30 rows first. The dashboard waits on the API (Render's free tier) more than on the browser. Its games list now arrives in one request instead of four, one after another (18 Nov 2026): 8 API requests became 5, and the list's bytes went from 71.8 KB on the wire (473 KB of JSON) to about 19 KB (215 KB), because a list row no longer carries the mistake features that only the patterns and the coach use.
 
 The whole page works without animation: with reduced motion, or in a browser that runs no animation frames, every element is simply in its final state.
 

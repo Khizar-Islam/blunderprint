@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { HEX, LABEL, TEXT } from "./classes";
+import { BEST_TEXT, HEX, LABEL, TEXT } from "./classes";
 
 // Under the board on an inaccuracy/mistake/blunder: "Nxe5?? was a blunder. Better was Nf3",
 // and a Show control that switches the board to the position BEFORE the move, with a teal
@@ -58,7 +58,7 @@ export function BetterMove({
           {betterSan && (
             <>
               {" "}
-              Better was <span style={{ color: HEX.best }}>{betterSan}</span>.
+              Better was <span className={BEST_TEXT}>{betterSan}</span>.
             </>
           )}
         </span>
@@ -100,8 +100,9 @@ export function BetterMove({
       </p>
       {peek && betterSan && (
         <p className="text-xs text-graphite/80" aria-live="polite">
-          Before {san}: <span style={{ color: HEX.best }}>■ {betterSan}</span> was better than{" "}
-          <span className="text-mistake/70">■ {san}</span>
+          {/* The ■ are the two arrows' colours (a key to the board); the moves' names are text. */}
+          Before {san}: <span style={{ color: HEX.best }}>■</span> <span className={BEST_TEXT}>{betterSan}</span> was better than{" "}
+          <span className="text-mistake/70">■</span> <span className="text-mistake-text">{san}</span>
         </p>
       )}
     </div>

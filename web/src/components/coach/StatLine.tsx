@@ -35,7 +35,7 @@ export function StatLine({ stat }: { stat: CoachStat }) {
           { label: "usual", value: stat.baseline, color: "bg-square-dark/60" },
         ].map((bar, i) => (
           <div key={bar.label} className="grid grid-cols-[3rem_1fr] items-center gap-2">
-            <span className="font-mono text-[11px] text-graphite/60">{bar.label}</span>
+            <span className="font-mono text-[11px] text-graphite/70">{bar.label}</span>
             <div className="h-1.5 bg-square-light/60">
               <div
                 className={`bar-x h-full w-full ${bar.color}`}

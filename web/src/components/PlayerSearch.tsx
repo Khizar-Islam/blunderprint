@@ -73,7 +73,7 @@ export function PlayerSearch() {
           spellCheck={false}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
-          className="min-h-11 min-w-0 flex-1 rounded-md border border-ink/30 bg-transparent px-3 py-2 font-mono text-base text-ink transition-colors placeholder:font-sans placeholder:text-graphite/50 hover:border-ink/60 focus-visible:border-ink"
+          className="min-h-11 min-w-0 flex-1 rounded-md border border-ink/30 bg-transparent px-3 py-2 font-mono text-base text-ink transition-colors placeholder:font-sans placeholder:text-graphite/70 hover:border-ink/60 focus-visible:border-ink"
         />
         <button
           type="submit"

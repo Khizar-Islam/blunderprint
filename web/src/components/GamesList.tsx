@@ -169,7 +169,7 @@ const Row = memo(function Row({
               <span className="shrink-0 font-mono text-xs text-graphite/80 tabular-nums">{game.opponentRating}</span>
             )}
             {game.playerRating != null && (
-              <span className="hidden shrink-0 font-mono text-xs whitespace-nowrap text-graphite/50 tabular-nums lg:inline">
+              <span className="hidden shrink-0 font-mono text-xs whitespace-nowrap text-graphite/70 tabular-nums lg:inline">
                 you {game.playerRating}
               </span>
             )}

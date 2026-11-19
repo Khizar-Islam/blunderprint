@@ -47,7 +47,7 @@ export function PatternCard({
       aria-labelledby={`pattern-${index}`}
     >
       <header className="flex flex-col gap-1">
-        <p className="font-mono text-xs tracking-wide text-graphite/60 uppercase">
+        <p className="font-mono text-xs tracking-wide text-graphite/70 uppercase">
           Pattern {index + 1} of {total}
         </p>
         <h2 id={`pattern-${index}`} className="font-display text-2xl leading-tight text-ink sm:text-3xl">
@@ -62,7 +62,7 @@ export function PatternCard({
         <div className="flex flex-col gap-4">
           <p className="text-base leading-relaxed text-ink">{pattern.explanation}</p>
           <div className="border-l-2 border-best pl-4">
-            <p className="font-mono text-xs tracking-wide text-best uppercase">Exercise</p>
+            <p className="font-mono text-xs tracking-wide text-best-text uppercase">Exercise</p>
             <p className="mt-1 font-display text-lg leading-snug text-ink italic">{pattern.drill}</p>
           </div>
         </div>

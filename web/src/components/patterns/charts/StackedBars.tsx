@@ -78,13 +78,13 @@ export function StackedBars({
               className="-mx-1.5 grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 rounded-sm px-1.5 py-0.5 transition-colors duration-150 hover:bg-square-light/45 sm:grid-cols-[8.5rem_1fr_3.5rem]"
               aria-label={`${row.label}: ${row.value === null ? "no data" : format(row.value)}; ${row.counts.blunder} blunders, ${row.counts.mistake} mistakes, ${row.counts.inaccuracy} inaccuracies${few ? "; few games, read with care" : ""}`}
             >
-              <span className={`flex min-w-0 flex-col text-sm ${few ? "text-graphite/60" : "text-ink"}`}>
+              <span className={`flex min-w-0 flex-col text-sm ${few ? "text-graphite/70" : "text-ink"}`}>
                 <span className="flex min-w-0 items-baseline gap-2">
                   <span className="truncate">{row.label}</span>
-                  {row.sub && <span className="shrink-0 font-mono text-xs text-graphite/60">{row.sub}</span>}
+                  {row.sub && <span className="shrink-0 font-mono text-xs text-graphite/70">{row.sub}</span>}
                 </span>
                 {/* Its own line, so it never squeezes the label in the narrow label column. */}
-                {few && <span className="font-mono text-[11px] leading-tight text-graphite/60 italic">few games</span>}
+                {few && <span className="font-mono text-[11px] leading-tight text-graphite/70 italic">few games</span>}
               </span>
               <svg
                 className="col-span-2 row-start-2 h-3 w-full sm:col-span-1 sm:row-start-auto"
@@ -117,14 +117,14 @@ export function StackedBars({
                   />
                 ))}
               </svg>
-              <span className={`text-right font-mono text-sm tabular-nums ${few ? "text-graphite/60" : "text-ink"}`}>
+              <span className={`text-right font-mono text-sm tabular-nums ${few ? "text-graphite/70" : "text-ink"}`}>
                 <AnimatedNumber value={row.value} format={format} />
               </span>
             </li>
           );
         })}
       </ul>
-      <p className="font-mono text-[11px] text-graphite/60">
+      <p className="font-mono text-[11px] text-graphite/70">
         scale 0–{format(max)}
       </p>
     </figure>

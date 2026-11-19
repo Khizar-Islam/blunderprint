@@ -62,11 +62,13 @@ export function MoveList({
         data-segment
         className={`relative rounded-sm px-1.5 py-0.5 text-left transition-[color,background-color,transform] duration-150 active:scale-[0.97] ${
           isCurrent ? "bg-ink text-bone hover:text-square-light group-data-[indicator=on]:bg-transparent" : "hover:bg-square-light/60"
-        }`}
+        } ${mine && cls === "inaccuracy" ? "tick-inaccuracy" : ""}`}
       >
+        {/* The player's inaccuracy: the amber tick goes in front of the move (on the button, also
+            while it is the current move, so the text doesn't shift when selected); its glyph is ink. */}
         {p.san}
         {glyph && (
-          <span className={`ml-0.5 ${isCurrent ? "" : mine ? (TEXT[cls!] ?? "") : "text-graphite/50"}`}>{glyph}</span>
+          <span className={`ml-0.5 ${isCurrent ? "" : mine ? (cls === "inaccuracy" ? "text-ink" : (TEXT[cls!] ?? "")) : "text-graphite/70"}`}>{glyph}</span>
         )}
       </button>
     );
@@ -82,7 +84,7 @@ export function MoveList({
       <li ref={pill} role="presentation" className="seg-indicator rounded-sm bg-ink opacity-0" aria-hidden="true" />
       {rows.map(([w, b]) => (
         <li key={w.n} className="contents">
-          <span className="py-0.5 pr-2 text-right text-graphite/50 tabular-nums">{(w.n + 1) / 2}.</span>
+          <span className="py-0.5 pr-2 text-right text-graphite/70 tabular-nums">{(w.n + 1) / 2}.</span>
           {cell(w)}
           {cell(b)}
         </li>

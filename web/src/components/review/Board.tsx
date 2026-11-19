@@ -32,7 +32,7 @@ export interface BoardArrow {
 
 // Inline CSS (not SVG attributes), so the palette's CSS variables work here.
 const NOTATION_ON_LIGHT = { color: "color-mix(in oklab, var(--color-graphite) 75%, transparent)" };
-const NOTATION_ON_DARK = { color: "color-mix(in oklab, var(--color-ink) 85%, transparent)" };
+const NOTATION_ON_DARK = { color: "var(--color-ink)" }; // full ink: 4.7:1 on the dark square (85 % was 3.8)
 const NOTATION_TEXT = { fontFamily: "var(--font-mono)", fontSize: "11px", userSelect: "none" as const };
 
 const tint = (cls: MoveClass | undefined) =>

@@ -25,7 +25,7 @@ export function OpeningsTable({ openings }: { openings: Summary["openings"] }) {
       </figcaption>
       <table className="w-full table-fixed border-collapse text-sm">
         <thead>
-          <tr className="border-b border-ink/15 text-left font-mono text-[11px] font-normal text-graphite/60">
+          <tr className="border-b border-ink/15 text-left font-mono text-[11px] font-normal text-graphite/70">
             <th className="pb-1.5 pl-1 font-normal">Opening</th>
             <th className="w-12 pb-1.5 text-right font-normal">Games</th>
             <th className="w-[30%] pb-1.5 pl-3 font-normal sm:w-40">Score</th>
@@ -37,9 +37,9 @@ export function OpeningsTable({ openings }: { openings: Summary["openings"] }) {
             // Under 5 games, the score and error rate are greyed: a 1-game opening at 100% isn't a finding.
             const few = fewGames(o.games);
             return (
-              <tr key={o.eco ?? "none"} className={`border-b border-ink/5 align-middle transition-colors duration-150 hover:bg-square-light/45 ${few ? "text-graphite/60" : ""}`}>
+              <tr key={o.eco ?? "none"} className={`border-b border-ink/5 align-middle transition-colors duration-150 hover:bg-square-light/45 ${few ? "text-graphite/70" : ""}`}>
                 <td className="py-1.5 pr-2 pl-1">
-                  <span className="mr-2 font-mono text-xs text-graphite/60">{o.eco ?? "—"}</span>
+                  <span className="mr-2 font-mono text-xs text-graphite/70">{o.eco ?? "—"}</span>
                   <span className={few ? "" : "text-ink"}>{o.name ?? "Unknown opening"}</span>
                   {few && <span className="ml-2 font-mono text-[11px] whitespace-nowrap italic">few games</span>}
                 </td>

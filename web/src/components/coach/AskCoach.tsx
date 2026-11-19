@@ -99,7 +99,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
   return (
     <section aria-labelledby="ask-heading" className="flex flex-col gap-6 border-t-2 border-ink pt-5">
       <header className="flex flex-col gap-1">
-        <p className="font-mono text-xs tracking-wide text-graphite/60 uppercase">Ask the coach</p>
+        <p className="font-mono text-xs tracking-wide text-graphite/70 uppercase">Ask the coach</p>
         <h2 id="ask-heading" className="font-display text-2xl leading-tight text-ink sm:text-3xl">
           A question about your own games
         </h2>
@@ -123,10 +123,10 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
           aria-describedby="ask-counter ask-privacy"
           aria-invalid={count.over || undefined}
           placeholder={aiEnabled ? "e.g. Which piece do I lose most often?" : "New questions are paused right now."}
-          className="w-full max-w-2xl resize-y rounded border border-ink/30 bg-transparent px-3 py-2 text-base text-ink transition-colors placeholder:text-graphite/50 hover:border-ink/60 focus-visible:border-ink disabled:opacity-60"
+          className="w-full max-w-2xl resize-y rounded border border-ink/30 bg-transparent px-3 py-2 text-base text-ink transition-colors placeholder:text-graphite/70 hover:border-ink/60 focus-visible:border-ink disabled:opacity-60"
         />
         <div className="flex max-w-2xl flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <p id="ask-counter" className={`font-mono text-xs tabular-nums ${count.over ? "text-blunder" : "text-graphite/60"}`}>
+          <p id="ask-counter" className={`font-mono text-xs tabular-nums ${count.over ? "text-blunder-text" : "text-graphite/70"}`}>
             {/* Screen-reader text first: an aria-hidden + sr-only pair is how AnimatedNumber is
                 marked, and ui-motion.mjs checks those pairs as counting numbers. */}
             <span className="sr-only">Up to 300 characters.</span>
@@ -144,7 +144,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
 
       {suggestions.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="font-mono text-xs tracking-wide text-graphite/60 uppercase" id="ask-suggested">
+          <p className="font-mono text-xs tracking-wide text-graphite/70 uppercase" id="ask-suggested">
             Or try one of these
           </p>
           <div role="group" aria-labelledby="ask-suggested" className="flex flex-wrap gap-2">
@@ -159,7 +159,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
               >
                 <span>{s.question}</span>
                 {s.answered && (
-                  <span className="font-mono text-[11px] text-best" title="Answered already: no wait">
+                  <span className="font-mono text-[11px] text-best-text" title="Answered already: no wait">
                     <span className="sr-only">(answer ready)</span>
                     <span aria-hidden="true">✓</span>
                   </span>
@@ -176,7 +176,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
         </p>
       )}
 
-      <p id="ask-privacy" className="max-w-prose text-xs leading-relaxed text-graphite/60">
+      <p id="ask-privacy" className="max-w-prose text-xs leading-relaxed text-graphite/70">
         Questions are sent to Google&apos;s Gemini on its free tier, where Google may use them to improve its models, so don&apos;t include
         personal details. Visitors are counted by a hashed address, never a stored IP.
       </p>

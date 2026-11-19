@@ -7,6 +7,7 @@ import type { CoachEvidence } from "@/lib/api";
 import { factsLine, fenAfterMove, moveCaption, uciSquares } from "@/lib/coach";
 import { useMountWhenNear } from "@/lib/useMountWhenNear";
 import { Board } from "../review/Board";
+import { TEXT } from "../review/classes";
 
 // One evidence position on a pattern card. When it scrolls into view:
 //   1. it fades in at the position BEFORE the mistake;
@@ -26,7 +27,7 @@ const RUST = "#D9772B";
 const TEAL = "#3E7C74";
 
 // Literal class names, so Tailwind sees them (it can't read a class built at runtime).
-const KIND_TEXT = { inaccuracy: "text-inaccuracy", mistake: "text-mistake", blunder: "text-blunder" } as const;
+const KIND_TEXT = { inaccuracy: TEXT.inaccuracy, mistake: TEXT.mistake, blunder: TEXT.blunder } as const;
 
 const SLIDE_MS = 450;
 const HOLD_MS = 600;
@@ -167,7 +168,7 @@ export function EvidenceBoard({
           {caption.better && (
             <>
               {" · better "}
-              <span className="font-semibold text-best">{caption.better}</span>
+              <span className="font-semibold text-best-text">{caption.better}</span>
             </>
           )}
         </p>

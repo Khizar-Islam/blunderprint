@@ -56,7 +56,7 @@ export function AnswerCard({
       data-answer={entry.status === "done" ? entry.answer?.outcome : undefined}
     >
       <p className="flex items-baseline gap-3 text-base text-ink">
-        <span className="font-mono text-xs tracking-wide text-graphite/60 uppercase" aria-hidden="true">
+        <span className="font-mono text-xs tracking-wide text-graphite/70 uppercase" aria-hidden="true">
           Q.
         </span>
         <span className="font-medium">{entry.question}</span>
@@ -201,7 +201,7 @@ function AnswerBody({
 // with the answer (the stream, or the cached POST), so opening it needs no request.
 function HowAnswered({ trace }: { trace: PublicRun | null }) {
   const [open, setOpen] = useState(false);
-  if (!trace) return <p className="font-mono text-xs text-graphite/60">This answer&apos;s trace has expired (traces are kept for 14 days).</p>;
+  if (!trace) return <p className="font-mono text-xs text-graphite/70">This answer&apos;s trace has expired (traces are kept for 14 days).</p>;
   return (
     <div className="flex flex-col gap-2">
       <button

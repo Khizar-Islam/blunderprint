@@ -28,13 +28,13 @@ export function HealthStatus() {
         // "DB down" is set apart by weight and an underline instead of colour.
         <p>
           <span className="text-ink">API ok</span>
-          <span className="px-2 text-graphite/50">·</span>
+          <span className="px-2 text-graphite/70">·</span>
           {state.value.db ? (
             <span className="text-ink">DB ok</span>
           ) : (
             <span className="font-semibold text-ink underline decoration-ink/40 underline-offset-2">DB down</span>
           )}
-          <span className="pl-3 text-graphite/50">v{state.value.version}</span>
+          <span className="pl-3 text-graphite/70">v{state.value.version}</span>
         </p>
       )}
 

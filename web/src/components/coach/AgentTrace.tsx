@@ -64,7 +64,7 @@ export function TypedText({ text, animate }: { text: string; animate: boolean })
 // The blinking cursor of a live trace. It sits at the end of the newest line (not on a line of its
 // own below the list, which every new line would push down: a layout shift each time).
 const Cursor = () => (
-  <span className="ml-1 inline-block animate-pulse text-graphite/50 motion-reduce:animate-none" aria-hidden="true">
+  <span className="ml-1 inline-block animate-pulse text-graphite/70 motion-reduce:animate-none" aria-hidden="true">
     ▍
   </span>
 );
@@ -76,10 +76,10 @@ export function TraceLine({ step, animate, cursor = false }: { step: TraceStep; 
     <li
       className={`grid grid-cols-[2rem_1rem_1fr_auto] items-baseline gap-x-2 border-l-2 py-1 pr-1 pl-2 font-mono text-[13px] leading-snug ${
         isSwitch ? "border-inaccuracy bg-inaccuracy/10" : "border-transparent"
-      } ${muted ? "text-graphite/55" : "text-ink"}`}
+      } ${muted ? "text-graphite/70" : "text-ink"}`}
     >
-      <span className="text-right text-graphite/50 tabular-nums">{step.n}.</span>
-      <span className={isSwitch ? "text-inaccuracy" : step.kind === "verify" ? "text-best" : "text-graphite/60"} aria-hidden="true">
+      <span className="text-right text-graphite/70 tabular-nums">{step.n}.</span>
+      <span className={isSwitch ? "text-ink" : step.kind === "verify" ? "text-best-text" : "text-graphite/70"} aria-hidden="true">
         {GLYPH[step.kind]}
       </span>
       <span className="min-w-0">
@@ -91,7 +91,7 @@ export function TraceLine({ step, animate, cursor = false }: { step: TraceStep; 
         </span>
         {cursor && <Cursor />}
       </span>
-      <span className="text-right text-graphite/60 tabular-nums">{step.ms > 0 ? seconds(step.ms) : ""}</span>
+      <span className="text-right text-graphite/70 tabular-nums">{step.ms > 0 ? seconds(step.ms) : ""}</span>
     </li>
   );
 }

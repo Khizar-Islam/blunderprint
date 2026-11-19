@@ -66,7 +66,7 @@ export function AnalysisBar({
       <div className="h-px w-full max-w-md bg-ink/15" aria-hidden="true">
         <div className="bar-x h-px w-full bg-ink" style={{ transform: `scaleX(${fraction})` }} />
       </div>
-      {error && <p className="text-sm text-blunder">{error}</p>}
+      {error && <p className="text-sm text-blunder-text">{error}</p>}
     </div>
   );
 }

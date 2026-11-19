@@ -290,7 +290,7 @@ function AnalysingNotice({ analysis, live, finished }: { analysis: AnalysisView;
           aria-hidden
         />
       )}
-      {analysis.error && <p className="text-sm text-blunder">{analysis.error}</p>}
+      {analysis.error && <p className="text-sm text-blunder-text">{analysis.error}</p>}
     </div>
   );
 }

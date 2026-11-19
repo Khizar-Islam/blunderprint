@@ -47,9 +47,9 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
         </span>
       </figcaption>
 
-      <p className="text-center font-mono text-[11px] tracking-wide text-graphite/60 uppercase">their side</p>
+      <p className="text-center font-mono text-[11px] tracking-wide text-graphite/70 uppercase">their side</p>
       <div className="grid grid-cols-[1rem_1fr] gap-1">
-        <ol className="grid grid-rows-8 text-center font-mono text-[11px] text-graphite/60" aria-hidden="true">
+        <ol className="grid grid-rows-8 text-center font-mono text-[11px] text-graphite/70" aria-hidden="true">
           {labels.ranks.map((r) => (
             <li key={r} className="flex items-center justify-center">
               {r}
@@ -89,13 +89,13 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
           })}
         </div>
         <span />
-        <ol className="grid grid-cols-8 text-center font-mono text-[11px] text-graphite/60" aria-hidden="true">
+        <ol className="grid grid-cols-8 text-center font-mono text-[11px] text-graphite/70" aria-hidden="true">
           {labels.files.map((f) => (
             <li key={f}>{f}</li>
           ))}
         </ol>
       </div>
-      <p className="text-center font-mono text-[11px] tracking-wide text-graphite/60 uppercase">your side</p>
+      <p className="text-center font-mono text-[11px] tracking-wide text-graphite/70 uppercase">your side</p>
 
       {/* Two lines held (min-h-8): a long square description wraps, and a one-line height made the
           legend below jump 12 px as the pointer moved between squares. */}
@@ -111,7 +111,7 @@ export function HeatBoard({ squares, mode }: { squares: Summary["squares"]; mode
           />
           darker = more costly errors
         </span>
-        <span className="text-graphite/60">A blunder counts 3, a mistake 2, an inaccuracy 1.</span>
+        <span className="text-graphite/70">A blunder counts 3, a mistake 2, an inaccuracy 1.</span>
       </div>
     </figure>
   );

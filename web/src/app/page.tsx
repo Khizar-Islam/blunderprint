@@ -42,7 +42,7 @@ export default function Home() {
             <Link href={base} className={DEMO_LINK}>
               Open this Blunderprint
             </Link>
-            <span aria-hidden="true" className="text-graphite/50">
+            <span aria-hidden="true" className="text-graphite/70">
               ·
             </span>
             <Link href={`${base}/coach`} className={DEMO_LINK}>

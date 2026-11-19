@@ -213,10 +213,10 @@ function HowMade({ runId, open, onToggle }: { runId: string; open: boolean; onTo
 
 function FinishedTrace({ runId }: { runId: string }) {
   const request = useWakingRequest((signal) => fetchFinishedRun(runId, signal));
-  if (request.state.kind === "loading") return <p className="font-mono text-xs text-graphite/60">Loading the trace…</p>;
-  if (request.state.kind === "error") return <p className="font-mono text-xs text-graphite/60">Couldn&apos;t load the trace.</p>;
+  if (request.state.kind === "loading") return <p className="font-mono text-xs text-graphite/70">Loading the trace…</p>;
+  if (request.state.kind === "error") return <p className="font-mono text-xs text-graphite/70">Couldn&apos;t load the trace.</p>;
   const run = request.state.value;
-  if (!run) return <p className="font-mono text-xs text-graphite/60">This trace has expired (traces are kept for 14 days).</p>;
+  if (!run) return <p className="font-mono text-xs text-graphite/70">This trace has expired (traces are kept for 14 days).</p>;
   return (
     <>
       <p className="font-mono text-xs text-graphite/70">{traceSummary(run, run.report?.patterns.length ?? null)}</p>

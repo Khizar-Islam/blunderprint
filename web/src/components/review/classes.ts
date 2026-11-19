@@ -15,12 +15,16 @@ export const LABEL: Record<MoveClass, string> = {
 export const isError = (c: MoveClass | undefined): c is "inaccuracy" | "mistake" | "blunder" =>
   c === "inaccuracy" || c === "mistake" || c === "blunder";
 
-// Tailwind text classes (the @theme tokens in globals.css).
+// Tailwind classes for a classification's WORDS (a move's name, its glyph, "blunder"): the darker
+// text-only tones from globals.css, readable on bone (WCAG AA). Amber can't be darkened that far
+// and still read as amber, so an inaccuracy is ink behind an amber tick. For text on bone or
+// a stone tint only, never on ink.
 export const TEXT: Partial<Record<MoveClass, string>> = {
-  inaccuracy: "text-inaccuracy",
-  mistake: "text-mistake",
-  blunder: "text-blunder",
+  inaccuracy: "text-ink tick-inaccuracy",
+  mistake: "text-mistake-text",
+  blunder: "text-blunder-text",
 };
+export const BEST_TEXT = "text-best-text";
 
 // Hex values for places CSS variables can't reach (SVG attributes in react-chessboard's arrows).
 // Keep in sync with globals.css.

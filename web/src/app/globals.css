@@ -36,6 +36,13 @@ body {
   outline-offset: 2px;
 }
 
+/* The same ring drawn inside the element, for a box that clips what is painted outside it (a
+   games list row: content-visibility). A plain rule, because the rule above would win over a
+   Tailwind utility (utilities sit in a lower cascade layer). */
+.focus-inset:focus-visible {
+  outline-offset: -2px;
+}
+
 /* A small outlined button (Retry, Load more). Hover fills it; press shrinks it slightly. */
 @utility btn-quiet {
   border-radius: 0.25rem;

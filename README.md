@@ -288,7 +288,7 @@ In `web/.env.local`, set `NEXT_PUBLIC_API_URL=http://localhost:5000`.
 
 ```
 cd backend && npm run typecheck && npm test                    645 tests
-cd web && npm run typecheck && npm run lint && npm test        257 tests
+cd web && npm run typecheck && npm run lint && npm test        263 tests
 ```
 
 All passing on 18 Nov 2026. Line coverage of the source files the tests load (test files not counted; Node's built-in coverage): backend 99.2%, web 95.6%. The React components and hooks are not loaded by these tests; the browser checks below cover them. GitHub Actions runs the same commands on every push and pull request to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); no job needs a secret. Its first red runs were timing races in the tests themselves (a test read a job before the worker had marked it finished), found by reading the failed logs and fixed. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.

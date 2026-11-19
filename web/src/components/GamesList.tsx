@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useState } from "react";
+import { memo, useDeferredValue, useState } from "react";
 import type { LiveGame } from "@/engine/useAnalysis";
 import type { GameRow, Platform } from "@/lib/api";
+import { urgentRowCount } from "@/lib/firstRows";
 import { formatTimeControl, fullDate, relativeTime } from "@/lib/format";
 import { classifiedRibbon, progressRibbon } from "@/lib/ribbon";
 
@@ -35,10 +36,16 @@ export function GamesList({
     setNewOrder(order);
   }
 
+  // A list that has just arrived renders its first rows now and the rest in a later render that
+  // React can interrupt (lib/firstRows.ts), so 200 rows are never one long frame.
+  const drawn = useDeferredValue(games);
+  const count = urgentRowCount(games.length, drawn.length, drawn === games);
+  const rows = count === games.length ? games : games.slice(0, count);
+
   if (games.length === 0) return null;
   return (
     <ol className="flex flex-col border-t border-ink/10" aria-label="Games, newest first">
-      {games.map((game) => (
+      {rows.map((game) => (
         <Row
           key={game.id}
           game={game}
@@ -131,13 +138,23 @@ const Row = memo(function Row({
   return (
     // A CSS animation (anim-rise) runs once, when a row mounts, so rows already on screen never
     // re-animate; the row's normal style is its final state, so it shows even without frames.
-    <li className="anim-rise border-b border-ink/10 [animation-duration:250ms]" style={{ animationDelay: `${delay}s` }}>
+    // content-visibility: auto lets the browser skip the layout and paint of rows that are off
+    // screen (most of the 200), and contain-intrinsic-size is the height it reserves for a skipped
+    // row's content (its 1 px border comes on top): 74 px on two lines, 56 px on one line from sm
+    // (measured; "auto" then remembers each row's real height once it has been drawn). Skipped rows
+    // stay focusable and findable (Ctrl+F).
+    <li
+      className="anim-rise border-b border-ink/10 [animation-duration:250ms] [contain-intrinsic-size:auto_74px] [content-visibility:auto] sm:[contain-intrinsic-size:auto_56px]"
+      style={{ animationDelay: `${delay}s` }}
+    >
       {/* The whole row opens the game review. prefetch off: Next would prefetch every row that
-          scrolls into view (up to 200), and the review page loads its data in the browser anyway. */}
+          scrolls into view (up to 200), and the review page loads its data in the browser anyway.
+          The focus ring is drawn inside the row (focus-inset): content-visibility clips
+          whatever a row paints outside its own box, and the usual ring sits 2 px outside. */}
       <Link
         href={href}
         prefetch={false}
-        className="block px-1 py-2.5 transition-colors hover:bg-square-light/40 active:bg-square-light/70 sm:px-2"
+        className="block px-1 py-2.5 transition-colors focus-inset hover:bg-square-light/40 active:bg-square-light/70 sm:px-2"
       >
         {/* Mobile: two lines. sm and up: one grid row. */}
         <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-0.5 sm:grid-cols-[auto_minmax(0,1.7fr)_4.5rem_minmax(0,1.3fr)_6rem]">

@@ -3,9 +3,9 @@
 //   local: npm run build && npx next start -p 3000 (with the API it points at awake)
 //   live:  node scripts/ui-csp.mjs https://blunderprint.vercel.app --engine lichess/EricRosen
 //
-// Does the site break its own Content-Security-Policy (src/lib/securityHeaders.ts)? Run it while
-// the policy is Report-Only (nothing is blocked, violations are only reported) and again after
-// it is enforced. It:
+// Does the site break its own Content-Security-Policy (src/lib/securityHeaders.ts)? The policy
+// is enforced, so a violation here is something the browser BLOCKED. (It works the same on a
+// Report-Only policy, where violations are reported and nothing is blocked.) It:
 //   1. reads the security headers of a page and of the engine's worker script;
 //   2. visits the landing page, dashboard, game review and coach page of the demo player and a
 //      404, scrolling each to the bottom;

@@ -31,8 +31,13 @@ describe("contentSecurityPolicy", () => {
       policy,
       "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://blunderprint-api.onrender.com; " +
-        "worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+        "worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; " +
+        "upgrade-insecure-requests",
     );
+  });
+  test("http requests are upgraded in production, not in development (localhost is plain http)", () => {
+    assert.ok(policy.split("; ").includes("upgrade-insecure-requests"));
+    assert.ok(!contentSecurityPolicy("http://localhost:5000", true).includes("upgrade-insecure-requests"));
   });
   test("the page may connect to itself and the API, nowhere else", () => {
     assert.equal(directive(policy, "connect-src"), `'self' ${API}`);
@@ -53,14 +58,14 @@ describe("contentSecurityPolicy", () => {
 describe("securityHeaders", () => {
   const headers = securityHeaders(API, false);
   const value = (key: string) => headers.find((h) => h.key === key)?.value;
-  test("four headers are enforced", () => {
+  test("the four fixed headers", () => {
     assert.equal(value("X-Content-Type-Options"), "nosniff");
     assert.equal(value("Referrer-Policy"), "strict-origin-when-cross-origin");
     assert.equal(value("X-Frame-Options"), "DENY");
     assert.equal(value("Permissions-Policy"), "camera=(), microphone=(), geolocation=()");
   });
-  test("the CSP is report-only: nothing is blocked yet", () => {
-    assert.equal(value("Content-Security-Policy-Report-Only"), contentSecurityPolicy(API, false));
-    assert.equal(value("Content-Security-Policy"), undefined);
+  test("the CSP is enforced, not report-only", () => {
+    assert.equal(value("Content-Security-Policy"), contentSecurityPolicy(API, false));
+    assert.equal(value("Content-Security-Policy-Report-Only"), undefined);
   });
 });

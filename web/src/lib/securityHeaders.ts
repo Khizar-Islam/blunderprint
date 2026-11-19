@@ -1,10 +1,11 @@
 // The security headers every response of the site carries (next.config.ts `headers()`).
 //
-// Four are enforced: no MIME sniffing, a short referrer, no framing, and no camera, microphone
-// or location. The Content-Security-Policy (CSP: a list, per kind of resource, of where the page
-// may load it from) is sent as Content-Security-Policy-REPORT-ONLY for now: the browser reports
-// a violation in its console but blocks nothing. It becomes enforcing once the live site has run
-// with no violations (scripts/ui-csp.mjs).
+// No MIME sniffing, a short referrer, no framing, no camera, microphone or location, and the
+// Content-Security-Policy (CSP: a list, per kind of resource, of where the page may load it
+// from). The CSP is ENFORCED: the browser blocks what the policy doesn't allow. It ran as
+// Content-Security-Policy-Report-Only first (reports, blocks nothing) until the live site showed
+// no violations (scripts/ui-csp.mjs); run that script again after any change to the policy or
+// to what the pages load.
 //
 // What the policy does and does not do:
 // - connect-src pins where the page can send data: itself and the API (fetch, the SSE streams,
@@ -19,6 +20,8 @@
 //   policy that arrives with its own script.
 // - style-src keeps 'unsafe-inline': React and motion write inline style attributes.
 // - Fonts are self-hosted by next/font, so font-src is 'self'.
+// - upgrade-insecure-requests (production only): any http:// request the page makes is sent as
+//   https:// instead. Not in development, where the site and the API are plain http on localhost.
 
 export interface Header {
   key: string;
@@ -52,8 +55,9 @@ export function contentSecurityPolicy(apiUrl: string | undefined, dev: boolean):
     ["base-uri", ["'self'"]],
     ["form-action", ["'self'"]],
     ["frame-ancestors", ["'none'"]],
+    ...(dev ? [] : [["upgrade-insecure-requests", []] as [string, string[]]]),
   ];
-  return directives.map(([name, sources]) => `${name} ${sources.join(" ")}`).join("; ");
+  return directives.map(([name, sources]) => [name, ...sources].join(" ")).join("; ");
 }
 
 export function securityHeaders(apiUrl: string | undefined, dev: boolean): Header[] {
@@ -62,6 +66,6 @@ export function securityHeaders(apiUrl: string | undefined, dev: boolean): Heade
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
     { key: "X-Frame-Options", value: "DENY" },
     { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-    { key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy(apiUrl, dev) },
+    { key: "Content-Security-Policy", value: contentSecurityPolicy(apiUrl, dev) },
   ];
 }

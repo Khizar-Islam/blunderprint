@@ -107,6 +107,12 @@ export const PAGES = [
   // a scripted answer first (free too). The click is a plain JS click (not "user input" for CLS):
   // ui-cls.mjs's "ask" scenario clicks with real mouse events instead.
   { name: "coach-ask", path: `/p/lichess/${demo.username}/coach`, ready: ASK_READY },
+  // The 404 page (Stage 8): any address the app doesn't have.
+  { name: "not-found", path: "/no-such-page", ready: `!!document.querySelector('[role=status]') && /exist/.test(document.body.innerText)` },
+  // The error page (Stage 8) only shows when a page throws, which no real page does. To check it,
+  // add a page that throws for the length of the check (never commit it), build, and name its path:
+  //   set UI_ERROR_PAGE=/dev/boom&& node scripts/ui-audit.mjs error
+  ...(process.env.UI_ERROR_PAGE ? [{ name: "error", path: process.env.UI_ERROR_PAGE, ready: `!!document.querySelector('[role=status]') && /Try again/.test(document.body.innerText)` }] : []),
 ];
 
 // Scrolls to the bottom in steps (so every scroll-triggered reveal fires), then back to the top.

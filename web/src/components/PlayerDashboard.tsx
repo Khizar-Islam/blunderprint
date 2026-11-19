@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchGames, fetchPlayer, isValidUsername, PLATFORM_NAMES, type GameRow, type Platform, type Player } from "@/lib/api";
 import { isImportRefusal, startDashboard, type Start } from "@/lib/dashboardStart";
@@ -15,6 +14,7 @@ import { CoachButton } from "./coach/CoachButton";
 import { AnalysisBar } from "./AnalysisBar";
 import { GamesList } from "./GamesList";
 import { ImportProgress } from "./ImportProgress";
+import { Notice, SEARCH_LINK } from "./Notice";
 import { PatternsDashboard } from "./patterns/PatternsDashboard";
 
 type Props = { platform: Platform; username: string };
@@ -151,7 +151,7 @@ function Dashboard({ platform, username }: Props) {
           {error.message}
         </Notice>
       ) : (
-        <Notice title="Can't import this player right now" link>
+        <Notice title="Can't import this player right now" link={SEARCH_LINK}>
           {error.message}
         </Notice>
       );
@@ -162,7 +162,7 @@ function Dashboard({ platform, username }: Props) {
   if (job?.status === "failed") {
     if (job.error?.code === "user_not_found") {
       return (
-        <Notice title="Player not found" link>
+        <Notice title="Player not found" link={SEARCH_LINK}>
           {job.error.message}
         </Notice>
       );
@@ -261,34 +261,5 @@ function Status({ children }: { children: React.ReactNode }) {
     <p className="font-mono text-sm text-graphite/70" role="status" aria-live="polite">
       {children}
     </p>
-  );
-}
-
-function Notice({
-  title,
-  children,
-  action,
-  link,
-}: {
-  title: string;
-  children: React.ReactNode;
-  action?: { label: string; onClick: () => void };
-  link?: boolean;
-}) {
-  return (
-    <div className="flex flex-col items-start gap-2 border-l-2 border-ink/30 py-1 pl-4" role="status">
-      <p className="font-display text-xl text-ink">{title}</p>
-      <p className="text-sm text-graphite">{children}</p>
-      {action && (
-        <button type="button" className="btn-quiet mt-1 text-sm" onClick={action.onClick}>
-          {action.label}
-        </button>
-      )}
-      {link && (
-        <Link href="/" className="btn-quiet mt-1 text-sm">
-          Search another player
-        </Link>
-      )}
-    </div>
   );
 }

@@ -106,7 +106,7 @@ console.log(`\n${selftest ? "SELF-TEST (violations are expected below)" : "Check
 await page.viewport(1280, 900);
 try {
   const breakIt = () => page.evaluate(`fetch('http://127.0.0.1:9/csp-selftest').catch(() => {})`);
-  for (const p of PAGES.filter((q) => q.name !== "coach-ask" && (!selftest || q.name === "landing"))) await visit(p.name, base + p.path, p.ready, selftest ? breakIt : undefined);
+  for (const p of PAGES.filter((q) => q.name !== "coach-ask" && q.name !== "error" && (!selftest || q.name === "landing"))) await visit(p.name, base + p.path, p.ready, selftest ? breakIt : undefined);
 
   if (!selftest) {
     // One pre-answered chip: its answer comes from the cache with no AI call.
@@ -117,7 +117,6 @@ try {
       await waitFor(page, `!!document.querySelector('article[data-answer]')`, 60_000, "the cached answer");
       console.log(`             clicked "${clicked.slice(0, 60)}"`);
     });
-    await visit("404", base + "/no-such-page", `document.readyState === 'complete'`);
   }
 
   if (engine) {

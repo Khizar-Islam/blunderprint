@@ -35,13 +35,15 @@ export async function launch(port = 9333) {
       pending.delete(msg.id);
       if (msg.error) reject(new Error(msg.error.message));
       else resolve(msg.result);
-    } else if (msg.method) (listeners.get(msg.method) ?? []).forEach((f) => f(msg.params));
+    } else if (msg.method) (listeners.get(msg.method) ?? []).forEach((f) => f(msg.params, msg.sessionId));
   });
-  const send = (method, params = {}) =>
+  // sessionId: a target attached with Target.setAutoAttach (a worker), for ui-csp.mjs; a listener
+  // gets the sender's sessionId as its second argument (undefined for the page itself).
+  const send = (method, params = {}, sessionId) =>
     new Promise((resolve, reject) => {
       const n = ++id;
       pending.set(n, { resolve, reject });
-      ws.send(JSON.stringify({ id: n, method, params }));
+      ws.send(JSON.stringify({ id: n, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
   const on = (method, f) => listeners.set(method, [...(listeners.get(method) ?? []), f]);
   const evaluate = async (expression) => {

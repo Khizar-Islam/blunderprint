@@ -17,7 +17,7 @@ The API runs on a free tier that sleeps after 15 minutes, so the first request c
 - [What it does](#what-it-does)
 - [Architecture](#architecture)
 - [Tech stack](#tech-stack)
-- [How it works](#how-it-works): [import and the job queue](#1-import-and-the-job-queue) · [the engine](#2-the-engine-runs-in-your-browser) · [patterns](#3-patterns-one-aggregation-pipeline) · [the coach agent](#4-the-coach-agent) · [ask the coach](#5-ask-the-coach) · [limits and budgets](#6-limits-budgets-and-the-kill-switch)
+- [How it works](#how-it-works): [import and the job queue](#1-import-and-the-job-queue) · [the engine](#2-the-engine-runs-in-your-browser) · [patterns](#3-patterns-one-aggregation-pipeline) · [the coach agent](#4-the-coach-agent) · [ask the coach](#5-ask-the-coach) · [limits and budgets](#6-limits-budgets-and-the-kill-switch) · [security headers](#7-security-headers)
 - [Measured numbers](#measured-numbers)
 - [Run it locally](#run-it-locally)
 - [Tests and checks](#tests-and-checks)
@@ -178,6 +178,30 @@ The site has no sign-in, so everything is limited per visitor and globally.
 
 `npm run ops:status` gives one read-only look at the live system: today's AI budget, storage against the gate, the queue, failed jobs and runs, and whether anything needs attention.
 
+### 7. Security headers
+
+Every response of the site (pages, static files and the engine's worker script) carries the same headers, built by one tested function ([`web/src/lib/securityHeaders.ts`](web/src/lib/securityHeaders.ts)).
+
+| Header | Value | What it does |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | the browser never guesses a file's type |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | other sites only learn the site's address, never the page |
+| `X-Frame-Options` | `DENY` | no other site can show the app inside a frame |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | the page can't ask for any of them |
+| `Content-Security-Policy-Report-Only` | below | a list of where each kind of resource may come from |
+
+```
+default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://blunderprint-api.onrender.com;
+worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+- **Report-Only for now.** The browser reports a violation but blocks nothing. The policy is switched to enforcing only after the live site has run with it and no violation was reported.
+- **What it blocks (once enforced):** the page connecting anywhere but itself and the API (`connect-src`: fetch, the live streams, `sendBeacon`), scripts, styles, fonts and workers loaded from any other site, plugins, a changed `<base>`, forms posting elsewhere, and other sites framing the app.
+- **What it does not block:** an injected INLINE script. `script-src` keeps `'unsafe-inline'`, because Next.js puts small inline scripts into every page and the alternative (a fresh nonce per request) would make every page server-rendered on each visit, including the landing page that is served as a static file today. So this is not a full defence against cross-site scripting. What limits that risk is the app itself: it never renders HTML from a visitor, a chess platform or the AI (no `dangerouslySetInnerHTML`), only text. `style-src` keeps `'unsafe-inline'` too, for the inline `style` attributes React and the animation library write.
+- **`'wasm-unsafe-eval'`** lets the Stockfish worker compile its WebAssembly, and nothing else: `eval` stays forbidden. A worker follows the policy that arrives with its own script, which is why `/engine/*` gets the same headers.
+- **Checked by a script, not by eye:** `node scripts/ui-csp.mjs <site> --engine <platform>/<username>` visits every page in headless Chrome, clicks one pre-answered question, runs one real engine analysis, and collects violations from the page's `securitypolicyviolation` events and from the consoles of the page and its workers. Its `--selftest` mode makes one real violation on the page and one in the worker and fails unless it sees both.
+
 ## Measured numbers
 
 All measured on the real thing: my laptop (8 GB RAM), Render's free tier and Atlas M0.
@@ -288,7 +312,7 @@ In `web/.env.local`, set `NEXT_PUBLIC_API_URL=http://localhost:5000`.
 
 ```
 cd backend && npm run typecheck && npm test                    645 tests
-cd web && npm run typecheck && npm run lint && npm test        263 tests
+cd web && npm run typecheck && npm run lint && npm test        271 tests
 ```
 
 All passing on 18 Nov 2026. Line coverage of the source files the tests load (test files not counted; Node's built-in coverage): backend 99.2%, web 95.6%. The React components and hooks are not loaded by these tests; the browser checks below cover them. GitHub Actions runs the same commands on every push and pull request to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); no job needs a secret. Its first red runs were timing races in the tests themselves (a test read a job before the worker had marked it finished), found by reading the failed logs and fixed. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.

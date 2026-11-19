@@ -20,9 +20,25 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// The site's own address: link previews need an absolute URL for the picture (og:image), and metadataBase
+// is what Next resolves it against. If the site moves, change it here. No og:url on purpose: it
+// would name the home page on every page, and some sites then link a shared player page there.
+const SITE_URL = "https://blunderprint.vercel.app";
+const DESCRIPTION = "Find the recurring mistakes in your Chess.com or Lichess games.";
+
+// The preview picture itself is app/opengraph-image.png (+ .alt.txt): Next adds its og:image and
+// twitter:image tags by the file's name. It is made by `npm run og:image`.
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Blunderprint",
-  description: "Find the recurring mistakes in your Chess.com or Lichess games.",
+  description: DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: "Blunderprint",
+    title: "Blunderprint: your mistakes leave a print",
+    description: DESCRIPTION,
+  },
+  twitter: { card: "summary_large_image" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

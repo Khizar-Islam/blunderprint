@@ -11,7 +11,8 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "snapshot:demo": "node scripts/snapshot-demo.mjs"
+    "snapshot:demo": "node scripts/snapshot-demo.mjs",
+    "og:image": "node --import tsx scripts/og-image.mjs"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

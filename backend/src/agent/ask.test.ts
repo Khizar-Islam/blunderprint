@@ -23,6 +23,7 @@ import { runTask, type AgentLimits } from "./loop.js";
 import type { ModelRequest } from "./model.js";
 import { createPacer } from "./pacer.js";
 import { createScriptedModel } from "./scriptedModel.js";
+import type { FilledSlot } from "./slots.js";
 import { runTool } from "./tools/index.js";
 import type { ToolLog } from "./verifier.js";
 
@@ -136,7 +137,7 @@ describe("verifyAnswer", () => {
           "You make {{b}} here.",
           "Your rate is {{c}}.",
         ],
-        slots: [SLOT_A, { name: "c", step: 2, path: "examples[0].ply" }],
+        slots: [SLOT_A, { name: "c", step: 2, path: "rankScore" }],
         evidenceStep: 2,
         evidence: examples.slice(0, 1),
       }),
@@ -151,7 +152,7 @@ describe("verifyAnswer", () => {
     assert.match(text, /sentence 4 contains a link/);
     assert.match(text, /sentence 5 uses markdown/);
     assert.match(text, /sentence 6 uses \{\{b\}\}, but no slot of that name was given/);
-    assert.match(text, /sentence 7: slot \{\{c\}\} \(step 2\): the field "ply" can't be shown/);
+    assert.match(text, /sentence 7: slot \{\{c\}\} \(step 2\): path "rankScore" doesn't exist in that result/);
   });
 
   it("evidence: only this run's examples, only this player's games, at most 3", async () => {
@@ -454,5 +455,66 @@ describe("field names and intensity before an error kind in an answer (ask promp
     ]);
     const final = await verifyAnswer(ctx, d, log, { final: true });
     assert.deepEqual(final.output.sentences, ["Overall you make {{a}}."]);
+  });
+});
+
+describe("a slot at an example's ply; a score slot (no prompt change)", () => {
+  it("'on move {{c}}' with c = examples[0].ply: no issue, the sentence stays and says the move number; logged in removed", async () => {
+    const { log, examples } = await realLog();
+    const d = draft({
+      sentences: ["Overall you make {{a}}.", "The clearest case came on move {{c}}, where you gave up {{d}}."],
+      slots: [SLOT_A, { name: "c", step: 2, path: "examples[0].ply" }, { name: "d", step: 2, path: "examples[0].winPctLost" }],
+    });
+    const first = await verifyAnswer(ctx, d, log, { final: false });
+    assert.deepEqual(first.issues, []);
+    const { output } = await verifyAnswer(ctx, d, log, { final: true });
+    assert.equal(output.outcome, "answer");
+    assert.deepEqual(output.sentences, ["Overall you make {{a}}.", "The clearest case came on {{c}}, where you gave up {{d}}."]);
+    const c = (output.slots as Record<string, FilledSlot>).c!;
+    assert.deepEqual([c.text, c.kind, c.path], [`move ${Math.ceil(examples[0]!.ply / 2)}`, "moveNumber", "examples[0].moveNumber"]);
+    assert.deepEqual(output.removed, ["doubled noun before {{c}}", "slot {{c}}: ply shown as its move number"]);
+    // The position the slots talk about is cited by code (autoCite), as before.
+    assert.ok(output.evidence.some((e) => e.gameId === examples[0]!.gameId && e.ply === examples[0]!.ply));
+  });
+
+  it("a ply slot and a moveNumber slot for the same example are one number under two names", async () => {
+    const { log } = await realLog();
+    const { issues } = await verifyAnswer(
+      ctx,
+      draft({
+        sentences: ["It came on {{c}}.", "That was {{e}}."],
+        slots: [{ name: "c", step: 2, path: "examples[0].ply" }, { name: "e", step: 2, path: "examples[0].moveNumber" }],
+      }),
+      log,
+      { final: false },
+    );
+    assert.match(issues.join("\n"), /slots \{\{c\}\} and \{\{e\}\} point at the same number \(step 2, examples\[0\]\.moveNumber\)/);
+  });
+
+  it("a note for a slot whose sentence was removed isn't logged", async () => {
+    const { log } = await realLog();
+    const { output } = await verifyAnswer(
+      ctx,
+      draft({ sentences: ["Overall you make {{a}}.", "It came on {{c}} and cost 12 points."], slots: [SLOT_A, { name: "c", step: 2, path: "examples[0].ply" }] }),
+      log,
+      { final: true },
+    );
+    assert.deepEqual(output.sentences, ["Overall you make {{a}}."]);
+    assert.ok(!output.removed.some((r) => r.includes("ply shown")));
+  });
+
+  it("'You win {{a}} with White' reads as a share of the points", async () => {
+    const { log, profile } = await realLog();
+    const white = (profile.byColor as { white: { scorePct: number } }).white.scorePct;
+    const { issues, output } = await verifyAnswer(
+      ctx,
+      draft({ sentences: ["You win {{a}} with White."], slots: [{ name: "a", step: 1, path: "byColor.white.scorePct" }] }),
+      new Map([...log].filter(([step]) => step === 1)),
+      { final: true },
+    );
+    assert.deepEqual(issues, []);
+    const a = (output.slots as Record<string, FilledSlot>).a!;
+    assert.equal(a.kind, "score");
+    assert.equal(a.text, `${String(Math.round(white * 10) / 10)}% of the points`);
   });
 });

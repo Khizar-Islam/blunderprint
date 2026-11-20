@@ -2,6 +2,11 @@
 // chip is answered at once from the cache, with no AI call. Run from backend/ (Windows cmd):
 //   set DEMO_PLAYERS=lichess:DrNykterstein&& npm run demo:answers
 //   (or name the player: npm run demo:answers -- lichess DrNykterstein; it must be in DEMO_PLAYERS)
+//   npm run demo:answers -- --force     answers ALL the chips again, also the ones with a current
+//                                       answer, and replaces those answers (after a change to how
+//                                       answers are checked or worded that didn't bump the prompt
+//                                       version). Prints each answer it replaced. Demo players only,
+//                                       like the rest of this script.
 //
 // Uses the REAL model, the live database from backend/.env and the shared daily budget: up to
 // ASK_MAX_REQUESTS (10) requests per question that isn't answered yet; already answered ones are
@@ -33,7 +38,11 @@ function fail(message: string): never {
 }
 
 const env = loadEnv();
-const [argPlatform, argUser] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const force = args.includes("--force");
+const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--force");
+if (unknownFlag) fail(`Unknown option ${unknownFlag}. usage: npm run demo:answers [-- [--force] [<lichess|chesscom> <username>]]`);
+const [argPlatform, argUser] = args.filter((a) => !a.startsWith("-"));
 let key: string;
 if (argPlatform || argUser) {
   if (!argPlatform || !argUser || !PLATFORMS.includes(argPlatform as Platform)) fail("usage: npm run demo:answers [-- <lichess|chesscom> <username>]");
@@ -63,11 +72,11 @@ try {
   if (!report) throw new Error("The player has no current coach report for this model and prompt: refresh it first.");
 
   const suggestions = await suggestionsFor(player._id, basis.hash, coach.modelName);
-  const toAsk = suggestions.filter((s) => !s.answered).length;
+  const toAsk = force ? suggestions.length : suggestions.filter((s) => !s.answered).length;
   const before = await coach.budget.remaining();
   const needed = toAsk * coach.askLimits.maxRequests;
-  console.log(`demo:answers ${player.platform}:${player.username}  model ${coach.modelName}  ${basis.analysed} analysed games`);
-  for (const s of suggestions) console.log(`  ${s.answered ? "answered " : "to ask   "} ${s.question}`);
+  console.log(`demo:answers${force ? " --force" : ""} ${player.platform}:${player.username}  model ${coach.modelName}  ${basis.analysed} analysed games`);
+  for (const s of suggestions) console.log(`  ${force ? (s.answered ? "to replace" : "to ask    ") : s.answered ? "answered " : "to ask   "} ${s.question}`);
   console.log(`budget left today: ${before}; worst case for ${toAsk} question(s): ${needed}\n`);
   if (before < needed) throw new Error(`Not enough budget left today (${before} < ${needed}).`);
 
@@ -76,6 +85,7 @@ try {
     coach,
     playerId: player._id,
     questions: SUGGESTED_QUESTIONS,
+    force,
     onRunStarted: (q, runId) => console.log(`started: ${JSON.stringify(q)} (run ${runId})`),
   });
 
@@ -87,6 +97,11 @@ try {
   for (const r of results) {
     console.log(`${r.status.padEnd(10)} ${r.question}${r.ownJob === false ? "  (joined a visitor's run of the same question)" : ""}`);
     if (r.error) console.log(`           shown to visitors: [${r.error.code}] ${r.error.message}`);
+    if (r.previous) {
+      console.log(`           ${r.status === "done" ? "replaced" : "NOT replaced, still stored"} (answer ${r.previous.answerId}, run ${r.previous.runId}):`);
+      for (const s of r.previous.sentences) console.log(`             - ${s}`);
+      if (r.status === "done") console.log("           now:");
+    }
     if (!r.answerId) continue;
     const a = await Answer.findById(r.answerId).lean();
     if (!a) continue;
@@ -96,6 +111,8 @@ try {
     }
     const slots = (a.slots ?? {}) as Record<string, { text: string }>;
     for (const s of a.sentences) console.log(`           ${s.replace(/\{\{(\w+)\}\}/g, (_, n: string) => `[${slots[n]?.text ?? "?"}]`)}`);
+    for (const e of a.evidence) console.log(`           cites move ${e.moveNumber}: ${e.played} (better ${e.betterMove ?? "?"}), ${e.winPctLost} win-chance points`);
+    if (a.removed?.length) console.log(`           changed or removed by code: ${a.removed.join("; ")}`);
     console.log(`           ${a.evidence.length} evidence position(s); expiresAt ${a.expiresAt ? "SET (not kept!)" : "none (kept)"}`);
     if (a.expiresAt || r.status === "unfinished") exitCode = 1;
   }

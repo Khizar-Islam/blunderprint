@@ -45,7 +45,7 @@ describe("resolvePath: which fields may be shown", () => {
   it("by field name", () => {
     assert.equal(kindOf("games"), "count");
     assert.equal(kindOf("results.win"), "count");
-    assert.equal(kindOf("results.scorePct"), "percent");
+    assert.equal(kindOf("results.scorePct"), "score");
     assert.equal(kindOf("errors.per100Moves"), "per100");
     assert.equal(kindOf("errors.blunderPer100"), "per100");
     assert.equal(kindOf("errors.perGame"), "perGame");
@@ -60,7 +60,9 @@ describe("resolvePath: which fields may be shown", () => {
   it("a candidate's value and baseline take the candidate's unit", () => {
     assert.equal(kindOf("candidates[0].value"), "per100");
     assert.equal(kindOf("candidates[0].baseline"), "per100");
-    assert.equal(kindOf("candidates[1].value"), "percent");
+    // A score candidate is a score on both sides, not a bare percentage.
+    assert.equal(kindOf("candidates[1].value"), "score");
+    assert.equal(kindOf("candidates[1].baseline"), "score");
     assert.equal(kindOf("candidates[2].baseline"), "perGame");
     assert.equal(kindOf("candidates[0].gapPct"), "percent");
   });
@@ -94,6 +96,8 @@ describe("formatSlot: every kind decides its rounding and unit", () => {
     ["percent", 54.2374, "54.2%"],
     ["percent", 31, "31%"],
     ["percent", 0.2374, "0.2%"],
+    ["score", 72.24, "72.2% of the points"],
+    ["score", 50, "50% of the points"],
     ["share", 88.19, "88.2% of your errors"],
     ["per100", 7.9124, "7.9 errors per 100 moves"],
     ["per100", 12, "12 errors per 100 moves"],
@@ -346,5 +350,90 @@ describe("dropDoubledNouns: a noun repeated after a slot that already says it", 
       template: "You made {{a}}, {{b}}.",
       dropped: ["doubled noun after {{a}}", "doubled noun after {{b}}"],
     });
+  });
+});
+
+describe("a score says it is a share of the points", () => {
+  const data = {
+    results: { scorePct: 56.25 },
+    byColor: { white: { games: 100, scorePct: 72.2 }, black: { games: 100, scorePct: 78.2 } },
+    bySpeed: [{ speed: "bullet", scorePct: 61 }],
+    openings: [{ eco: "B06", scorePct: 44.44 }],
+    matching: { scorePct: 62.5 },
+    accuracyPct: { white: 93.1, black: 93.1 },
+    candidates: [{ id: "eco=B06|scorePct", measure: "scorePct", unit: "percent", value: 31.2, baseline: 56.3, gapPct: 45 }],
+  };
+  const log: ToolLog = new Map([[1, { ok: true, tool: "t", data }]]);
+  const fill = (path: string) => {
+    const r = fillSlot({ name: "a", step: 1, path }, log);
+    assert.ok(r.ok, path);
+    return r.slot;
+  };
+
+  it("every scorePct field, and a score candidate's value and baseline", () => {
+    for (const [path, text] of [
+      ["results.scorePct", "56.3% of the points"],
+      ["byColor.white.scorePct", "72.2% of the points"],
+      ["byColor.black.scorePct", "78.2% of the points"],
+      ["bySpeed[0].scorePct", "61% of the points"],
+      ["openings[0].scorePct", "44.4% of the points"],
+      ["matching.scorePct", "62.5% of the points"],
+      ["candidates[0].value", "31.2% of the points"],
+      ["candidates[0].baseline", "56.3% of the points"],
+    ] as const) {
+      assert.deepEqual([fill(path).text, fill(path).kind], [text, "score"], path);
+    }
+  });
+
+  it("accuracy and a gap stay bare percentages", () => {
+    assert.deepEqual([fill("accuracyPct.white").text, fill("accuracyPct.white").kind], ["93.1%", "percent"]);
+    assert.deepEqual([fill("candidates[0].gapPct").text, fill("candidates[0].gapPct").kind], ["45%", "percent"]);
+  });
+
+  it("'you win {{a}}' and 'you score {{a}}' both read true; a repeated unit is dropped", () => {
+    const slots = new Map<string, FilledSlot>([["a", fill("byColor.white.scorePct")]]);
+    assert.equal(fillSentence("You win {{a}} with White.", slots), "You win 72.2% of the points with White.");
+    assert.equal(fillSentence("You score {{a}} with White.", slots), "You score 72.2% of the points with White.");
+    assert.deepEqual(unitTail("72.2% of the points"), ["%", "of", "the", "points"]);
+    assert.deepEqual(dropDoubledNouns("With White you take {{a}} of the points.", slots), { template: "With White you take {{a}}.", dropped: ["doubled noun after {{a}}"] });
+    assert.deepEqual(dropDoubledNouns("With White you score {{a}}% in bullet.", slots), { template: "With White you score {{a}} in bullet.", dropped: ["doubled noun after {{a}}"] });
+  });
+});
+
+describe("a slot pointing at an example's ply is read as its move number", () => {
+  const data = {
+    examples: [
+      { gameId: "g1", ply: 117, moveNumber: 59, winPctLost: 60.3, played: "Ke3" },
+      { gameId: "g2", ply: 90, moveNumber: 45 },
+    ],
+    rows: [{ phase: "endgame", ply: 61 }],
+    odd: [{ ply: 12, moveNumber: null }, { ply: 12, moveNumber: "six" }],
+  };
+  const log: ToolLog = new Map([[3, { ok: true, tool: "find_example_mistakes", data }]]);
+
+  it("the text is 'move N', stored under moveNumber, with a note for the log", () => {
+    const r = fillSlot({ name: "c", step: 3, path: "examples[0].ply" }, log);
+    assert.ok(r.ok);
+    assert.deepEqual(r.slot, { text: "move 59", kind: "moveNumber", value: 59, step: 3, path: "examples[0].moveNumber" });
+    assert.equal(r.note, "slot {{c}}: ply shown as its move number");
+    // Black's move: ply 90 is move 45, not 90.
+    const black = fillSlot({ name: "d", step: 3, path: "examples[1].ply" }, log);
+    assert.ok(black.ok);
+    assert.equal(black.slot.text, "move 45");
+  });
+
+  it("a moveNumber slot itself has no note", () => {
+    const r = fillSlot({ name: "c", step: 3, path: "examples[0].moveNumber" }, log);
+    assert.ok(r.ok);
+    assert.equal(r.note, undefined);
+    assert.equal(r.slot.text, "move 59");
+  });
+
+  it("a ply with no move number beside it still can't be shown", () => {
+    for (const path of ["rows[0].ply", "odd[0].ply", "odd[1].ply"]) {
+      const r = fillSlot({ name: "c", step: 3, path }, log);
+      assert.ok(!r.ok, path);
+      assert.match(r.problem, /the field "ply" can't be shown/, path);
+    }
   });
 });

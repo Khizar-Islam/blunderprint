@@ -47,6 +47,9 @@ export interface PreAnswerResult {
   // Whether this call's own worker enqueued the job (false: joined a visitor's run of the same
   // question, which the live server runs).
   ownJob?: boolean;
+  // force only: the answer that was current before this call. With status "done" it was replaced;
+  // otherwise (the run failed or didn't finish) it is still the stored answer.
+  previous?: { answerId: string; runId: string; sentences: string[] };
 }
 
 export interface PreAnswerOptions {
@@ -54,6 +57,10 @@ export interface PreAnswerOptions {
   coach: CoachRuntime;
   playerId: Types.ObjectId;
   questions: readonly string[];
+  // Answer every question again, also one with a current answer, and replace that answer
+  // (demo:answers --force). The old answer stays in place until the new one is saved, so a chip
+  // is never unanswered in between; a failed run leaves it untouched.
+  force?: boolean;
   handlers?: Handlers; // default: the production ask handler for `coach`
   pollMs?: number; // how often the runs are checked in the database
   timeoutMs?: number; // stop waiting after this long (default: each question's run timeout + 1 min)
@@ -66,6 +73,7 @@ export async function preAnswer({
   coach,
   playerId,
   questions,
+  force = false,
   handlers = { ask: createAskHandler(coach) },
   pollMs = 2_000,
   timeoutMs = questions.length * (coach.askLimits.runTimeoutMs + 60_000),
@@ -85,13 +93,21 @@ export async function preAnswer({
       promptVersion: ASK_PROMPT_VERSION,
       model: coach.modelName,
     });
-    if (cached) {
+    if (cached && !force) {
       await keepAnswer(cached._id);
       results.push({ question, status: "cached", runId: String(cached.runId), answerId: String(cached._id) });
       continue;
     }
-    const started = await startAskRun(queue, playerId, coach.modelName, question);
+    const started = await startAskRun(queue, playerId, coach.modelName, question, undefined, { force });
     const result: PreAnswerResult = { question, status: "unfinished", runId: started.runId, ownJob: started.created };
+    if (cached) {
+      const slots = (cached.slots ?? {}) as Record<string, { text?: string }>;
+      result.previous = {
+        answerId: String(cached._id),
+        runId: String(cached.runId),
+        sentences: cached.sentences.map((s) => s.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, n: string) => slots[n]?.text ?? "?")),
+      };
+    }
     if (started.created) {
       const run = await AgentRun.findById(started.runId, { jobId: 1 }).lean();
       if (run?.jobId) ownJobIds.push(run.jobId as Types.ObjectId);

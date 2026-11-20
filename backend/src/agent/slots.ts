@@ -12,14 +12,16 @@ import type { ToolLog } from "./verifier.js";
 // each allowed name maps to a kind, and the kind decides the rounding and the unit text. A field
 // that isn't in the table (a ply, a rank score, a step number) can't be a slot at all.
 
-export type SlotKind = "percent" | "share" | "per100" | "perGame" | "count" | "moveNumber" | "seconds" | "winPoints" | "rating";
+export type SlotKind = "percent" | "score" | "share" | "per100" | "perGame" | "count" | "moveNumber" | "seconds" | "winPoints" | "rating";
 
-export const SLOT_KINDS: readonly SlotKind[] = ["percent", "share", "per100", "perGame", "count", "moveNumber", "seconds", "winPoints", "rating"];
+export const SLOT_KINDS: readonly SlotKind[] = ["percent", "score", "share", "per100", "perGame", "count", "moveNumber", "seconds", "winPoints", "rating"];
 
 // Field name → kind. Field names are the tools' own (agent/tools/*.ts).
 const KIND_BY_KEY: Record<string, SlotKind> = {
+  // A score: the share of the POINTS (a win counts 1, a draw a half), so it says "of the points".
+  // A bare "72.2%" let the model write "you win 72.2%", which a score with draws in it isn't.
+  scorePct: "score",
   // Percentages 0-100 (tools/format.ts pct).
-  scorePct: "percent",
   accuracyPct: "percent",
   gapPct: "percent",
   // Shares of the player's errors, with what they're a share of: "88% of your blunders".
@@ -111,7 +113,8 @@ export function parsePath(path: string): PathPart[] | null {
 }
 
 export type Resolved =
-  | { ok: true; value: number; kind: SlotKind; key: string; noun?: RateNoun }
+  // viaPly: the path ended at an example's `ply` and was read as its moveNumber (see below).
+  | { ok: true; value: number; kind: SlotKind; key: string; noun?: RateNoun; viaPly?: true }
   | { ok: false; problem: string };
 
 // Follows the path through a tool result, own properties only (never "constructor" or
@@ -145,12 +148,20 @@ export function resolvePath(data: unknown, path: string): Resolved {
   if (typeof node !== "number" || !Number.isFinite(node)) return { ok: false, problem: `path "${path}" isn't a number` };
   if (typeof parts.at(-1) !== "string") return { ok: false, problem: `path "${path}" must end at a named field` };
 
+  // The model's habit: "on {{c}}", c = examples[0].ply. A ply is a half-move count no reader
+  // uses, but the same object says which move it is: read as its moveNumber ("move 59"). Certain,
+  // so it isn't a verifier issue (the demo answers of 20 Nov 2026 lost three sentences each to it).
+  if (lastKey === "ply" && parent && typeof parent === "object" && !Array.isArray(parent) && Object.hasOwn(parent, "moveNumber")) {
+    const moveNumber = (parent as Record<string, unknown>).moveNumber;
+    if (typeof moveNumber === "number" && Number.isFinite(moveNumber)) return { ok: true, value: moveNumber, kind: "moveNumber", key: "moveNumber", viaPly: true };
+  }
+
   const key = lastKey!;
   let kind: SlotKind | undefined;
   let noun: RateNoun | undefined;
   if ((key === "value" || key === "baseline") && parent && typeof parent === "object") {
     const p = parent as Record<string, unknown>;
-    kind = KIND_BY_UNIT[String(p.unit)];
+    kind = p.measure === "scorePct" ? "score" : KIND_BY_UNIT[String(p.unit)];
     noun = NOUN_BY_KEY[String(p.measure)];
   } else {
     kind = KIND_BY_KEY[key] ?? (parentKey ? KIND_BY_PARENT[parentKey] : undefined);
@@ -178,6 +189,8 @@ export function formatSlot(value: number, kind: SlotKind, noun?: RateNoun): stri
   switch (kind) {
     case "percent":
       return `${fixed(value, 1)}%`;
+    case "score":
+      return `${fixed(value, 1)}% of the points`;
     case "share":
       return `${fixed(value, 1)}% of your ${noun ?? "errors"}`;
     case "per100":
@@ -209,6 +222,7 @@ export function formatSlot(value: number, kind: SlotKind, noun?: RateNoun): stri
 // "{{a}} per 100 moves per 100 moves").
 export const SLOT_KIND_EXAMPLES: Record<SlotKind, string> = {
   percent: `"54.2%"`,
+  score: `"54.2% of the points"`,
   share: `"88% of your blunders", "96.4% of your errors"`,
   per100: `"7.9 errors per 100 moves", "6.8 blunders per 100 moves"`,
   perGame: `"1.25 errors per game"`,
@@ -235,14 +249,21 @@ export interface SlotRef {
   path: string;
 }
 
-// Resolves one slot against this run's tool log.
-export function fillSlot(slot: SlotRef, log: ToolLog): { ok: true; slot: FilledSlot } | { ok: false; problem: string } {
+// Resolves one slot against this run's tool log. `note`: what code changed on the way (a ply
+// read as its move number), for the answer's `removed` log.
+export function fillSlot(slot: SlotRef, log: ToolLog): { ok: true; slot: FilledSlot; note?: string } | { ok: false; problem: string } {
   const entry = log.get(slot.step);
   if (!entry) return { ok: false, problem: `slot {{${slot.name}}}: step ${slot.step} doesn't exist` };
   if (!entry.ok) return { ok: false, problem: `slot {{${slot.name}}}: step ${slot.step} was a failed ${entry.tool} call` };
   const r = resolvePath(entry.data, slot.path);
   if (!r.ok) return { ok: false, problem: `slot {{${slot.name}}} (step ${slot.step}): ${r.problem}` };
-  return { ok: true, slot: { text: formatSlot(r.value, r.kind, r.noun), kind: r.kind, value: r.value, step: slot.step, path: slot.path } };
+  // A ply read as its move number is stored under the field it really shows.
+  const path = r.viaPly ? slot.path.replace(/ply$/, "moveNumber") : slot.path;
+  return {
+    ok: true,
+    slot: { text: formatSlot(r.value, r.kind, r.noun), kind: r.kind, value: r.value, step: slot.step, path },
+    ...(r.viaPly ? { note: `slot {{${slot.name}}}: ply shown as its move number` } : {}),
+  };
 }
 
 // The placeholders in a sentence: "{{a}} and {{b2}}" → ["a", "b2"].

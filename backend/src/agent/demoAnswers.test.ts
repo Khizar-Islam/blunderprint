@@ -159,3 +159,51 @@ describe("preAnswer (npm run demo:answers)", () => {
     assert.deepEqual(ownJobsFilter([]), { _id: { $in: [] }, type: "ask" });
   });
 });
+
+describe("preAnswer with force (npm run demo:answers -- --force)", () => {
+  it("answers a question again although its answer is current, replaces that answer and reports the old one", async () => {
+    const queue = createQueue();
+    const coach = coachRuntime();
+    const questions = SUGGESTED_QUESTIONS.slice(0, 1);
+    const [first] = await preAnswer({ queue, coach, playerId: demoId, questions, ...fast });
+    assert.equal(first?.status, "done");
+    const old = await Answer.findById(first!.answerId).lean();
+    const runs = await AgentRun.countDocuments();
+
+    const [again] = await preAnswer({ queue, coach, playerId: demoId, questions, force: true, ...fast });
+    assert.equal(again?.status, "done");
+    assert.equal(again?.ownJob, true);
+    // What it replaced: the old answer's id and run, and its sentences as a reader saw them.
+    assert.equal(again?.previous?.answerId, String(old!._id));
+    assert.equal(again?.previous?.runId, String(old!.runId));
+    assert.equal(again?.previous?.sentences.length, old!.sentences.length);
+    for (const s of again!.previous!.sentences) assert.ok(s.length > 0 && !/[{}?]{2}/.test(s), s);
+
+    // A real new run wrote it (the handler didn't serve the cached answer), one answer is stored,
+    // and it and its run are kept.
+    assert.equal(await AgentRun.countDocuments(), runs + 1);
+    assert.notEqual(again?.runId, first?.runId);
+    const answers = await Answer.find({ playerId: demoId }).lean();
+    assert.equal(answers.length, 1);
+    assert.equal(String(answers[0]!.runId), again?.runId);
+    assert.equal(answers[0]!.expiresAt, undefined);
+    const run = await AgentRun.findById(again!.runId).lean();
+    assert.equal(run?.status, "done");
+    assert.equal(run?.expiresAt, undefined);
+    assert.ok((run?.usage?.calls ?? 0) > 0);
+  });
+
+  it("without force the same call is served from the cache; an ordinary ask job never carries force", async () => {
+    const queue = createQueue();
+    const coach = coachRuntime();
+    const questions = SUGGESTED_QUESTIONS.slice(0, 1);
+    await preAnswer({ queue, coach, playerId: demoId, questions, ...fast });
+    const [again] = await preAnswer({ queue, coach, playerId: demoId, questions, ...fast });
+    assert.equal(again?.status, "cached");
+    assert.equal(again?.previous, undefined);
+    const visitor = await startAskRun(queue, demoId, coach.modelName, VISITOR_QUESTION);
+    assert.equal(visitor.created, true);
+    const run = await AgentRun.findById(visitor.runId, { jobId: 1 }).lean();
+    assert.deepEqual(Object.keys((await Job.findById(run!.jobId).lean())!.payload as object).sort(), ["model", "runId"]);
+  });
+});

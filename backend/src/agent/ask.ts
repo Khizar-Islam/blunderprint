@@ -333,6 +333,7 @@ export async function verifyAnswer(ctx: AgentContext, draft: AskDraft, log: Tool
 
   // Slots: a valid, unique name, and a number in this run's results whose field may be shown.
   const filled = new Map<string, FilledSlot>();
+  const slotNotes = new Map<string, string>(); // what code changed in a slot (slots.ts fillSlot)
   const slotProblems = new Map<string, string>();
   for (const s of draft.slots) {
     if (!SLOT_NAME.test(s.name)) {
@@ -358,6 +359,7 @@ export async function verifyAnswer(ctx: AgentContext, draft: AskDraft, log: Tool
       continue;
     }
     filled.set(s.name, r.slot);
+    if (r.note) slotNotes.set(s.name, r.note);
   }
 
   // Moves in this run's examples, for a precise repair hint when a sentence names one whose
@@ -483,6 +485,7 @@ export async function verifyAnswer(ctx: AgentContext, draft: AskDraft, log: Tool
     });
     if (sentences.length === 0) return cannot("no_data", removed);
     const used = new Set(sentences.flatMap(placeholdersIn));
+    for (const [name, note] of slotNotes) if (used.has(name)) removed.push(note);
     return {
       outcome: "answer",
       sentences,

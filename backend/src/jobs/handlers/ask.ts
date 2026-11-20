@@ -29,6 +29,10 @@ import type { JobHandler } from "../worker.js";
 export interface AskPayload {
   runId: string;
   model: string;
+  // Answer again although a current answer is cached, and replace it. Only npm run demo:answers
+  // --force sets it (agent/demoAnswers.ts); POST /ask never does. In the payload, not a handler
+  // option, because the live server's coach lane may claim the script's job first.
+  force?: true;
 }
 
 export const askJobKey = (model: string, playerId: Types.ObjectId | string, qKey: string) => `ask:${model}:${String(playerId)}:${qKey}`;
@@ -44,6 +48,7 @@ export async function startAskRun(
   question: string,
   // What the asker paid with (lib/quota.ts): given back if the run fails for lack of AI credit.
   refundIds?: string[],
+  { force = false }: { force?: boolean } = {},
 ): Promise<{ runId: string; created: true; token: string } | { runId: string; created: false }> {
   const { token, hash } = newRunToken();
   const run = await AgentRun.create({
@@ -56,7 +61,7 @@ export async function startAskRun(
     expiresAt: runExpiresAt(),
     ...(refundIds?.length ? { refundIds } : {}),
   });
-  const payload: AskPayload = { runId: String(run._id), model: modelName };
+  const payload: AskPayload = { runId: String(run._id), model: modelName, ...(force ? { force: true as const } : {}) };
   let enqueued: Awaited<ReturnType<Queue["enqueue"]>>;
   try {
     enqueued = await queue.enqueue({
@@ -109,7 +114,7 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
       const log = { runId: String(runId), jobId: String(job._id), playerId: String(player._id), attempt: job.attempts, kind: "ask" };
 
       const cached = await Answer.findOne({ playerId: player._id, questionKey: qKey, analysedGamesHash: basis.hash, promptVersion: ASK_PROMPT_VERSION, model: coach.modelName });
-      if (cached) {
+      if (cached && (job.payload as AskPayload).force !== true) {
         await runStore.doneAsk(runId, { answerId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 } }, publicAnswerOf(cached));
         logger.info("ask_cached", log);
         return;

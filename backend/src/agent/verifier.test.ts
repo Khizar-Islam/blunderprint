@@ -339,7 +339,8 @@ describe("field names in prose (H1.1)", () => {
     assert.equal(fieldNameAdvice("clockLeftSeconds"), 'write "N seconds left on the clock"');
     assert.match(fieldNameAdvice("clockBucket"), /describe the clock in words/);
     assert.match(fieldNameAdvice("under10"), /describe the clock in words/);
-    assert.equal(fieldNameAdvice("scorePct"), 'write "N%"');
+    assert.equal(fieldNameAdvice("scorePct"), 'write "N% of the points"');
+    assert.equal(fieldNameAdvice("accuracyPct"), 'write "N%"');
     assert.equal(fieldNameAdvice("rankScore"), "say it in plain words");
   });
 

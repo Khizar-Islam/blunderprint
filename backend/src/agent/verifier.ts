@@ -282,6 +282,7 @@ export function fieldNameAdvice(name: string, { slots = false }: { slots?: boole
   if (n === "clockleftseconds") return say(slots ? "12 seconds" : "N seconds left on the clock");
   if (n === "clockbucket" || /^(?:under|over|from)\d/.test(n)) return `describe the clock in words ("short on time", "with plenty of time")`;
   if (n === "movenumber") return say(slots ? "move 23" : "move N");
+  if (n === "scorepct") return say(slots ? "54.2% of the points" : "N% of the points");
   if (n.endsWith("pct")) return say(slots ? "54.2%" : "N%");
   return "say it in plain words";
 }

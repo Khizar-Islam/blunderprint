@@ -396,7 +396,7 @@ export interface AskSuggestion {
 
 // How code formatted a number slot (backend agent/slots.ts): decides nothing on the page but
 // can be used for styling. The page only ever gets the slot's finished text.
-export type SlotKind = "percent" | "share" | "per100" | "perGame" | "count" | "moveNumber" | "seconds" | "winPoints" | "rating";
+export type SlotKind = "percent" | "score" | "share" | "per100" | "perGame" | "count" | "moveNumber" | "seconds" | "winPoints" | "rating";
 
 // A verified answer (backend agent/answerStore.ts toPublicAnswer).
 export interface CoachAnswer {

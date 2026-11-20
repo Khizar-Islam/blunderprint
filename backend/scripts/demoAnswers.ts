@@ -7,6 +7,8 @@
 //                                       answers are checked or worded that didn't bump the prompt
 //                                       version). Prints each answer it replaced. Demo players only,
 //                                       like the rest of this script.
+//   npm run demo:answers -- --force --question "Why do I lose so many games in time trouble?"
+//                                       ONE chip only (its exact text); the others are untouched.
 //
 // Uses the REAL model, the live database from backend/.env and the shared daily budget: up to
 // ASK_MAX_REQUESTS (10) requests per question that isn't answered yet; already answered ones are
@@ -38,11 +40,27 @@ function fail(message: string): never {
 }
 
 const env = loadEnv();
+const USAGE = 'usage: npm run demo:answers [-- [--force] [--question "<exact chip text>"] [<lichess|chesscom> <username>]]';
 const args = process.argv.slice(2);
-const force = args.includes("--force");
-const unknownFlag = args.find((a) => a.startsWith("-") && a !== "--force");
-if (unknownFlag) fail(`Unknown option ${unknownFlag}. usage: npm run demo:answers [-- [--force] [<lichess|chesscom> <username>]]`);
-const [argPlatform, argUser] = args.filter((a) => !a.startsWith("-"));
+let force = false;
+let onlyQuestion: string | undefined;
+const positional: string[] = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i]!;
+  if (a === "--force") force = true;
+  else if (a === "--question") {
+    onlyQuestion = args[++i];
+    if (onlyQuestion === undefined) fail(`--question needs the chip's text. ${USAGE}`);
+  } else if (a.startsWith("-")) fail(`Unknown option ${a}. ${USAGE}`);
+  else positional.push(a);
+}
+// Only a chip can be pre-answered: any other text would be a typed question, not a demo answer.
+const CHIPS: readonly string[] = SUGGESTED_QUESTIONS;
+if (onlyQuestion !== undefined && !CHIPS.includes(onlyQuestion)) {
+  fail(`--question must be one of the chips, exactly:\n${SUGGESTED_QUESTIONS.map((q) => `  "${q}"`).join("\n")}`);
+}
+const questions: readonly string[] = onlyQuestion !== undefined ? [onlyQuestion] : CHIPS;
+const [argPlatform, argUser] = positional;
 let key: string;
 if (argPlatform || argUser) {
   if (!argPlatform || !argUser || !PLATFORMS.includes(argPlatform as Platform)) fail("usage: npm run demo:answers [-- <lichess|chesscom> <username>]");
@@ -72,11 +90,15 @@ try {
   if (!report) throw new Error("The player has no current coach report for this model and prompt: refresh it first.");
 
   const suggestions = await suggestionsFor(player._id, basis.hash, coach.modelName);
-  const toAsk = force ? suggestions.length : suggestions.filter((s) => !s.answered).length;
+  const chosen = suggestions.filter((s) => questions.includes(s.question));
+  const toAsk = force ? chosen.length : chosen.filter((s) => !s.answered).length;
   const before = await coach.budget.remaining();
   const needed = toAsk * coach.askLimits.maxRequests;
   console.log(`demo:answers${force ? " --force" : ""} ${player.platform}:${player.username}  model ${coach.modelName}  ${basis.analysed} analysed games`);
-  for (const s of suggestions) console.log(`  ${force ? (s.answered ? "to replace" : "to ask    ") : s.answered ? "answered " : "to ask   "} ${s.question}`);
+  for (const s of suggestions) {
+    const plan = !questions.includes(s.question) ? "untouched " : force ? (s.answered ? "to replace" : "to ask    ") : s.answered ? "answered  " : "to ask    ";
+    console.log(`  ${plan} ${s.question}`);
+  }
   console.log(`budget left today: ${before}; worst case for ${toAsk} question(s): ${needed}\n`);
   if (before < needed) throw new Error(`Not enough budget left today (${before} < ${needed}).`);
 
@@ -84,7 +106,7 @@ try {
     queue: createQueue(),
     coach,
     playerId: player._id,
-    questions: SUGGESTED_QUESTIONS,
+    questions,
     force,
     onRunStarted: (q, runId) => console.log(`started: ${JSON.stringify(q)} (run ${runId})`),
   });

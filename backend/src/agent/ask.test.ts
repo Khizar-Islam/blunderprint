@@ -518,3 +518,38 @@ describe("a slot at an example's ply; a score slot (no prompt change)", () => {
     assert.equal(a.text, `${String(Math.round(white * 10) / 10)}% of the points`);
   });
 });
+
+describe("the word next to a slot; capitals and full stops (no prompt change)", () => {
+  it("the live answer of 20 Nov: 'Ke3 on {{c}} lost {{d}}' wired backwards is two issues, then the sentence goes; the first sentence is tidied", async () => {
+    const { log, examples } = await realLog();
+    const d = draft({
+      sentences: ["when you're short on time your rate is {{a}}, against your usual figure", "Nf3 on {{c}} lost {{d}}"],
+      slots: [SLOT_A, { name: "c", step: 2, path: "examples[0].winPctLost" }, { name: "d", step: 2, path: "examples[0].clockLeftSeconds" }],
+      evidenceStep: 2,
+      evidence: examples.slice(0, 2),
+    });
+    const first = await verifyAnswer(ctx, d, log, { final: false });
+    assert.deepEqual(first.issues, [
+      'sentence 2: "on {{c}}" needs a move number (a slot ending in moveNumber), but slot {{c}} is win-chance points (examples[0].winPctLost): point the slot at the right field, or reword the sentence',
+      'sentence 2: "lost {{d}}" needs win-chance points (a slot ending in winPctLost), but slot {{d}} is a clock time (examples[0].clockLeftSeconds): point the slot at the right field, or reword the sentence',
+    ]);
+    const { output } = await verifyAnswer(ctx, d, log, { final: true });
+    assert.deepEqual(output.sentences, ["When you're short on time your rate is {{a}}, against your usual figure."]);
+    assert.deepEqual(output.removed.slice(-2), ["capital letter added", "full stop added"]);
+  });
+
+  it("wired correctly it passes with no issue, and only the full stop is added", async () => {
+    const { log, examples } = await realLog();
+    const d = draft({
+      sentences: ["Overall you make {{a}}.", "Nf3 on {{c}} lost {{d}}"],
+      slots: [SLOT_A, { name: "c", step: 2, path: "examples[0].moveNumber" }, { name: "d", step: 2, path: "examples[0].winPctLost" }],
+      evidenceStep: 2,
+      evidence: examples.slice(0, 2),
+    });
+    const first = await verifyAnswer(ctx, d, log, { final: false });
+    assert.deepEqual(first.issues, []);
+    // A first check with no issues is the final answer: it is tidied too.
+    assert.deepEqual(first.output.sentences, ["Overall you make {{a}}.", "Nf3 on {{c}} lost {{d}}."]);
+    assert.deepEqual(first.output.removed, ["full stop added"]);
+  });
+});

@@ -4,7 +4,7 @@ import { colourIn, COLOUR_RULE } from "./colour.js";
 import type { AgentContext } from "./context.js";
 import type { AgentTask } from "./loop.js";
 import type { ModelRequest } from "./model.js";
-import { dropDoubledNouns, fillSlot, placeholdersIn, SLOT_NAME, type FilledSlot } from "./slots.js";
+import { dropDoubledNouns, fillSlot, placeholdersIn, SLOT_NAME, slotContextProblems, tidySentence, type FilledSlot } from "./slots.js";
 import { moveNumberOf, round1, uciToSan } from "./tools/format.js";
 import { fieldNameIssue, fieldNamesIn,
   allowedProseMoves,
@@ -467,6 +467,8 @@ export async function verifyAnswer(ctx: AgentContext, draft: AskDraft, log: Tool
     }
     for (const phrase of colourIn(prose)) problems.push(`sentence ${n} says "${phrase}", ${COLOUR_RULE}`);
     for (const name of fieldNamesIn(prose)) problems.push(fieldNameIssue(`sentence ${n}`, name, { slots: true }));
+    // The word next to a slot must fit what the slot shows ("on {{c}}" with c = win-chance points).
+    for (const p of slotContextProblems(sentence, filled)) problems.push(`sentence ${n}: ${p.message}`);
     if (URL_LIKE.test(prose)) problems.push(`sentence ${n} contains a link: plain sentences only`);
     if (MARKDOWN.test(sentence)) problems.push(`sentence ${n} uses markdown or a list: plain sentences only`);
     return problems;
@@ -481,7 +483,10 @@ export async function verifyAnswer(ctx: AgentContext, draft: AskDraft, log: Tool
     const sentences = templates.map((s) => {
       const d = dropDoubledNouns(s, filled);
       removed.push(...d.dropped);
-      return d.template;
+      // A capital letter at the start, a full stop at the end: also cosmetic and certain.
+      const tidy = tidySentence(d.template);
+      removed.push(...tidy.changes);
+      return tidy.template;
     });
     if (sentences.length === 0) return cannot("no_data", removed);
     const used = new Set(sentences.flatMap(placeholdersIn));

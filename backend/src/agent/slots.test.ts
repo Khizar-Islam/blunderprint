@@ -1,6 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { dropDoubledNouns, fillSentence, fillSlot, formatSlot, parsePath, placeholdersIn, resolvePath, SLOT_KINDS, unitTail, type FilledSlot, type SlotKind } from "./slots.js";
+import {
+  dropDoubledNouns,
+  fillSentence,
+  fillSlot,
+  formatSlot,
+  parsePath,
+  placeholdersIn,
+  resolvePath,
+  SLOT_KINDS,
+  slotContextProblems,
+  tidySentence,
+  unitTail,
+  type FilledSlot,
+  type SlotKind,
+} from "./slots.js";
 import type { ToolLog } from "./verifier.js";
 
 // Number slots (Stage 6 chunk B): the model points at a number, code formats it.
@@ -435,5 +449,105 @@ describe("a slot pointing at an example's ply is read as its move number", () =>
       assert.ok(!r.ok, path);
       assert.match(r.problem, /the field "ply" can't be shown/, path);
     }
+  });
+});
+
+describe("slotContextProblems: the word next to a slot must fit what the slot shows", () => {
+  const example = { gameId: "g1", ply: 117, moveNumber: 59, winPctLost: 60.3, clockLeftSeconds: 4.3 };
+  const data = { examples: [example], matchingGames: 37, rows: [{ per100Moves: 14.1 }], results: { loss: 12, scorePct: 55 }, currentRatings: { blitz: 1850 } };
+  const log: ToolLog = new Map([[3, { ok: true, tool: "find_example_mistakes", data }]]);
+  const slots = (paths: Record<string, string>) =>
+    new Map<string, FilledSlot>(
+      Object.entries(paths).map(([name, path]) => {
+        const r = fillSlot({ name, step: 3, path }, log);
+        assert.ok(r.ok, path);
+        return [name, r.slot];
+      }),
+    );
+  const phrases = (template: string, paths: Record<string, string>) => slotContextProblems(template, slots(paths)).map((p) => [p.phrase, p.need, p.got]);
+
+  it("the live sentence, 'Ke3 on {{c}} lost {{d}}' with c = win-chance points and d = the clock: both caught", () => {
+    const wired = slots({ c: "examples[0].winPctLost", d: "examples[0].clockLeftSeconds" });
+    assert.equal(fillSentence("Ke3 on {{c}} lost {{d}}", wired), "Ke3 on 60.3 win-chance points lost 4 seconds");
+    const problems = slotContextProblems("Ke3 on {{c}} lost {{d}}", wired);
+    assert.deepEqual(problems.map((p) => [p.name, p.phrase, p.need, p.got]), [
+      ["c", "on {{c}}", "moveNumber", "winPoints"],
+      ["d", "lost {{d}}", "winPoints", "seconds"],
+    ]);
+    assert.equal(
+      problems[0]!.message,
+      '"on {{c}}" needs a move number (a slot ending in moveNumber), but slot {{c}} is win-chance points (examples[0].winPctLost): point the slot at the right field, or reword the sentence',
+    );
+    assert.equal(
+      problems[1]!.message,
+      '"lost {{d}}" needs win-chance points (a slot ending in winPctLost), but slot {{d}} is a clock time (examples[0].clockLeftSeconds): point the slot at the right field, or reword the sentence',
+    );
+  });
+
+  it("the same sentence wired correctly passes, also through a ply slot", () => {
+    assert.deepEqual(phrases("Ke3 on {{c}} lost {{d}}", { c: "examples[0].moveNumber", d: "examples[0].winPctLost" }), []);
+    assert.deepEqual(phrases("Ke3 on {{c}} lost {{d}}.", { c: "examples[0].ply", d: "examples[0].winPctLost" }), []);
+    assert.deepEqual(phrases("Ke3 on {{c}} cost you {{d}} with {{e}} left.", { c: "examples[0].moveNumber", d: "examples[0].winPctLost", e: "examples[0].clockLeftSeconds" }), []);
+  });
+
+  it("each listed context: on / at, lost / cost / costs / costing (you), … left / remaining", () => {
+    assert.deepEqual(phrases("It happened at {{c}}.", { c: "examples[0].winPctLost" }), [["at {{c}}", "moveNumber", "winPoints"]]);
+    assert.deepEqual(phrases("That cost {{d}}.", { d: "examples[0].clockLeftSeconds" }), [["cost {{d}}", "winPoints", "seconds"]]);
+    assert.deepEqual(phrases("That costs you {{d}}.", { d: "examples[0].moveNumber" }), [["costs you {{d}}", "winPoints", "moveNumber"]]);
+    assert.deepEqual(phrases("Each one is costing you {{d}}.", { d: "rows[0].per100Moves" }), [["costing you {{d}}", "winPoints", "per100"]]);
+    assert.deepEqual(phrases("You played it with {{e}} left.", { e: "examples[0].winPctLost" }), [["{{e}} left", "seconds", "winPoints"]]);
+    assert.deepEqual(phrases("You played it with {{e}} remaining on the clock.", { e: "examples[0].moveNumber" }), [["{{e}} remaining", "seconds", "moveNumber"]]);
+    assert.deepEqual(phrases("On {{c}} you had {{e}} left.", { c: "examples[0].clockLeftSeconds", e: "examples[0].moveNumber" }), [
+      ["on {{c}}", "moveNumber", "seconds"],
+      ["{{e}} left", "seconds", "moveNumber"],
+    ]);
+  });
+
+  it("only those contexts, and not where the word is ordinary with that kind", () => {
+    for (const [template, paths] of [
+      ["This is based on {{n}} games.", { n: "matchingGames" }],
+      ["Your rate stands at {{a}}.", { a: "rows[0].per100Moves" }],
+      ["You score {{s}} and are rated at {{r}}.", { s: "results.scorePct", r: "currentRatings.blitz" }],
+      ["You moved at {{e}} on the clock.", { e: "examples[0].clockLeftSeconds" }],
+      ["You lost {{n}} of those games.", { n: "results.loss" }],
+      ["Your rate is {{a}} when you're short on time.", { a: "rows[0].per100Moves" }],
+      ["The move gave up {{d}} after {{c}}.", { d: "examples[0].winPctLost", c: "examples[0].moveNumber" }],
+      ["A salmon {{d}} and a glost {{d2}}.", { d: "examples[0].clockLeftSeconds", d2: "examples[0].clockLeftSeconds" }],
+      ["It was {{c}} leftover.", { c: "examples[0].moveNumber" }],
+      ["An unknown {{zz}} left.", {}],
+    ] as [string, Record<string, string>][]) {
+      assert.deepEqual(phrases(template, paths), [], template);
+    }
+  });
+});
+
+describe("tidySentence: a capital letter at the start, a full stop at the end", () => {
+  it("the live sentence gets both", () => {
+    assert.deepEqual(tidySentence("when you're short on time your rate is {{a}}, against {{b}} overall"), {
+      template: "When you're short on time your rate is {{a}}, against {{b}} overall.",
+      changes: ["capital letter added", "full stop added"],
+    });
+    assert.deepEqual(tidySentence("Ke3 on {{c}} lost {{d}}"), { template: "Ke3 on {{c}} lost {{d}}.", changes: ["full stop added"] });
+  });
+
+  it("a sentence that is already fine is untouched", () => {
+    for (const s of ["In the opening your rate is {{a}}.", "Is it worse? Yes!", "Do you play worse with Black?", 'You call it "time trouble."', "{{a}} of your blunders come late.", "O-O was better here."]) {
+      assert.deepEqual(tidySentence(s), { template: s, changes: [] }, s);
+    }
+  });
+
+  it("a pawn move at the start keeps its small letter; other small starts are capitalised", () => {
+    assert.deepEqual(tidySentence("e5 was the better move"), { template: "e5 was the better move.", changes: ["full stop added"] });
+    assert.deepEqual(tidySentence("exd5 on {{c}} lost {{d}}."), { template: "exd5 on {{c}} lost {{d}}.", changes: [] });
+    assert.deepEqual(tidySentence("e8=Q+ wins."), { template: "e8=Q+ wins.", changes: [] });
+    assert.deepEqual(tidySentence("each of these came late."), { template: "Each of these came late.", changes: ["capital letter added"] });
+    assert.deepEqual(tidySentence("b5 pawns are weak"), { template: "b5 pawns are weak.", changes: ["full stop added"] });
+    assert.deepEqual(tidySentence("black's rate is {{a}}."), { template: "Black's rate is {{a}}.", changes: ["capital letter added"] });
+  });
+
+  it("a trailing comma, colon or space gives way to the full stop; a slot at the end gets one", () => {
+    assert.deepEqual(tidySentence("  Your rate is {{a}}, "), { template: "Your rate is {{a}}.", changes: ["full stop added"] });
+    assert.deepEqual(tidySentence("Your rate is {{a}}:"), { template: "Your rate is {{a}}.", changes: ["full stop added"] });
+    assert.deepEqual(tidySentence(""), { template: "", changes: [] });
   });
 });

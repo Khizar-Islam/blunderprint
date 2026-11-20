@@ -320,7 +320,7 @@ In `web/.env.local`, set `NEXT_PUBLIC_API_URL=http://localhost:5000`.
 ## Tests and checks
 
 ```
-cd backend && npm run typecheck && npm test                    739 tests
+cd backend && npm run typecheck && npm test                    749 tests
 cd web && npm run typecheck && npm run lint && npm test        272 tests
 ```
 

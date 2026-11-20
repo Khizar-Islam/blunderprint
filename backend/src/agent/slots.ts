@@ -365,3 +365,92 @@ export function dropDoubledNouns(template: string, slots: Map<string, FilledSlot
   }
   return { template: out + template.slice(last), dropped };
 }
+
+// ---------------------------------------------------------------------------------------------
+// The word next to a slot must fit what the slot shows (20 Nov 2026). Every figure in "Ke3 on
+// {{c}} lost {{d}}" was real and from the right position, but c pointed at the win-chance figure
+// and d at the clock, so the page read "Ke3 on 60.3 win-chance points lost 4 seconds". Only the
+// contexts in this table are checked, and a kind the word is ordinary with is left alone
+// ("based on {{n}} games", "your rate stands at {{a}}", "you lost {{n}} of those games").
+
+const KIND_WORDS: Record<SlotKind, string> = {
+  percent: "a percentage",
+  score: "a score",
+  share: "a share",
+  per100: "a rate per 100 moves",
+  perGame: "a rate per game",
+  count: "a count",
+  moveNumber: "a move number",
+  seconds: "a clock time",
+  winPoints: "win-chance points",
+  rating: "a rating",
+};
+// The field a slot of that kind points at, for the repair round.
+const KIND_FIELD: Partial<Record<SlotKind, string>> = { moveNumber: "moveNumber", winPoints: "winPctLost", seconds: "clockLeftSeconds" };
+
+interface SlotContext {
+  where: "before" | "after";
+  words: RegExp; // before: must match the END of the text before the slot; after: the START of the text after it
+  need: SlotKind;
+  fine: readonly SlotKind[]; // kinds the word is ordinary with: not checked
+}
+const SLOT_CONTEXTS: readonly SlotContext[] = [
+  { where: "before", words: /(?:^|[^\p{L}])(on)\s+$/iu, need: "moveNumber", fine: ["count"] },
+  { where: "before", words: /(?:^|[^\p{L}])(at)\s+$/iu, need: "moveNumber", fine: ["per100", "perGame", "percent", "score", "share", "rating", "seconds"] },
+  { where: "before", words: /(?:^|[^\p{L}])((?:lost|cost|costs|costing)(?:\s+you)?)\s+$/iu, need: "winPoints", fine: ["count"] },
+  { where: "after", words: /^\s+(left|remaining)(?![\p{L}])/iu, need: "seconds", fine: [] },
+];
+
+export interface SlotContextProblem {
+  name: string;
+  phrase: string; // "on {{c}}", "{{d}} left"
+  need: SlotKind;
+  got: SlotKind;
+  message: string;
+}
+
+export function slotContextProblems(template: string, slots: Map<string, FilledSlot>): SlotContextProblem[] {
+  const problems: SlotContextProblem[] = [];
+  for (const m of template.matchAll(/\{\{\s*([^{}]*?)\s*\}\}/g)) {
+    const name = m[1]!;
+    const slot = slots.get(name);
+    if (!slot) continue;
+    const before = template.slice(0, m.index);
+    const after = template.slice(m.index! + m[0].length);
+    for (const c of SLOT_CONTEXTS) {
+      const hit = c.words.exec(c.where === "before" ? before : after);
+      if (!hit || slot.kind === c.need || c.fine.includes(slot.kind)) continue;
+      const word = hit[1]!.toLowerCase().replace(/\s+/g, " ");
+      const phrase = c.where === "before" ? `${word} {{${name}}}` : `{{${name}}} ${word}`;
+      problems.push({
+        name,
+        phrase,
+        need: c.need,
+        got: slot.kind,
+        message: `"${phrase}" needs ${KIND_WORDS[c.need]} (a slot ending in ${KIND_FIELD[c.need]}), but slot {{${name}}} is ${KIND_WORDS[slot.kind]} (${slot.path}): point the slot at the right field, or reword the sentence`,
+      });
+    }
+  }
+  return problems;
+}
+
+// A sentence starts with a capital letter and ends with . ! or ? (the same live answer: "when
+// you're short on time your rate is {{a}}, against {{b}} overall"). Cosmetic and certain, so code
+// does it, like dropDoubledNouns: no verifier issue, no repair round; ask.ts logs each change in
+// `removed`. A sentence that starts with a pawn move keeps its small letter ("e5 was better").
+const STARTS_WITH_PAWN_MOVE = /^[a-h](?:x[a-h])?[1-8](?:=[QRBN])?[+#]?(?![\p{L}\d])/u;
+export function tidySentence(template: string): { template: string; changes: string[] } {
+  const changes: string[] = [];
+  let t = template.trim();
+  if (t.length === 0) return { template: t, changes };
+  const first = t[0]!;
+  if (first !== first.toUpperCase() && /\p{Ll}/u.test(first) && !STARTS_WITH_PAWN_MOVE.test(t)) {
+    t = first.toUpperCase() + t.slice(1);
+    changes.push("capital letter added");
+  }
+  if (!/[.!?]["'”’)]?$/.test(t)) {
+    t = t.replace(/[\s,;:]+$/, "") + ".";
+    changes.push("full stop added");
+  }
+  return { template: t, changes };
+}

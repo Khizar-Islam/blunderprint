@@ -2,56 +2,55 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { PLY_CAP } from "../patterns/geometry";
 import { demo } from "./demoData";
-import { ARRIVE_MS, clockText, heroFrame, SCAN_END_MS, SCAN_START_MS } from "./heroTimeline";
+import { ARRIVE_MS, clockText, DEVELOPED_MS, heroFrame, KIND_MS, TARGET_MS } from "./heroTimeline";
 
 // The landing's first screen (heroTimeline.ts) and the committed demo snapshot it draws.
 
-const L = { columns: 100, tickW: 4 };
-
 describe("heroFrame: the phases", () => {
   test("before it starts: nothing shown", () => {
-    const f = heroFrame(-1, 200, L);
+    const f = heroFrame(-1, 200);
     assert.equal(f.games, 0);
     assert.equal(f.rowAlpha(0), 0);
-    assert.equal(f.colouredUpTo, 0);
+    assert.deepEqual(f.kind, { inaccuracy: 0, mistake: 0, blunder: 0 });
+    assert.equal(f.target, 0);
   });
 
   test("games arrive top to bottom and the counter follows", () => {
-    const mid = heroFrame(ARRIVE_MS / 2, 200, L);
+    const mid = heroFrame(ARRIVE_MS / 2, 200);
     assert.equal(mid.rowAlpha(0), 1);
     assert.equal(mid.rowAlpha(199), 0);
     assert.ok(mid.games > 90 && mid.games < 110, `games ${mid.games}`);
-    const arrived = heroFrame(ARRIVE_MS, 200, L);
+    const arrived = heroFrame(ARRIVE_MS, 200);
     assert.equal(arrived.games, 200);
-    assert.equal(arrived.colouredUpTo, 0, "nothing coloured before the engine pass");
-    assert.equal(arrived.scanX, null);
+    assert.deepEqual(arrived.kind, { inaccuracy: 0, mistake: 0, blunder: 0 }, "no mark before the rows are there");
   });
 
-  test("the engine pass colours the print left to right behind the scan line", () => {
-    const mid = heroFrame((SCAN_START_MS + SCAN_END_MS) / 2, 200, L);
-    assert.equal(mid.colouredUpTo, 50);
-    assert.equal(mid.scanX, 200);
-    const later = heroFrame(SCAN_END_MS - 100, 200, L);
-    assert.ok(later.colouredUpTo > mid.colouredUpTo);
-    const over = heroFrame(SCAN_END_MS, 200, L);
-    assert.equal(over.colouredUpTo, Infinity);
-    assert.equal(over.scanX, null);
-    assert.ok(SCAN_END_MS <= 4_500, "the first screen is final in under 5 s");
+  test("the marks develop kind by kind, the faintest first, the followed move last", () => {
+    const early = heroFrame(KIND_MS.inaccuracy[1], 200);
+    assert.equal(early.kind.inaccuracy, 1);
+    assert.ok(early.kind.mistake > 0 && early.kind.mistake < 1);
+    assert.equal(early.kind.blunder, 0);
+    const late = heroFrame(KIND_MS.blunder[1], 200);
+    assert.deepEqual(late.kind, { inaccuracy: 1, mistake: 1, blunder: 1 });
+    assert.equal(late.target, 0, "the followed move is still to come");
+    assert.ok(KIND_MS.inaccuracy[0] < KIND_MS.mistake[0] && KIND_MS.mistake[0] < KIND_MS.blunder[0] && KIND_MS.blunder[1] <= TARGET_MS[0]);
+    assert.equal(heroFrame(DEVELOPED_MS, 200).target, 1);
+    assert.ok(DEVELOPED_MS <= 3_000, "the print is whole within the first three seconds");
   });
 
   test("Infinity is the final state (reduced motion, no frames, a scrolled page)", () => {
-    const f = heroFrame(Infinity, 200, L);
+    const f = heroFrame(Infinity, 200);
     assert.equal(f.games, 200);
     assert.equal(f.rowAlpha(0), 1);
     assert.equal(f.rowAlpha(199), 1);
-    assert.equal(f.colouredUpTo, Infinity);
-    assert.equal(f.scanX, null);
+    assert.deepEqual(f.kind, { inaccuracy: 1, mistake: 1, blunder: 1 });
+    assert.equal(f.target, 1);
   });
 
   test("a skipped stretch of frames lands on the right phase (time-based, not frame-counted)", () => {
     // The same t gives the same frame whatever came before it.
-    assert.deepEqual({ ...heroFrame(3100, 200, L), rowAlpha: null }, { ...heroFrame(3100, 200, L), rowAlpha: null });
-    assert.equal(heroFrame(4100, 200, L).colouredUpTo, Infinity);
+    assert.deepEqual({ ...heroFrame(1300, 200), rowAlpha: null }, { ...heroFrame(1300, 200), rowAlpha: null });
+    assert.equal(heroFrame(4100, 200).target, 1);
   });
 });
 

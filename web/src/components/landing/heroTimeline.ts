@@ -1,46 +1,50 @@
-import type { Layout } from "../patterns/geometry";
+import type { ErrorKind } from "@/lib/api";
 
 // The landing's first screen, "the print develops", as pure functions of the time since it
 // started, so the phases and the final state can be tested without a browser. (What happens
 // once the page is scrolled is in diveTimeline.ts.)
 //
-//   0 – 0.9 s     games arrive: quiet rows drop in from the top, the counter ticks up
-//   1.2 – 4.0 s   the engine passes: a scan line sweeps the ply columns left to right and the
-//                 player's errors take their colours behind it
+// It develops like a photograph in its tray, the faintest marks first:
+//
+//   0 – 0.5 s     games arrive: quiet rows drop in from the top, the counter ticks up
+//   0.5 – 1.1 s   the inaccuracies bleed in, from the paper's own tone to full amber
+//   1.0 – 1.6 s   the mistakes
+//   1.5 – 2.2 s   the blunders
+//   2.3 – 2.6 s   one last mark: the move the page follows
 //
 // Everything is computed from the elapsed time, never counted frame by frame: a browser that
 // skips frames (a throttled tab, a slow laptop) jumps to the right phase instead of lagging,
 // and heroFrame(Infinity) is the final state (reduced motion, no frames, a scrolled page).
 
-export const ARRIVE_MS = 900; // the last row starts arriving here
+export const ARRIVE_MS = 500; // the last row starts arriving here
 export const ROW_FADE_MS = 200;
-export const SCAN_START_MS = 1200;
-export const SCAN_END_MS = 4000;
+export const KIND_MS: Record<ErrorKind, readonly [number, number]> = {
+  inaccuracy: [500, 1100],
+  mistake: [1000, 1600],
+  blunder: [1500, 2200],
+};
+export const TARGET_MS: readonly [number, number] = [2300, 2600];
+export const DEVELOPED_MS = TARGET_MS[1]; // the whole print is there
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
-const easeInOut = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
+const span = (t: number, [from, to]: readonly [number, number]) => clamp01((t - from) / (to - from));
 
 export interface HeroFrame {
   rowAlpha: (row: number) => number;
   games: number; // the counter: rows that have started to arrive
-  colouredUpTo: number; // plies coloured so far (Infinity once the pass is over)
-  scanX: number | null; // the scan line's x in CSS px, while it runs
+  kind: Record<ErrorKind, number>; // how far each kind of mark has developed, 0 to 1
+  target: number; // … and the one followed move, which comes last
 }
 
-export function heroFrame(t: number, rows: number, l: Pick<Layout, "columns" | "tickW">): HeroFrame {
+export function heroFrame(t: number, rows: number): HeroFrame {
   const rowStart = (row: number) => (rows <= 1 ? 0 : (row / (rows - 1)) * ARRIVE_MS);
   const games = t < 0 ? 0 : t >= ARRIVE_MS ? rows : Math.min(rows, Math.floor((t / ARRIVE_MS) * (rows - 1)) + 1);
-
-  let colouredUpTo = 0;
-  let scanX: number | null = null;
-  if (t >= SCAN_END_MS) colouredUpTo = Infinity;
-  else if (t > SCAN_START_MS) {
-    const cols = easeInOut((t - SCAN_START_MS) / (SCAN_END_MS - SCAN_START_MS)) * l.columns;
-    colouredUpTo = Math.floor(cols);
-    scanX = cols * l.tickW;
-  }
-
-  return { rowAlpha: (row) => clamp01((t - rowStart(row)) / ROW_FADE_MS), games, colouredUpTo, scanX };
+  return {
+    rowAlpha: (row) => clamp01((t - rowStart(row)) / ROW_FADE_MS),
+    games,
+    kind: { inaccuracy: span(t, KIND_MS.inaccuracy), mistake: span(t, KIND_MS.mistake), blunder: span(t, KIND_MS.blunder) },
+    target: span(t, TARGET_MS),
+  };
 }
 
 // "0:04" / "1:07": a clock.

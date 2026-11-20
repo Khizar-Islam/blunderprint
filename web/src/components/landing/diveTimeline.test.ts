@@ -114,6 +114,11 @@ describe("stageBox", () => {
     const b = stageBox(1088, 650, true, 200);
     assert.equal(b.pitch0, 2);
     assert.ok(b.hy + 200 * b.pitch0 < 650);
+    assert.equal(stageBox(1088, 593, true, 200).pitch0, 2);
+    // A tall screen gets taller rows, never more than 4 px apart.
+    assert.equal(stageBox(1088, 1080, true, 200).pitch0, 4);
+    assert.equal(stageBox(1088, 1080, true, 200).rowH0, 3);
+    assert.equal(stageBox(1088, 2000, true, 200).pitch0, 4);
     assert.equal(b.board, 338);
   });
   test("a phone: a big board for the move, then it shrinks to what the words leave", () => {

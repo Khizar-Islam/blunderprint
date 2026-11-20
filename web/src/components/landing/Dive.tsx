@@ -19,8 +19,8 @@ import { errorKindAt, INK, isPlayersPly, moveName, RIDGE, TICK_COLOR } from "@/c
 import type { ErrorKind } from "@/lib/api";
 import { ANNOTATION, statText } from "@/lib/coach";
 import { demo } from "./demoData";
-import { DIVE_COLS, divePhases, diveRows, errorsFoundUpTo, lerp, resultWords, seg, splitFigure, stageBox, utcDay, xlerp } from "./diveTimeline";
-import { clockText, heroFrame, SCAN_END_MS } from "./heroTimeline";
+import { DIVE_COLS, divePhases, diveRows, ease, lerp, resultWords, seg, splitFigure, stageBox, utcDay, xlerp } from "./diveTimeline";
+import { clockText, DEVELOPED_MS, heroFrame } from "./heroTimeline";
 import { PrintLink } from "./PrintLink";
 
 const RUST = "#D9772B"; // hex, not CSS variables: SVG attributes and canvas fills
@@ -40,8 +40,14 @@ const ROW = demo.ribbons.findIndex((r) => r.gameId === ev.gameId);
 const GAME = demo.ribbons[ROW]!;
 const PLY = ev.ply;
 const SANS = demo.dive.sans;
-const FOUND = errorsFoundUpTo(ROWS);
-const TOTAL_ERRORS = FOUND[FOUND.length - 1]!;
+// How many marks of each kind the print holds: the counter runs as they develop.
+const COUNTS: Record<ErrorKind, number> = { inaccuracy: 0, mistake: 0, blunder: 0 };
+for (const r of ROWS) for (const e of r.errs) COUNTS[e.kind] += 1;
+const TOTAL_ERRORS = COUNTS.inaccuracy + COUNTS.mistake + COUNTS.blunder;
+// The coach's finding is drawn on the print it is about. When its group is a stretch of move
+// numbers ("… from move 41 on", a label code wrote), a bracket spans those columns.
+const FROM_MOVE = Number(/from move (\d+) on/.exec(note.title)?.[1] ?? 0);
+const BRACKET_PLY = FROM_MOVE > 0 && FROM_MOVE * 2 - 1 < DIVE_COLS ? FROM_MOVE * 2 - 1 : null;
 const FINAL_COUNTER = `${ROWS.length} games · ${TOTAL_ERRORS.toLocaleString("en")} errors found`;
 
 const SIDE: Side = ev.color ?? GAME.color;
@@ -55,7 +61,6 @@ const MOVE = `${moveName(PLY)} ${ev.played}${ANNOTATION[ev.kind]}`; // "47. Nd4?
 const CLOCK = ev.facts.clockLeftSeconds == null ? null : clockText(ev.facts.clockLeftSeconds);
 const STAT = statText(note.stat);
 const [BEFORE, FIGURE, AFTER] = splitFigure(demo.dive.sentence, demo.dive.figure);
-const PLATFORM = demo.platform === "lichess" ? "Lichess" : "Chess.com";
 const BASE = `/p/${demo.platform}/${encodeURIComponent(demo.username)}`;
 
 const hex = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -151,6 +156,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
       if (wide) style("boardCap", { width: `${box.board}px` });
       // The print's caption is as wide as the print (beside the words, that is the right part of the stage).
       style("cue", { width: `${W - box.hx}px` });
+      style("finding", { width: `${W - box.hx}px` });
       style("board", { width: `${box.board}px`, height: `${box.board}px` });
       capH = cap?.offsetHeight ?? 44;
       return true;
@@ -199,8 +205,10 @@ function Stage({ at, className }: { at?: number; className: string }) {
       const snap = (v: number) => -((((v * dpr) % 1) + 1) % 1) / dpr;
       cv.style.transform = `translate(${snap(at0.left).toFixed(3)}px, ${snap(at0.top).toFixed(3)}px)`;
       ctx.clearRect(0, 0, W, H);
-      const f = heroFrame(devT, ROWS.length, { columns: DIVE_COLS, tickW: cw0 });
-      const upTo = f.colouredUpTo;
+      const f = heroFrame(devT, ROWS.length);
+      // A mark bleeds in from the paper's own line colour to its full colour.
+      const developed = (kind: ErrorKind, k: number) => (k >= 1 ? TICK_COLOR[kind] : mix(RIDGE, TICK_COLOR[kind], ease(k)));
+      const TINT: Record<ErrorKind, string> = { inaccuracy: developed("inaccuracy", f.kind.inaccuracy), mistake: developed("mistake", f.kind.mistake), blunder: developed("blunder", f.kind.blunder) };
 
       // The other 199 games: a quiet line each, a mark per error.
       if (otherA > 0.01) {
@@ -215,8 +223,8 @@ function Stage({ at, className }: { at?: number; className: string }) {
           ctx.fillStyle = RIDGE;
           ctx.fillRect(X, y, Math.min(row.len, DIVE_COLS) * cw, otherH);
           for (const er of row.errs) {
-            if (er.ply > DIVE_COLS || er.ply > upTo) continue;
-            ctx.fillStyle = TICK_COLOR[er.kind];
+            if (er.ply > DIVE_COLS || f.kind[er.kind] <= 0) continue;
+            ctx.fillStyle = TINT[er.kind];
             ctx.fillRect(X + (er.ply - 1) * cw, y, Math.max(2.5, cw * 2), otherH);
           }
         }
@@ -234,10 +242,13 @@ function Stage({ at, className }: { at?: number; className: string }) {
           for (let ply = 1; ply <= last; ply++) {
             const x = X + (ply - 1) * cw;
             if (x > W || x + cw * 2 < 0) continue;
-            const kind = ply <= upTo ? errorKindAt(row.classes, ply, row.color) : null;
+            const k0 = errorKindAt(row.classes, ply, row.color);
+            // The followed move develops last of all.
+            const dev = !k0 ? 0 : ply === PLY ? f.target : f.kind[k0];
+            const kind = dev > 0 ? k0 : null;
             if ((pass === 1) !== !!kind) continue;
             if (ply === PLY && c > 0) continue; // on its way to the board (the DOM square below)
-            ctx.fillStyle = kind ? TICK_COLOR[kind] : mix(RIDGE, isPlayersPly(ply, row.color) ? TICK_COLOR.own : TICK_COLOR.opponent, a);
+            ctx.fillStyle = kind ? (ply === PLY ? developed(kind, dev) : TINT[kind]) : mix(RIDGE, isPlayersPly(ply, row.color) ? TICK_COLOR.own : TICK_COLOR.opponent, a);
             const w = kind ? Math.max(2.5 * (1 - a), cw * lerp(2, 1, a) - gap) : cw - gap;
             ctx.fillRect(x + gap / 2, yT, Math.max(0.5, w), rowHT);
           }
@@ -274,7 +285,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
       }
 
       // The ring that keeps the eye on the move, from the first screen to the square.
-      const ringOn = (devT >= SCAN_END_MS + 300 ? 1 : 0) * (1 - seg(p, 0.42, 0.5));
+      const ringOn = (devT >= DEVELOPED_MS ? 1 : 0) * (1 - seg(p, 0.42, 0.5));
       if (ringOn > 0.01) {
         ctx.globalAlpha = ringOn;
         ctx.strokeStyle = INK;
@@ -284,16 +295,20 @@ function Stage({ at, className }: { at?: number; className: string }) {
         ctx.stroke();
       }
 
-      // The engine's pass over the first screen.
-      if (a === 0 && f.scanX !== null) {
-        ctx.globalAlpha = 1;
+      // The bracket over the columns the coach's finding is about (its words hang above it).
+      const findOn = 1 - seg(p, 0.01, 0.05);
+      if (BRACKET_PLY !== null && findOn > 0.01 && devT >= DEVELOPED_MS + 100) {
+        const k = devT === Infinity ? 1 : ease(seg(devT, DEVELOPED_MS + 100, DEVELOPED_MS + 700));
+        const x0 = Math.round(hx + (BRACKET_PLY - 1) * cw0);
+        ctx.globalAlpha = findOn;
         ctx.fillStyle = INK;
-        ctx.fillRect(hx + Math.min(hw - 1, f.scanX), hy - 6, 1, ROWS.length * pitch0 + 12);
+        ctx.fillRect(x0, hy - 11, (hx + hw - x0) * k, 1.5);
+        ctx.fillRect(x0, hy - 11, 1.5, 7);
       }
       ctx.globalAlpha = 1;
       // While the print is whole and developed, the canvas says where it is ("x,y,width,height"):
       // "Open this Blunderprint" carries a copy of it onto the dashboard (lib/printCarry.ts).
-      if (at === undefined && a === 0 && devT >= SCAN_END_MS) cv.dataset.print = `${hx},${hy},${hw},${ROWS.length * pitch0}`;
+      if (at === undefined && a === 0 && devT >= DEVELOPED_MS) cv.dataset.print = `${hx},${hy},${hw},${ROWS.length * pitch0}`;
       else delete cv.dataset.print;
 
       // ---- The first screen's words and labels ---------------------------------------------------
@@ -305,18 +320,22 @@ function Stage({ at, className }: { at?: number; className: string }) {
       }
       const counter = part("counter");
       if (counter) {
-        const found = upTo === Infinity ? TOTAL_ERRORS : FOUND[Math.min(DIVE_COLS, upTo)]!;
+        const found = Math.round(COUNTS.inaccuracy * f.kind.inaccuracy + COUNTS.mistake * f.kind.mistake + COUNTS.blunder * f.kind.blunder);
         const text = `${f.games} games · ${found.toLocaleString("en")} errors found`;
         if (counter.textContent !== text) counter.textContent = text;
       }
-      put("counterBox", hx, hy - 34, 1 - seg(p, 0.02, 0.1));
-      const noteOn = devT >= SCAN_END_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
+      // Beside the words the counter sits over the print's left end, level with the finding's
+      // second line; under the words (phones) it goes below the print, above the caption.
+      const under = hy + ROWS.length * pitch0 + 12;
+      put("counterBox", hx, wide ? hy - 34 : under, 1 - seg(p, 0.02, 0.1));
+      put("finding", hx, hy - 56, devT >= DEVELOPED_MS + 300 ? 1 - seg(p, 0.01, 0.05) : 0);
+      const noteOn = devT >= DEVELOPED_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
       put("note", Math.max(0, Math.min(W - 262, xT0 + 14)), hy + ROW * pitch0 + 16, noteOn);
-      const cueOn = (devT >= SCAN_END_MS + 900 ? 1 : 0) * (1 - seg(p, 0, 0.04));
+      const cueOn = (devT >= DEVELOPED_MS + 900 ? 1 : 0) * (1 - seg(p, 0, 0.04));
       // Right under the print, in the print's own column. It used to sit at the bottom of the
       // whole stage: on a short laptop screen that put it across the words, between the demo's
       // label and its links.
-      put("cue", hx, hy + ROWS.length * pitch0 + 12, cueOn);
+      put("cue", hx, under + (wide ? 0 : 26), cueOn);
 
       // ---- A, B: the game, and what the eye is on ----------------------------------------------
       put("gameCap", 0, yT - (wide ? lerp(34, 44, b) : lerp(44, 66, b)), a * (1 - seg(p, 0.58, 0.64)));
@@ -358,7 +377,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
       style("checked", { opacity: seg(ph.check, 0.6, 1).toFixed(3) });
       show("ctas", ph.ctas);
 
-      if (devT !== Infinity && devT < SCAN_END_MS + 1200) frame = requestAnimationFrame(fromFrame);
+      if (devT !== Infinity && devT < DEVELOPED_MS + 1200) frame = requestAnimationFrame(fromFrame);
     };
     const fromFrame = () => {
       sawFrame = true;
@@ -388,7 +407,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
         render();
       }, STALL_MS),
       // The print's final state and its note land whether or not the last frame ran.
-      window.setTimeout(render, SCAN_END_MS + 1300),
+      window.setTimeout(render, DEVELOPED_MS + 1300),
     ];
     // The words' height is only right once the web fonts are in.
     void document.fonts?.ready.then(onResize);
@@ -435,10 +454,26 @@ function Stage({ at, className }: { at?: number; className: string }) {
 
       {/* The first screen's labels. */}
       <p data-el="counterBox" className={`${layer} font-mono text-xs whitespace-nowrap text-graphite tabular-nums`}>
-        <span data-el="counter" data-dive-counter={FINAL_COUNTER}>
+        {/* As wide as its final text from the start (mono: one ch per character), so the name after it never moves. */}
+        <span data-el="counter" data-dive-counter={FINAL_COUNTER} className="inline-block" style={{ minWidth: `${FINAL_COUNTER.length}ch` }}>
           0 games · 0 errors found
         </span>
-        <span className="hidden sm:inline"> · {PLATFORM}</span> · {demo.username}
+{" "}
+        · {demo.username}
+      </p>
+      {/* The coach's finding, on the print it is about: code's label and code's two numbers. */}
+      <p
+        data-el="finding"
+        className={`${layer} flex flex-col items-end text-right font-mono transition-opacity duration-500 motion-reduce:transition-none`}
+        style={{ opacity: 0, visibility: "hidden" }}
+      >
+        <span className="text-sm font-medium text-ink">
+          <span className="hidden font-normal text-graphite sm:inline">The coach found: </span>
+          {note.title}
+        </span>
+        <span className="text-xs whitespace-nowrap text-graphite">
+          <span className="text-ink">{STAT.value(note.stat.value)}</span> against your <span className="text-ink">{STAT.baseline}</span> overall
+        </span>
       </p>
       <div
         data-el="note"
@@ -595,7 +630,7 @@ export function Dive({ children }: { children: ReactNode }) {
         {children}
       </div>
       <div className="relative h-[560svh] motion-reduce:h-auto">
-        <Stage className="sticky top-0 h-svh motion-reduce:relative motion-reduce:h-[23rem] xl:motion-reduce:h-[49rem]" />
+        <Stage className="sticky top-0 h-svh motion-reduce:relative motion-reduce:h-[23rem] xl:motion-reduce:h-[52rem]" />
         {/* What the dive shows, for a screen reader (the stage's own words come and go with the scroll). */}
         <p className="sr-only">
           An example from the demo: in game {ROW + 1} of {ROWS.length}, {MOVE} was a {ev.kind}

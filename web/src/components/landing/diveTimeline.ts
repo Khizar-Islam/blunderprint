@@ -116,17 +116,19 @@ export interface StageBox {
 // under it; the stage is one screen tall, so the board shrinks to that once the words come.
 export function stageBox(W: number, H: number, wide: boolean, rows: number, fit = Infinity): StageBox {
   const hx = wide ? Math.round(W * 0.38) : 0;
-  const hy = wide ? 132 : 36;
-  // 200 games at 3 px a row need 600 px: on a short laptop screen the rows are 2 px apart.
-  const roomy = wide && H >= hy + rows * 3 + 40;
+  // Above the print: the coach's finding (two lines) and the bracket it hangs from.
+  const hy = wide ? 132 : 60;
+  // Beside the words the print is as tall as the screen allows: rows 2 to 4 px apart (200 games
+  // at 3 px need 600 px, so a short laptop screen gets 2). Under the words (phones) always 2.
+  const pitch0 = wide ? Math.max(2, Math.min(4, Math.floor((H - hy - 64) / rows))) : 2;
   const board = Math.round(wide ? Math.min(440, H * 0.52) : Math.min(W, H * 0.5, 420));
   const small = wide ? board : Math.round(Math.max(96, Math.min(board, fit)));
   return {
     wide,
     hx,
     hy,
-    pitch0: roomy ? 3 : 2,
-    rowH0: roomy ? 2 : 1,
+    pitch0,
+    rowH0: Math.max(1, pitch0 - 1),
     board,
     small,
     bx: wide ? Math.round(W * 0.05) : Math.round((W - board) / 2),

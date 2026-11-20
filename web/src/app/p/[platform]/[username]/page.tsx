@@ -37,7 +37,7 @@ export default async function PlayerPage({ params }: Props) {
           ← Blunderprint
         </Link>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="font-display text-4xl tracking-tight break-all text-ink sm:text-5xl">{username}</h1>
+          <h1 className="font-display text-4xl tracking-tight break-all text-ink sm:text-6xl">{username}</h1>
           <span className="font-mono text-sm text-graphite/70">{PLATFORM_NAMES[platform]}</span>
         </div>
       </header>

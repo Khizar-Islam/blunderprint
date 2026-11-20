@@ -10,10 +10,15 @@ import { Blunderprint } from "./Blunderprint";
 import { StackedBars, type BarRow } from "./charts/StackedBars";
 import { ChipGroup, Filters } from "./Filters";
 import { HeatBoard } from "./HeatBoard";
+import type { HeatMode } from "./heat";
+import type { MarkInfo } from "./link";
+import { Plate } from "./Plate";
 import { OpeningsTable } from "./OpeningsTable";
 
-// The patterns section of the player page: filters, the Blunderprint with the heat board beside
-// it, the error breakdowns and the openings. Data: GET /summary (lib/useSummary.ts).
+// The patterns section of the player page: filters, the player's plate (three numbers and the
+// print in one line), the Blunderprint with the heat board beside it (the two are linked: see
+// PrintAndBoard below), the error breakdowns and the openings. Data: GET /summary
+// (lib/useSummary.ts).
 //
 // The filters live in the URL. A change pushes a history entry with the browser's own
 // history.pushState, which Next's router picks up (useSearchParams updates) without a server
@@ -85,7 +90,7 @@ export function PatternsDashboard({
       {summary && (
         <div className={`flex flex-col gap-10 transition-opacity duration-200 ${view.loading ? "opacity-60" : ""}`}>
           <div className="anim-rise">
-            <Headline summary={summary} extracting={view.data!.extracting} />
+            <Plate summary={summary} extracting={view.data!.extracting} />
           </div>
 
           {summary.totals.analysed === 0 ? (
@@ -102,19 +107,7 @@ export function PatternsDashboard({
             </div>
           ) : (
             <>
-              <div className="anim-rise grid gap-8 [animation-delay:80ms] lg:grid-cols-[1fr_20rem]">
-                <figure className="flex min-w-0 flex-col gap-2">
-                  <figcaption className="flex flex-col gap-0.5">
-                    <span className="font-display text-xl text-ink">The Blunderprint</span>
-                    <span className="text-xs text-graphite/70">
-                      One row per analysed game, newest at the top; one mark per error, at its move number, so a
-                      column is the same move in every game. Point at a game to see every move of it.
-                    </span>
-                  </figcaption>
-                  <Blunderprint ribbons={summary.ribbons} gameHref={gameHref} />
-                </figure>
-                <HeatBoard squares={summary.squares} mode={filters.color ?? "both"} />
-              </div>
+              <PrintAndBoard summary={summary} mode={filters.color ?? "both"} gameHref={gameHref} />
 
               <div className="anim-rise flex flex-col gap-5 [animation-delay:160ms]">
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -169,26 +162,26 @@ function bar(key: string, label: string, r: Rate, rate: RateMode, games: number)
   };
 }
 
-function Headline({ summary, extracting }: { summary: Summary; extracting: boolean }) {
-  const t = summary.totals;
-  const per100 = t.moves > 0 ? (t.mistakes.total / t.moves) * 100 : null;
+// The print and the heat board, talking to each other. The link lives here, so a pointer moving
+// over either re-renders these two and nothing else on the page:
+// - `cell`: the board square being pointed at → the print lights the errors that landed there;
+// - `mark`: the error being pointed at in the print → the board outlines its square and names it.
+function PrintAndBoard({ summary, mode, gameHref }: { summary: Summary; mode: HeatMode; gameHref: (id: string, ply: number) => string }) {
+  const [cell, setCell] = useState<number | null>(null);
+  const [mark, setMark] = useState<MarkInfo | null>(null);
   return (
-    <div className="flex flex-col gap-1">
-      <p className="font-mono text-sm text-graphite">
-        {t.analysed} of {t.games} games analysed
-        {per100 !== null && (
-          <>
-            {" · "}
-            {per100.toFixed(1)} errors per 100 moves · {count(t.mistakes.blunder, "blunder", "blunders")},{" "}
-            {count(t.mistakes.mistake, "mistake", "mistakes")}, {count(t.mistakes.inaccuracy, "inaccuracy", "inaccuracies")}
-          </>
-        )}
-      </p>
-      {extracting && (
-        <p className="font-mono text-xs text-graphite/70" role="status">
-          Working out patterns for the newest analysed games…
-        </p>
-      )}
+    <div className="anim-rise grid gap-8 [animation-delay:80ms] lg:grid-cols-[1fr_22rem]">
+      <figure className="flex min-w-0 flex-col gap-2">
+        <figcaption className="flex flex-col gap-0.5">
+          <span className="font-display text-xl text-ink">The Blunderprint</span>
+          <span className="text-xs text-graphite/70">
+            One row per analysed game, newest at the top; one mark per error, at its move number, so a column is
+            the same move in every game. Point at a game to see every move of it.
+          </span>
+        </figcaption>
+        <Blunderprint ribbons={summary.ribbons} gameHref={gameHref} mode={mode} litCell={cell} onMark={setMark} />
+      </figure>
+      <HeatBoard squares={summary.squares} mode={mode} mark={mark} onCell={setCell} gameHref={gameHref} />
     </div>
   );
 }

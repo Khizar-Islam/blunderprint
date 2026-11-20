@@ -4,7 +4,7 @@
 //
 // The review board's 16 coordinates (8 letters, 8 numbers): each one's computed colour must be
 // one of our two notation colours (components/review/Board.tsx: graphite 75% on light squares,
-// ink 85% on dark), resolved in the same page so the comparison is exact. Also saves
+// full ink on dark, since the contrast pass), resolved in the same page so the comparison is exact. Also saves
 // board-labels-zoom.png, the bottom rank at 4×, to check the text rendering by eye (Windows
 // subpixel smoothing used to fringe these labels blue; Board.tsx explains the fix).
 // Then the "Ask the coach" box's labels and announcements (Stage 6, at the end).
@@ -26,7 +26,7 @@ const result = JSON.parse(
   const probe = (color) => { const s = document.createElement('span'); s.style.color = color; document.body.appendChild(s); const c = getComputedStyle(s).color; s.remove(); return c; };
   const ours = {
     light: probe('color-mix(in oklab, var(--color-graphite) 75%, transparent)'),
-    dark: probe('color-mix(in oklab, var(--color-ink) 85%, transparent)'),
+    dark: probe('var(--color-ink)'),
   };
   const labels = [...document.querySelectorAll('[role=img] [data-square] span')]
     .filter((s) => s.children.length === 0 && /^[a-h1-8]$/.test(s.textContent))

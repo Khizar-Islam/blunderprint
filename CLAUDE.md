@@ -169,9 +169,10 @@ blunderprint/
 │  ├─ src/components/        (PlayerSearch, PlayerDashboard, ImportProgress, GamesList, HealthStatus,
 │  │                          MotionProvider, AnalysisBar, Notice (the short "nothing to show" message);
 │  │                          review/: GameReview, Board, EvalGraph, MoveList, BetterMove, classes;
+│  │                          MiniBoard (a small view-only board: plain squares, pieces from public/pieces/, two arrows);
 │  │                          patterns/: PatternsDashboard, Filters, Blunderprint (canvas) + geometry.ts,
-│  │                          HeatBoard + heat.ts, OpeningsTable, charts/ (StackedBars, AnimatedNumber,
-│  │                          scale.ts, sample.ts);
+│  │                          HeatBoard + heat.ts, Plate + digest.ts (the plate), link.ts (print ⇄ board),
+│  │                          OpeningsTable, charts/ (StackedBars, AnimatedNumber, scale.ts, sample.ts);
 │  │                          coach/: CoachButton, CoachPage, AgentTrace, PatternCard, StatLine,
 │  │                          EvidenceBoard, FingerprintLens + lens.ts, AskCoach, AnswerCard, Figure;
 │  │                          landing/: HeroPrint (canvas) + heroTimeline.ts, demoData.ts)
@@ -182,6 +183,7 @@ blunderprint/
 │  ├─ scripts/copy-engine.mjs (predev/prebuild: copies the engine from node_modules/stockfish)
 │  ├─ scripts/snapshot-demo.mjs (by hand, npm run snapshot:demo: live API → src/data/demo.json)
 │  ├─ scripts/og-image.mjs   (by hand, npm run og:image, with the built site running: demo.json → src/app/opengraph-image.png)
+│  ├─ scripts/make-pieces.mjs (by hand: react-chessboard's 12 piece drawings → public/pieces/*.svg, committed)
 │  ├─ scripts/ui-*.mjs       (Stage 7 checks over headless Chrome, run comments at the top of each:
 │  │                          ui-audit hover/press/focus, ui-motion reduced motion + no frames + 390 px,
 │  │                          ui-cls layout shift, ui-frames long frames, ui-labels, ui-shots;
@@ -190,6 +192,7 @@ blunderprint/
 │  │                          ui-contrast: the contrast of all visible text against WCAG AA (§12);
 │  │                          ui-readme-shots: the README's screenshots → docs/img/, takes the site URL,
 │  │                          safe on live: clicks only a pre-answered chip, never types a question)
+│  ├─ public/pieces/         (committed: our own copy of the 12 piece drawings, for the small view-only boards)
 │  ├─ public/engine/         (gitignored, copied at build: stockfish-19-lite-single.js + .wasm,
 │  │                          Copying.txt GPL text, SOURCE.txt where the source is)
 │  └─ .env.example
@@ -677,7 +680,19 @@ Rules:
     - One **canvas** (200 games × ~80 plies is ~16,000 ticks; as DOM nodes that would be slow). Rows 3 px + 1 px gap (2 + 1 on narrow screens), newest at the top. x is the ply on one scale for all rows, so a column is the same move in every game.
     - Rows are cut at **120 plies** so one long game doesn't squash the rest. A cut row gets an end marker tinted by the worst of the player's errors past the cap. The hover/tap **loupe** draws the game's full row, and its ticks can be clicked too.
     - Keyboard: ↑/↓ choose a game, ←/→ step through its errors (past the cap too), Enter opens.
-    - **Heat board:** the destination square of each error. One hue (brick), strength = severity-weighted count (blunder 3, mistake 2, inaccuracy 1) on a scale from 0, so only the costly squares stand out; the label still breaks it down by kind. White's games on a normal board, Black's flipped, "both" with Black's ranks mirrored so rank 1 is always the player's back rank (labels say "from your side").
+    - **Heat board:** the destination square of each error. White's games on a normal board, Black's flipped, "both" with Black's ranks mirrored so rank 1 is always the player's back rank (labels say "from your side"). Until the UI pass it was a tint per square (one hue, strength = blunder 3 / mistake 2 / inaccuracy 1); redrawn below.
+  - **The dashboard in the UI pass (20 Nov 2026; needs summary v3, §8.3):**
+    - **The plate** (`patterns/Plate.tsx`, the first thing in the patterns section; it follows the filters): three numbers that count up (errors per 100 moves, blunders per 100 moves, average accuracy), the print pressed into one line (`digest.ts` `moveDigest`: 60 cells, how often each move number goes wrong, as a share of the busiest; a move number under 4% of the games reach stays empty), and one sentence from the API's own move-number buckets (`densest`: the bucket with the highest errors per 100 moves on ≥ 100 moves, only when it is ≥ 10% above the overall figure; else "spread evenly").
+    - **The heat board is a real board** (`HeatBoard.tsx`): stone squares, coordinates in the corners, and a **brick disc** per square for the win-chance points lost there (`cost`). `heat.ts` `markOf`: the disc's AREA grows with the cost above a **baseline** (the weight 85% of the 64 squares stay under, `BASELINE_SHARE`); squares at or under it get a small dot that fades toward nothing.
+      - **Why a baseline:** a strong player's errors land almost everywhere. On the demo player the 16 costliest squares are within 26% of the top one, so discs sized on the raw cost (sqrt of cost / max) came out nearly equal: a board full of dots (the prototype's "Go stones"). With few errors the baseline is 0 and the area is simply proportional to the cost.
+    - **The print and the board talk** (`PrintAndBoard` in `PatternsDashboard.tsx` holds the link, so a moving pointer re-renders only those two; `link.ts`):
+      - point at (focus, tap) a **square** → the print draws the errors that landed there larger with an ink edge and fades the rest (`drawRows` `emphasis`, one repaint, no resize); the readout under the board shows the square's costliest move as a position (`components/MiniBoard.tsx`) with the move played in rust and the better move in teal. A click (Enter, a second tap) opens that move in the game review.
+      - point at a **mark** in the print (or step to it with the arrow keys) → the board outlines its square and the readout names the move, its cost and the game. The loupe's line also says the move and its cost ("30. Rb1?? · blunder · 19.8 points").
+      - **A mark's position is only shown when it is its square's costliest move.** The summary carries one position per square (120 on the demo player), not one per error (990): that would add ~60 KB. For any other mark the small board is empty with the square tinted, and the click opens the real position.
+    - **A filter change glides** (`Blunderprint.tsx`, `glideY` / `leaveAlpha` in `geometry.ts`): games that stay move to their new row over 480 ms, games that leave fade out where they were in the first half, new ones fade in. Time-based; a timer lands the final picture whether or not a frame ran; reduced motion: no glide. The canvas takes its new height at once (rows below it are simply cut).
+    - **The small boards' pieces are our own copy** (`public/pieces/*.svg`, 12 files, ~13 KB together, made by `node scripts/make-pieces.mjs` from react-chessboard's set; `THIRD_PARTY_NOTICES.md`), drawn as `<img>`: importing them from react-chessboard would pull its whole drag-and-drop board (~50 KB of script) onto the dashboard. They are fetched when the browser is idle, so the first position doesn't draw piece by piece.
+    - **The hydration warning the chat saw on the prototype** ("1 Issue" in dev) came from the prototype's strip only: it was rendered on the server, and an unrounded `(r / max) ** 1.4` gave a different last digit in Node and in Chrome. The real strip is drawn from fetched data in the browser and rounded to two decimals. Checked in `next dev`: the landing, dashboard and coach pages show 0 console errors.
+    - **Measured, local production build on the live API:** ui-audit 0 failures (the dashboard has 285 controls, 64 of them squares), ui-motion all ok, CLS 0.002, ui-contrast AA, ui-csp no violations; the glide's frames differ until ~480 ms and are still from 510 ms.
   - This is the one place to go big visually.
 
 ### Animation (generous and purposeful)

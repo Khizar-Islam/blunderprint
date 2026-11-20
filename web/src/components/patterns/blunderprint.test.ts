@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { drawRows, errorPlies, hitTest, isPlayersPly, layout, loupePly, MARK_COLS, MARK_MIN_W, markAt, MARKER_W, moveName, NEUTRAL_MARKER, PLY_CAP, RIDGE, stepError, TICK_COLOR, tickAt, truncation, type Color } from "./geometry";
+import { DIM_ALPHA, drawRows, errorPlies, glideEase, glideY, hitTest, INK, leaveAlpha, isPlayersPly, layout, loupePly, MARK_COLS, MARK_MIN_W, markAt, MARKER_W, moveName, NEUTRAL_MARKER, PLY_CAP, RIDGE, stepError, TICK_COLOR, tickAt, truncation, type Color } from "./geometry";
 
 // Tests for the Blunderprint's geometry (geometry.ts, drawn by Blunderprint.tsx).
 // classes: one letter per ply, b best, g good, i inaccuracy, m mistake, x blunder.
@@ -146,15 +146,21 @@ describe("drawRows", () => {
   function fakeCanvas() {
     const rects: Rect[] = [];
     const cleared: number[][] = [];
+    const strokes: Rect[] = [];
     const ctx = {
       fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 1,
       globalAlpha: 1,
       clearRect: (x: number, y: number, w: number, h: number) => void cleared.push([x, y, w, h]),
       fillRect(x: number, y: number, w: number, h: number) {
         rects.push({ x, y, w, h, fill: this.fillStyle, alpha: this.globalAlpha });
       },
+      strokeRect(x: number, y: number, w: number, h: number) {
+        strokes.push({ x, y, w, h, fill: this.strokeStyle, alpha: this.globalAlpha });
+      },
     };
-    return { ctx: ctx as unknown as CanvasRenderingContext2D, raw: ctx, rects, cleared };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, raw: ctx, rects, cleared, strokes };
   }
   const row = (classes: string, color: Color = "white") => ({ classes, color });
   const full = () => 1;
@@ -253,5 +259,55 @@ describe("drawRows", () => {
     assert.deepEqual([...new Set(c.rects.map((r) => r.y))], [0, 2 * l.pitch]);
     assert.ok(c.rects.filter((r) => r.y === 2 * l.pitch).every((r) => r.alpha === 0.4));
     assert.equal(c.raw.globalAlpha, 1);
+  });
+
+  test("linked hovering: a lit mark is drawn last, larger, with an ink edge; the others fade; the lines stay", () => {
+    // Row 0: blunders on plies 1 and 5. Row 1: a mistake on ply 3.
+    const rows = [row("xgggxg"), row("ggmggg")];
+    const l = layout(widthFor(6), [6, 6], false);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, rows, full, Infinity, { emphasis: (r, ply) => (r === 0 && ply === 5 ? "lit" : "dim") });
+    const ridges = c.rects.filter((r) => r.fill === RIDGE);
+    assert.ok(ridges.every((r) => r.alpha === 1), "the games' lines aren't dimmed");
+    const dim = c.rects.filter((r) => r.alpha === DIM_ALPHA);
+    assert.deepEqual(dim.map((r) => [r.x, r.y, r.fill]), [
+      [0, 0, TICK_COLOR.blunder],
+      [20, l.pitch, TICK_COLOR.mistake],
+    ]);
+    const last = c.rects.at(-1)!;
+    assert.deepEqual(last, { x: 39, y: -2, w: 22, h: l.rowH + 4, fill: TICK_COLOR.blunder, alpha: 1 });
+    assert.equal(c.strokes.length, 1);
+    assert.equal(c.strokes[0]!.fill, INK);
+    assert.equal(c.raw.globalAlpha, 1);
+  });
+
+  test("no emphasis (nothing pointed at): every mark as usual", () => {
+    const l = layout(widthFor(6), [6], false);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, [row("xgggxg")], full, Infinity, { emphasis: () => null });
+    assert.ok(c.rects.every((r) => r.alpha === 1));
+    assert.equal(c.strokes.length, 0);
+  });
+
+  test("rows can be placed anywhere (the glide), and a second set drawn over the first without clearing", () => {
+    const l = layout(widthFor(2), [2, 2], false);
+    const c = fakeCanvas();
+    drawRows(c.ctx, l, [row("gg"), row("gg")], full, Infinity, { y: (r) => 10 + r * 7 });
+    assert.deepEqual(c.rects.map((r) => r.y), [10, 17]);
+    assert.equal(c.cleared.length, 1);
+    drawRows(c.ctx, l, [row("gg")], full, Infinity, { clear: false });
+    assert.equal(c.cleared.length, 1, "not cleared again");
+    assert.equal(c.rects.length, 3);
+  });
+
+  test("the glide: eased from the old place to the new, landing exactly; leaving rows are gone by half way", () => {
+    assert.equal(glideY(40, 8, 0), 40);
+    assert.equal(glideY(40, 8, 1), 8);
+    assert.equal(glideY(40, 8, 7), 8, "past the end stays at the end");
+    assert.ok(glideY(40, 8, 0.5) < 12, "most of the way there by the middle (ease-out)");
+    assert.equal(glideEase(-1), 0);
+    assert.equal(leaveAlpha(0), 1);
+    assert.equal(leaveAlpha(0.5), 0);
+    assert.equal(leaveAlpha(1), 0);
   });
 });

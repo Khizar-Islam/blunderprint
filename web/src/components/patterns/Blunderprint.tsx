@@ -9,7 +9,9 @@ import { TEXT } from "../review/classes";
 import {
   drawRows,
   errorKindAt,
+  glideY,
   hitTest,
+  leaveAlpha,
   layout,
   loupePly,
   MARK_COLS,
@@ -20,6 +22,8 @@ import {
   TICK_COLOR,
   truncation,
 } from "./geometry";
+import { cellOf, type HeatMode } from "./heat";
+import { annotated, markInfoAt, marksByPly, type MarkInfo } from "./link";
 
 // The signature visual: every analysed game as one thin row (a quiet line with a coloured mark
 // per error, geometry.ts), newest at the top. Drawn on ONE canvas: 200 games × ~80 plies is ~16,000 ticks, which as SVG or divs would
@@ -33,6 +37,11 @@ import {
 // - Touch: the first tap shows the loupe; a second tap on the same tick opens it.
 // - Keyboard: ↑/↓ choose a game, ←/→ step between that game's errors (all of them, past the
 //   cap too), Enter opens, Esc clears.
+// - Linked to the heat board (PatternsDashboard): `litCell` is the board square being pointed
+//   at; the errors that landed there are drawn larger and the rest fade. The error under the
+//   pointer here is reported with `onMark`, and the board outlines its square.
+// - A change of filter doesn't redraw from nothing: games that stay glide to their new row,
+//   games that leave fade out where they were, new ones fade in.
 
 type Ribbon = Summary["ribbons"][number];
 type Active = { row: number; ply: number | null; source: "pointer" | "key" | "tap" };
@@ -41,11 +50,24 @@ const REVEAL_MS = 700; // the first draw sweeps down the rows in this long
 const FADE_MS = 300; // each row's fade-in (also for games that arrive later, e.g. one the engine just finished)
 const LAND_MARGIN_MS = 150; // the safety timer's slack after the last fade should have ended
 const LOUPE_H = 14;
+const GLIDE_MS = 480; // rows moving to their new place after a filter change
 
 const RESULT = { win: "Win", loss: "Loss", draw: "Draw" } as const;
 const KIND_WORD = { inaccuracy: "inaccuracy", mistake: "mistake", blunder: "blunder" } as const;
 
-export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHref: (gameId: string, ply: number) => string }) {
+export function Blunderprint({
+  ribbons,
+  gameHref,
+  mode = "both",
+  litCell = null,
+  onMark,
+}: {
+  ribbons: Ribbon[];
+  gameHref: (gameId: string, ply: number) => string;
+  mode?: HeatMode;
+  litCell?: number | null;
+  onMark?: (mark: MarkInfo | null) => void;
+}) {
   const router = useRouter();
   const reduced = useReducedMotion();
   const wrap = useRef<HTMLDivElement>(null);
@@ -70,13 +92,34 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
   // The first batch sweeps top to bottom; games that arrive in a later refetch fade in where
   // they land. Kept in a ref: it only steers the drawing, never React's output.
   const appearAt = useRef(new Map<string, number>());
+  // ---- Glide: where each row was before the list changed -------------------------------------
+  // `from`: the row each staying game had; `ghosts`: the games that left, with their old rows.
+  const shownBefore = useRef<Ribbon[]>([]);
+  const glide = useRef<{ t0: number; from: Map<string, number>; ghosts: { ribbon: Ribbon; row: number }[] } | null>(null);
   useEffect(() => {
     const now = performance.now();
     const first = appearAt.current.size === 0;
+    const before = shownBefore.current;
+    if (!first && before !== ribbons) {
+      const next = new Set(ribbons.map((r) => r.gameId));
+      const from = new Map(before.map((r, i) => [r.gameId, i]));
+      const moved = ribbons.some((r, i) => from.has(r.gameId) && from.get(r.gameId) !== i);
+      const ghosts = before.map((ribbon, row) => ({ ribbon, row })).filter((g) => !next.has(g.ribbon.gameId));
+      glide.current = moved || ghosts.length > 0 ? { t0: now, from, ghosts } : null;
+    }
+    shownBefore.current = ribbons;
     ribbons.forEach((r, i) => {
       if (!appearAt.current.has(r.gameId)) appearAt.current.set(r.gameId, first ? now + (i / ribbons.length) * REVEAL_MS : now);
     });
   }, [ribbons]);
+
+  // ---- Linked hovering: which marks to light -------------------------------------------------
+  const marks = useMemo(() => ribbons.map(marksByPly), [ribbons]);
+  const link = useRef({ litCell, mode, marks });
+  useEffect(() => {
+    link.current = { litCell, mode, marks };
+  });
+  const repaint = useRef<() => void>(() => {});
 
   // ---- Draw ------------------------------------------------------------------------------------
   useEffect(() => {
@@ -90,41 +133,88 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels; sharp on high-DPI screens
 
     let frame = 0;
-    const paint = () => {
-      const now = performance.now();
+    // The marks on the board square being pointed at are lit, the others dimmed.
+    const emphasis = (row: number, ply: number) => {
+      const { litCell: cell, mode: m, marks: byPly } = link.current;
+      if (cell === null) return null;
+      const mark = byPly[row]?.get(ply);
+      return mark && cellOf(mark.square, ribbons[row]!.color, m) === cell ? "lit" : "dim";
+    };
+    const draw = (now: number, final: boolean) => {
       let pending = false;
-      drawRows(ctx, l, ribbons, (row) => {
-        if (reduced) return 1;
-        const start = appearAt.current.get(ribbons[row]!.gameId) ?? 0;
-        const a = Math.max(0, Math.min(1, (now - start) / FADE_MS));
-        if (a < 1) pending = true;
-        return a;
-      });
-      if (pending) frame = requestAnimationFrame(paint);
+      const g = glide.current;
+      const k = !g || final || reduced ? 1 : Math.min(1, (now - g.t0) / GLIDE_MS);
+      if (g && k < 1) {
+        pending = true;
+        // The games that left: fading where they were, under the rows that stay.
+        const a = leaveAlpha(k);
+        drawRows(ctx, l, g.ghosts.map((x) => x.ribbon), () => a, Infinity, { y: (i) => g.ghosts[i]!.row * l.pitch });
+      } else if (g) glide.current = null;
+      drawRows(
+        ctx,
+        l,
+        ribbons,
+        (row) => {
+          if (reduced || final) return 1;
+          const start = appearAt.current.get(ribbons[row]!.gameId) ?? 0;
+          const a = Math.max(0, Math.min(1, (now - start) / FADE_MS));
+          if (a < 1) pending = true;
+          return a;
+        },
+        Infinity,
+        {
+          clear: !(g && k < 1),
+          emphasis,
+          y: g && k < 1 ? (row) => glideY((g.from.get(ribbons[row]!.gameId) ?? row) * l.pitch, row * l.pitch, k) : undefined,
+        },
+      );
+      return pending;
+    };
+    const paint = () => {
+      frame = draw(performance.now(), false) ? requestAnimationFrame(paint) : 0;
     };
     paint();
+    // A hover on the board repaints at once (no new layout, no resize).
+    repaint.current = () => {
+      if (frame === 0) draw(performance.now(), false);
+    };
     // The fade runs on animation frames; a browser that throttles them (a background tab, battery
     // saver) could leave rows half drawn. This timer draws the final state when the last fade
     // should have ended, frames or not (the same idea as AnimatedNumber's countTo).
     const lastStart = Math.max(0, ...ribbons.map((r) => appearAt.current.get(r.gameId) ?? 0));
+    const glideEnd = glide.current ? glide.current.t0 + GLIDE_MS : 0;
     const land = window.setTimeout(
       () => {
         cancelAnimationFrame(frame);
-        drawRows(ctx, l, ribbons, () => 1);
+        frame = 0;
+        draw(performance.now(), true);
       },
-      Math.max(0, lastStart + FADE_MS - performance.now()) + LAND_MARGIN_MS,
+      Math.max(0, lastStart + FADE_MS - performance.now(), glideEnd - performance.now()) + LAND_MARGIN_MS,
     );
     return () => {
       cancelAnimationFrame(frame);
       window.clearTimeout(land);
+      repaint.current = () => {};
     };
   }, [l, ribbons, reduced]);
+
+  // The board square being pointed at changed (or the colour view): light its marks.
+  useEffect(() => {
+    repaint.current();
+  }, [litCell, mode]);
 
   // The selection can outlive the data (filters changed): drop it if its row is gone.
   const current = active && active.row < ribbons.length ? active : null;
   const game = current ? ribbons[current.row]! : null;
 
   const open = useCallback((row: number, ply: number | null) => router.push(gameHref(ribbons[row]!.gameId, ply ?? 0)), [router, gameHref, ribbons]);
+
+  // Tell the heat board which error is under the pointer (or chosen with the keys).
+  const activeMark = useMemo(() => (game && current ? markInfoAt(game, current.ply) : null), [game, current]);
+  useEffect(() => {
+    onMark?.(activeMark);
+  }, [activeMark, onMark]);
+  useEffect(() => () => onMark?.(null), [onMark]);
 
   // ---- Pointer -----------------------------------------------------------------------------------
   const pointAt = (e: React.PointerEvent | React.MouseEvent) => {
@@ -315,6 +405,8 @@ function Loupe({
     return loupePly(rect.width, plies, e.clientX - rect.left);
   };
   const kind = shownPly ? errorKindAt(game.classes, shownPly, game.color) : null;
+  // The move itself and what it cost, when the summary sent this game's marks.
+  const mark = markInfoAt(game, shownPly);
 
   return (
     <div
@@ -329,7 +421,9 @@ function Loupe({
         <span>{`${fullDate(game.playedAt)} · ${RESULT[game.result]} · ${game.speed} · as ${game.color}`}</span>
         <span className={`grow text-right ${kind ? TEXT[kind] : ""}`}>
           {shownPly
-            ? `move ${moveName(shownPly)}${kind ? ` · ${KIND_WORD[kind]}` : ""}`
+            ? mark
+              ? `${moveName(shownPly)} ${annotated(mark.san, mark.kind)} · ${KIND_WORD[mark.kind]} · ${mark.winDrop.toFixed(1)} points`
+              : `move ${moveName(shownPly)}${kind ? ` · ${KIND_WORD[kind]}` : ""}`
             : `${Math.ceil(plies / 2)} moves${cut.cut ? " · longer than the chart shows" : ""}`}
         </span>
       </div>

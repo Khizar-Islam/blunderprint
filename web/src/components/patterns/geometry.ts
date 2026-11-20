@@ -132,6 +132,21 @@ export function loupePly(width: number, plies: number, x: number): number | null
   return Math.min(plies, Math.floor((x / width) * plies) + 1);
 }
 
+export const INK = "#1b1d1a";
+// A mark that isn't part of what's being pointed at (the dashboard's linked hovering).
+export const DIM_ALPHA = 0.16;
+
+export interface DrawOptions {
+  // A row's top edge (default: row × pitch). The dashboard glides rows to their new place when
+  // the filters change.
+  y?: (row: number) => number;
+  // false: draw over what's there (a second set of rows on the same canvas).
+  clear?: boolean;
+  // Linked hovering: "lit" marks are drawn larger with an ink edge, on top of everything;
+  // "dim" ones fade back. Null: as usual.
+  emphasis?: (row: number, ply: number) => "lit" | "dim" | null;
+}
+
 // Draws the rows: each game's quiet line, then its error marks on top. `alpha(row)` fades rows
 // in (reveal and newly arrived games). `colouredUpTo`: errors after that ply aren't marked yet,
 // as if not analysed (the landing's engine pass colours the print column by column). End markers
@@ -142,14 +157,16 @@ export function drawRows(
   rows: { classes: string; color: Color }[],
   alpha: (row: number) => number,
   colouredUpTo = Infinity,
+  opts: DrawOptions = {},
 ): void {
-  ctx.clearRect(0, 0, l.width, l.height);
+  if (opts.clear !== false) ctx.clearRect(0, 0, l.width, l.height);
   const edge = l.columns * l.tickW; // marks stop at the cap: the margin past it is the end marker's
+  const lit: { x: number; y: number; w: number; color: string; a: number }[] = [];
   rows.forEach((r, row) => {
     const a = alpha(row);
     if (a <= 0) return;
     ctx.globalAlpha = a;
-    const y = row * l.pitch;
+    const y = opts.y ? opts.y(row) : row * l.pitch;
     const shown = Math.min(r.classes.length, l.columns);
     ctx.fillStyle = RIDGE;
     ctx.fillRect(0, y, shown * l.tickW, l.rowH);
@@ -158,9 +175,17 @@ export function drawRows(
       const kind = errorKindAt(r.classes, ply, r.color);
       if (!kind) continue;
       const x = (ply - 1) * l.tickW;
+      const w = Math.min(Math.max(MARK_MIN_W, MARK_COLS * l.tickW), edge - x);
+      const em = opts.emphasis ? opts.emphasis(row, ply) : null;
+      if (em === "lit") {
+        lit.push({ x, y, w, color: TICK_COLOR[kind], a });
+        continue;
+      }
+      ctx.globalAlpha = em === "dim" ? a * DIM_ALPHA : a;
       ctx.fillStyle = TICK_COLOR[kind];
-      ctx.fillRect(x, y, Math.min(Math.max(MARK_MIN_W, MARK_COLS * l.tickW), edge - x), l.rowH);
+      ctx.fillRect(x, y, w, l.rowH);
     }
+    ctx.globalAlpha = a;
     const t = truncation(r.classes, r.color, l.columns);
     if (t.cut && colouredUpTo > l.columns) {
       // End marker: a short notch after a 2 px gap, in the colour of the worst hidden error.
@@ -168,8 +193,26 @@ export function drawRows(
       ctx.fillRect(l.columns * l.tickW + 2, y, MARKER_W - 2, l.rowH);
     }
   });
+  // The lit marks last, so a neighbouring row's line never covers their edge: 1 px larger all
+  // round (at least 5 px wide), with an ink outline.
+  for (const m of lit) {
+    const w = Math.max(5, m.w + 2);
+    ctx.globalAlpha = m.a;
+    ctx.fillStyle = m.color;
+    ctx.fillRect(m.x - 1, m.y - 2, w, l.rowH + 4);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(m.x - 1.5, m.y - 2.5, w + 1, l.rowH + 5);
+  }
   ctx.globalAlpha = 1;
 }
+
+// Where each row is while the rows glide to a new order (a filter changed, a game arrived).
+// `from`/`to`: a row's top before and after; k: 0 → 1 over the move. Eased so rows settle.
+export const glideEase = (k: number) => 1 - (1 - Math.min(1, Math.max(0, k))) ** 4;
+export const glideY = (from: number, to: number, k: number) => from + (to - from) * glideEase(k);
+// Rows that leave fade out in the first half of the move, where they were.
+export const leaveAlpha = (k: number) => Math.max(0, 1 - Math.min(1, Math.max(0, k)) * 2.2);
 
 // "23." for White's 23rd move, "23…" for Black's.
 export const moveName = (ply: number) => `${Math.ceil(ply / 2)}${ply % 2 === 1 ? "." : "…"}`;

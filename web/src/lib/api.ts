@@ -260,7 +260,26 @@ export interface Rate extends KindCounts {
   per100: number | null;
 }
 
-export type SquareCount = KindCounts & { square: string; total: number };
+// A square's costliest error (summary v3): enough to draw its position with the move played
+// and the better one. playedUci is null when the start square isn't certain; betterUci when the
+// engine's better move isn't known.
+export interface WorstMove {
+  gameId: string;
+  ply: number;
+  kind: ErrorKind;
+  san: string;
+  winDrop: number;
+  fen: string; // before the move
+  playedUci: string | null;
+  betterUci: string | null;
+}
+
+// cost: the win-chance points lost on the square, added up. cost and worst are missing in an
+// answer from an API still on summary v2 (the minutes between a web and an API deploy).
+export type SquareCount = KindCounts & { square: string; total: number; cost?: number; worst?: WorstMove };
+
+// One error of a ribbon's game: [ply, destination square, the move (SAN), win-chance points lost].
+export type RibbonMark = [number, string, string, number];
 
 export interface Summary {
   version: number;
@@ -271,6 +290,7 @@ export interface Summary {
     analysed: number; // games with features: the base of every rate
     moves: number;
     mistakes: KindCounts & { total: number };
+    accuracy?: number | null; // average move accuracy over the analysed games (v3)
     firstPlayedAt: string | null;
     lastPlayedAt: string | null;
   };
@@ -293,7 +313,16 @@ export interface Summary {
   squares: Record<"white" | "black", SquareCount[]>;
   // One per analysed game, newest first. classes: one letter per ply, both sides
   // (b best, g good, i inaccuracy, m mistake, x blunder).
-  ribbons: { gameId: string; playedAt: string; color: "white" | "black"; result: "win" | "loss" | "draw"; speed: Speed; classes: string }[];
+  // marks (v3): the game's errors in ply order; [] until its features are extracted.
+  ribbons: {
+    gameId: string;
+    playedAt: string;
+    color: "white" | "black";
+    result: "win" | "loss" | "draw";
+    speed: Speed;
+    classes: string;
+    marks?: RibbonMark[];
+  }[];
 }
 
 // extracting: some analysed games have no features yet, so the numbers will still change.

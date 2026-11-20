@@ -32,7 +32,7 @@ The API runs on a free tier that sleeps after 15 minutes, so the first request c
 
 **2. Analysis in your browser.** Stockfish runs on the visitor's own machine. Each game becomes a thin row of ticks, one per move, and the rows fill in tick by tick as the engine works.
 
-**3. The Blunderprint.** All the rows stacked make a fingerprint of the player's habits: errors in colour (amber inaccuracy, rust mistake, brick blunder), everything else quiet. Next to it, a heat board shows where on the board the costly errors land. Hover a row to read a game, click a tick to open that exact move.
+**3. The Blunderprint.** All the rows stacked make a fingerprint of the player's habits: errors in colour (amber inaccuracy, rust mistake, brick blunder), everything else quiet. Next to it, a board shows where the costly errors land: the bigger a square's mark, the more win chances were lost there. The two are linked: point at a square and its errors light up in the print, with the square's costliest move shown as a position; point at an error and its square lights up. Hover a row to read a game, click a mark to open that exact move.
 
 ![The patterns dashboard: the Blunderprint and the heat board](docs/img/dashboard.png)
 

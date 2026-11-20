@@ -70,6 +70,7 @@ THE SOFTWARE.
 ## Chess pieces by Colin M.L. Burnett
 
 - **What it is:** the standard piece drawings from Wikimedia Commons ("Cburnett" set). react-chessboard ships them as its default pieces, and Blunderprint draws them on every board. Checked: the piece paths in the installed package (`defaultPieces` in `react-chessboard/dist`) are the Cburnett drawings, and react-chessboard's own source (`src/pieces.tsx`) credits "en:User:Cburnett" and the Commons category below.
+- **Our own copy:** the same 12 drawings are also committed as files in `web/public/pieces/` (`wK.svg` … `bP.svg`), written by `web/scripts/make-pieces.mjs` from react-chessboard's set without changes to the shapes. The small view-only boards (the dashboard's readout) draw them as images, so those pages don't load react-chessboard. The same licence and notice apply to the copy.
 - **Licence:** the author released them under the GNU Free Documentation License, the BSD licence and the GNU General Public License (version 2 or later), "you may select the license of your choice"; Wikimedia Commons also lists CC BY-SA 3.0. **Blunderprint uses them under the BSD licence** (3-clause).
 - **Sources:** <https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces> and <https://en.wikipedia.org/wiki/User:Cburnett/GFDL_images/Chess>.
 - **Notice:**

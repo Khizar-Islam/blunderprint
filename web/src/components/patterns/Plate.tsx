@@ -34,7 +34,9 @@ export function Plate({ summary, extracting }: { summary: Summary; extracting: b
 
       {t.analysed > 0 && (
         <div className="flex flex-col gap-1.5">
+          {/* data-print-line: where a print carried over from the landing page is pressed flat (lib/printCarry.ts). */}
           <div
+            data-print-line
             className="flex h-4 w-full gap-px"
             role="img"
             aria-label={

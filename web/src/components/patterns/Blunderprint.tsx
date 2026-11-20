@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Summary } from "@/lib/api";
 import { fullDate } from "@/lib/format";
+import { carryWaiting, landCarry } from "@/lib/printCarry";
 import { TEXT } from "../review/classes";
 import {
   drawRows,
@@ -40,6 +41,9 @@ import { annotated, markInfoAt, marksByPly, type MarkInfo } from "./link";
 // - Linked to the heat board (PatternsDashboard): `litCell` is the board square being pointed
 //   at; the errors that landed there are drawn larger and the rest fade. The error under the
 //   pointer here is reported with `onMark`, and the board outlines its square.
+// - Arriving from the landing page's "Open this Blunderprint" (`carry`, lib/printCarry.ts): a
+//   copy of the landing's print is waiting on screen, so this one is drawn whole at once (no
+//   sweep) and the copy settles onto it.
 // - A change of filter doesn't redraw from nothing: games that stay glide to their new row,
 //   games that leave fade out where they were, new ones fade in.
 
@@ -61,12 +65,14 @@ export function Blunderprint({
   mode = "both",
   litCell = null,
   onMark,
+  carry,
 }: {
   ribbons: Ribbon[];
   gameHref: (gameId: string, ply: number) => string;
   mode?: HeatMode;
   litCell?: number | null;
   onMark?: (mark: MarkInfo | null) => void;
+  carry?: string;
 }) {
   const router = useRouter();
   const reduced = useReducedMotion();
@@ -108,10 +114,13 @@ export function Blunderprint({
       glide.current = moved || ghosts.length > 0 ? { t0: now, from, ghosts } : null;
     }
     shownBefore.current = ribbons;
+    // A print carried over from the landing page is already on screen: no sweep, the rows are there.
+    const carried = first && !!carry && carryWaiting(carry);
     ribbons.forEach((r, i) => {
-      if (!appearAt.current.has(r.gameId)) appearAt.current.set(r.gameId, first ? now + (i / ribbons.length) * REVEAL_MS : now);
+      if (!appearAt.current.has(r.gameId))
+        appearAt.current.set(r.gameId, carried ? now - FADE_MS : first ? now + (i / ribbons.length) * REVEAL_MS : now);
     });
-  }, [ribbons]);
+  }, [ribbons, carry]);
 
   // ---- Linked hovering: which marks to light -------------------------------------------------
   const marks = useMemo(() => ribbons.map(marksByPly), [ribbons]);
@@ -174,6 +183,8 @@ export function Blunderprint({
       frame = draw(performance.now(), false) ? requestAnimationFrame(paint) : 0;
     };
     paint();
+    // The landing's copy of the print, if one is waiting, settles onto this canvas now.
+    if (carry && ribbons.length > 0) landCarry(carry, el);
     // A hover on the board repaints at once (no new layout, no resize).
     repaint.current = () => {
       if (frame === 0) draw(performance.now(), false);
@@ -196,7 +207,7 @@ export function Blunderprint({
       window.clearTimeout(land);
       repaint.current = () => {};
     };
-  }, [l, ribbons, reduced]);
+  }, [l, ribbons, reduced, carry]);
 
   // The board square being pointed at changed (or the colour view): light its marks.
   useEffect(() => {

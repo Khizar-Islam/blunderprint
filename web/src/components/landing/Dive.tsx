@@ -21,6 +21,7 @@ import { ANNOTATION, statText } from "@/lib/coach";
 import { demo } from "./demoData";
 import { DIVE_COLS, divePhases, diveRows, errorsFoundUpTo, lerp, resultWords, seg, splitFigure, stageBox, utcDay, xlerp } from "./diveTimeline";
 import { clockText, heroFrame, SCAN_END_MS } from "./heroTimeline";
+import { PrintLink } from "./PrintLink";
 
 const RUST = "#D9772B"; // hex, not CSS variables: SVG attributes and canvas fills
 const TEAL = "#3E7C74";
@@ -288,6 +289,10 @@ function Stage({ at, className }: { at?: number; className: string }) {
         ctx.fillRect(hx + Math.min(hw - 1, f.scanX), hy - 6, 1, ROWS.length * pitch0 + 12);
       }
       ctx.globalAlpha = 1;
+      // While the print is whole and developed, the canvas says where it is ("x,y,width,height"):
+      // "Open this Blunderprint" carries a copy of it onto the dashboard (lib/printCarry.ts).
+      if (at === undefined && a === 0 && devT >= SCAN_END_MS) cv.dataset.print = `${hx},${hy},${hw},${ROWS.length * pitch0}`;
+      else delete cv.dataset.print;
 
       // ---- The first screen's words and labels ---------------------------------------------------
       if (heroEl) {
@@ -563,12 +568,13 @@ function Stage({ at, className }: { at?: number; className: string }) {
           <Link href={`${BASE}/coach`} className="btn-solid">
             Read the whole report
           </Link>
-          <Link
-            href={BASE}
+          <PrintLink
+            platform={demo.platform}
+            username={demo.username}
             className="inline-flex min-h-11 items-center rounded px-1 font-medium text-ink underline decoration-ink/30 underline-offset-4 transition-colors hover:decoration-ink active:scale-[0.97]"
           >
             Open this Blunderprint
-          </Link>
+          </PrintLink>
         </div>
       </div>
     </div>

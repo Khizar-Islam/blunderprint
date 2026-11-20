@@ -2,6 +2,7 @@ import Link from "next/link";
 import { HealthStatus } from "@/components/HealthStatus";
 import { demo } from "@/components/landing/demoData";
 import { Dive } from "@/components/landing/Dive";
+import { PrintLink } from "@/components/landing/PrintLink";
 import { PlayerSearch } from "@/components/PlayerSearch";
 import { dayDate } from "@/lib/format";
 
@@ -50,9 +51,10 @@ export default function Home() {
           <p className="flex flex-wrap items-center gap-x-1 text-sm text-graphite sm:text-base xl:text-sm">
             {/* In the narrow 1280 px column: the label on its own line, both links on the next. */}
             <span className="mr-1 xl:basis-full">No account? Explore the demo:</span>
-            <Link href={base} className={DEMO_LINK}>
+            {/* A click carries the print below onto the dashboard's (components/landing/PrintLink.tsx). */}
+            <PrintLink platform={demo.platform} username={demo.username} className={DEMO_LINK}>
               Open this Blunderprint
-            </Link>
+            </PrintLink>
             <span aria-hidden="true" className="text-graphite/70">
               ·
             </span>

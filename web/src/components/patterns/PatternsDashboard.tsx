@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import type { Platform, Rate, Summary } from "@/lib/api";
 import { apiQuery, filtersToQuery, parseFilters, type DashboardFilters } from "@/lib/filters";
+import { carryKey } from "@/lib/printCarry";
 import { count } from "@/lib/format";
 import { useSummary } from "@/lib/useSummary";
 import { Blunderprint } from "./Blunderprint";
@@ -107,7 +108,12 @@ export function PatternsDashboard({
             </div>
           ) : (
             <>
-              <PrintAndBoard summary={summary} mode={filters.color ?? "both"} gameHref={gameHref} />
+              <PrintAndBoard
+                summary={summary}
+                mode={filters.color ?? "both"}
+                gameHref={gameHref}
+                carry={filtered ? undefined : carryKey(platform, username)}
+              />
 
               <div className="anim-rise flex flex-col gap-5 [animation-delay:160ms]">
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -166,7 +172,19 @@ function bar(key: string, label: string, r: Rate, rate: RateMode, games: number)
 // over either re-renders these two and nothing else on the page:
 // - `cell`: the board square being pointed at → the print lights the errors that landed there;
 // - `mark`: the error being pointed at in the print → the board outlines its square and names it.
-function PrintAndBoard({ summary, mode, gameHref }: { summary: Summary; mode: HeatMode; gameHref: (id: string, ply: number) => string }) {
+// `carry`: the key of a print carried over from the landing page (lib/printCarry.ts), only for
+// the unfiltered view: the landing's print is all the games.
+function PrintAndBoard({
+  summary,
+  mode,
+  gameHref,
+  carry,
+}: {
+  summary: Summary;
+  mode: HeatMode;
+  gameHref: (id: string, ply: number) => string;
+  carry?: string;
+}) {
   const [cell, setCell] = useState<number | null>(null);
   const [mark, setMark] = useState<MarkInfo | null>(null);
   return (
@@ -179,7 +197,7 @@ function PrintAndBoard({ summary, mode, gameHref }: { summary: Summary; mode: He
             the same move in every game. Point at a game to see every move of it.
           </span>
         </figcaption>
-        <Blunderprint ribbons={summary.ribbons} gameHref={gameHref} mode={mode} litCell={cell} onMark={setMark} />
+        <Blunderprint ribbons={summary.ribbons} gameHref={gameHref} mode={mode} litCell={cell} onMark={setMark} carry={carry} />
       </figure>
       <HeatBoard squares={summary.squares} mode={mode} mark={mark} onCell={setCell} gameHref={gameHref} />
     </div>

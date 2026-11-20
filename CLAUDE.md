@@ -163,6 +163,7 @@ blunderprint/
 │  │                          coach.ts button state + stat/facts text, runStream.ts + useRunStream.ts,
 │  │                          useCoachInfo.ts; Stage 7: useReveal.ts + stagger.ts, useIndicator.ts,
 │  │                          dashboardStart.ts + summaryPrefetch.ts, mountQueue.ts + useMountWhenNear.ts,
+│  │                          printCarry.ts (the landing's print carried onto the demo dashboard, §12),
 │  │                          firstRows.ts (Stage 8: how many rows of the games list render at once),
 │  │                          perfProbe.ts + perfStats.ts (?perf=1); Stage 6: ask.ts box/answer/error rules,
 │  │                          askHistory.ts this visit's questions)
@@ -176,7 +177,8 @@ blunderprint/
 │  │                          coach/: CoachButton, CoachPage, AgentTrace, PatternCard, StatLine,
 │  │                          EvidenceBoard, FingerprintLens + lens.ts, AskCoach, AnswerCard, Figure;
 │  │                          landing/: Dive (the scroll-driven dive, canvas + board) + diveTimeline.ts,
-│  │                          heroTimeline.ts (the first screen's timing), demoData.ts)
+│  │                          heroTimeline.ts (the first screen's timing), demoData.ts,
+│  │                          PrintLink ("Open this Blunderprint": warms the summary, starts the carry))
 │  ├─ src/data/demo.json     (committed landing snapshot of the frozen demo player)
 │  ├─ src/engine/            (stockfish.ts worker wrapper, uci.ts parsing, analyseGame.ts,
 │  │                          replay.ts, scheduler.ts claim/analyse/post + Web Lock,
@@ -644,6 +646,13 @@ Rules:
   - **No animation frames:** if no frame has run 400 ms after load, the first screen is drawn final at once and a scroll paints directly (no `requestAnimationFrame`). A timer also lands the final first screen at 5.3 s.
   - **Reduced motion:** no pinned stage (`motion-reduce:` un-pins it and gives the block its natural height). The first screen's final print with its note, then a second, still stage with the dive's final picture (board, both arrows, the coach's words). No "Play the dive". Read in the effect with `matchMedia`, not kept in React state (a `useSyncExternalStore` version rendered the animated stage first).
   - A screen reader gets one hidden sentence that says what the dive shows.
+  - **The print is carried onto the demo dashboard** (UI pass step 4, 20 Nov 2026; `lib/printCarry.ts`, `landing/PrintLink.tsx`). "Open this Blunderprint" leads to the same 200 games; without this the print vanished with the page and another one swept in.
+    - **Start:** a plain left click while the landing's print is whole (the dive's canvas says so with `data-print="x,y,width,height"`, only on the first screen once the scan has passed) copies that region into ONE fixed canvas on `<body>`. It is outside React, so the route change doesn't touch it. A click that opens a new tab, reduced motion, or a print less than 60% on screen: no carry, a plain navigation.
+    - **Land:** when the dashboard's Blunderprint first paints (unfiltered only; `carry` prop), the copy moves onto its counterpart over 700 ms and fades: onto the dashboard's own print when ≥ 25% of it is on screen (a tall window), otherwise it is **pressed flat into the plate's one-line strip** (`[data-print-line]`, `Plate.tsx`): the same games on the same move axis, which is what that strip is. At 1280×900, 768 and 390 px the print starts at the bottom of the screen or below it, so the strip is the usual landing. The dashboard's print is drawn whole at once then (no sweep).
+    - **A sibling's entrance is finished first** (`settledBox`: the patterns sections rise into place, and the copy needs to know where they END up).
+    - **It always ends:** no dashboard print within 1.5 s (a sleeping server, another page) → the copy fades where it is; a second timer removes it if the browser runs no animation frames.
+    - Only a transform and opacity on a fixed element: measured CLS 0.0000 across the click at 1280×900, 1280×1500, 768 and 390 px.
+    - **Pointing at the link starts the dashboard's summary request** (`prefetchSummary`, also on focus and touch); the dashboard takes that answer instead of asking again. It is the landing's only request to the API besides the health check, and only when the link is pointed at.
   - **Link-preview picture (Stage 8 chunk D step e, 19 Nov 2026):** `src/app/opengraph-image.png` (1200×630, committed) + `opengraph-image.alt.txt`. Next serves it and writes the `og:image` / `twitter:image` tags by the file's name; `layout.tsx` sets `metadataBase` (the site's address, so the tags are absolute URLs), the Open Graph title and description, and the large Twitter card. Every page shows the same picture.
     - **Made by `npm run og:image`** (`scripts/og-image.mjs`, from `web/`, with `npm run build && npx next start -p 3000` running): the headline, and the print of all 200 snapshot games painted by the real `drawRows` (it runs in Node against a recording canvas context, and the rectangles are replayed on a real canvas in headless Chrome, with the site's own fonts). Not Next's `ImageResponse`: that renderer only knows flexbox, and the print is ~16,000 ticks.
     - **Re-run rule: after every `npm run snapshot:demo`, run `npm run og:image` too** and commit both, or the preview shows older games than the landing page.

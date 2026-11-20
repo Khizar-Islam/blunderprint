@@ -44,7 +44,7 @@ Below it, the same errors by phase, clock, move number and speed, per 100 moves 
 
 ![The game review page on an inaccuracy](docs/img/review.png)
 
-**5. Coach me.** The coach agent looks into the analysed games and reports 3 to 5 recurring patterns. Each has a statistic against the player's own average, the games it shows up in, an explanation, an exercise, and real positions that animate from the move played to the better move.
+**5. Coach me.** The coach agent looks into the analysed games and reports 3 to 5 recurring patterns. Each has a statistic against the player's own average, the games it shows up in, an explanation, an exercise, and real positions that animate from the move played to the better move. Every figure sits on a teal rule: point at one and the page says where it comes from ("49.4 is what 47. Nd4?? lost in win chance") and outlines that position.
 
 ![One pattern from the coach report, with its evidence boards](docs/img/coach-pattern.png)
 
@@ -266,13 +266,15 @@ Normal Chrome, dev tools closed, 1280×593 window, 60 Hz:
 
 | Test | Frames | Worst gap | Dropped | Load |
 |---|---|---|---|---|
-| Landing hero plays | 1,364 | 17.0 ms | 0% | LCP 308 ms · CLS 0.003 |
+| Landing hero plays (the first hero, since replaced) | 1,364 | 17.0 ms | 0% | LCP 308 ms · CLS 0.003 |
 | Dashboard, 9 filter changes (70.9 s) | 4,253 | 33.4 ms | 0% | LCP 1,728 ms · CLS 0.016 |
 | Dashboard, hover the print and board, scroll (39.0 s) | 2,342 | 17.0 ms | 0% | LCP 1,952 ms · CLS 0.258 → fixed, below |
 | Game review, drag the graph and hold ←/→ (53.7 s) | 3,223 | 17.5 ms | 0% | LCP 708 ms · CLS 0.010 |
 | Coach report, scroll through the boards (34.7 s) | 2,078 | 33.5 ms | 0.2% | LCP 2,292 ms |
 
 At 60 Hz a frame is 16.7 ms, so a worst gap of about 17 ms means no frame was missed, and 33 ms is one missed frame.
+
+The landing page has since become a scroll-driven dive (20 Nov 2026), and that version has not been through this checklist by hand. Measured by script instead: its layout shift through the load and a full scroll is 0.0001 at 1280 px and 0.0003 at 390 px.
 
 Two things the checklist found, and their fixes:
 
@@ -283,10 +285,10 @@ Lighthouse (mobile, simulated slow 4G and 4× slower CPU):
 
 | Page | Score | LCP | TBT | CLS |
 |---|---|---|---|---|
-| Landing | 100 | 1.3 s | 60 ms | 0 |
-| Demo dashboard | 88 | 3.69 s | 98 ms | 0 |
+| Landing | 100 | 1.0 s | 53 ms | 0 |
+| Demo dashboard | 87 | 3.9 s | 94 ms | 0 |
 
-The dashboard row is the median of 5 mobile runs on 19 Nov 2026 (scores 86 to 90). A day earlier it was 78, with 4.0 s LCP and 379 ms TBT: the 200 rows of the games list rendered in one long frame, and they now skip off-screen layout and paint and render the first 30 rows first. The dashboard waits on the API (Render's free tier) more than on the browser. Its games list now arrives in one request instead of four, one after another (18 Nov 2026): 8 API requests became 5, and the list's bytes went from 71.8 KB on the wire (473 KB of JSON) to about 19 KB (215 KB), because a list row no longer carries the mistake features that only the patterns and the coach use.
+Both rows are the median of 5 mobile runs on 20 Nov 2026 (landing 99 to 100, dashboard 86 to 88). A day earlier it was 78, with 4.0 s LCP and 379 ms TBT: the 200 rows of the games list rendered in one long frame, and they now skip off-screen layout and paint and render the first 30 rows first. The dashboard waits on the API (Render's free tier) more than on the browser. Its games list now arrives in one request instead of four, one after another (18 Nov 2026): 8 API requests became 5, and the list's bytes went from 71.8 KB on the wire (473 KB of JSON) to about 19 KB (215 KB), because a list row no longer carries the mistake features that only the patterns and the coach use.
 
 The whole page works without animation: with reduced motion, or in a browser that runs no animation frames, every element is simply in its final state.
 

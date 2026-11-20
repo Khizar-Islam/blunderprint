@@ -12,6 +12,14 @@ export interface DemoNote {
   evidence: Omit<CoachEvidence, "ribbon">;
 }
 
+// The one move the landing's dive follows.
+export interface DemoDive {
+  note: number; // which of `notes`
+  sentence: string; // the sentence of the coach's explanation that names the move, word for word
+  figure: string | null; // the move's own figure inside that sentence ("49.4 win-chance points")
+  sans: string[]; // every move of that game, in order (the strip's labels)
+}
+
 export interface DemoSnapshot {
   platform: Platform;
   username: string;
@@ -20,6 +28,7 @@ export interface DemoSnapshot {
   reportGeneratedAt: string;
   analysedGames: number;
   notes: DemoNote[];
+  dive: DemoDive;
   ribbons: DemoRibbon[];
 }
 

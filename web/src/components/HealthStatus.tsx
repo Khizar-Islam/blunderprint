@@ -3,25 +3,26 @@
 import { API_URL, fetchHealth } from "@/lib/api";
 import { useWakingRequest } from "@/lib/useWakingRequest";
 
+// The landing page's last line: one small, calm status. The check is made as the page loads, so
+// a sleeping API starts waking before the visitor's first click; but nothing on that page waits
+// for the API, so a sleeping server is said in a few words, with no counter (the pages that do
+// wait show "Waking the server up… (Ns)" themselves).
 export function HealthStatus() {
-  const { state, elapsedMs, waking, retry } = useWakingRequest(fetchHealth);
+  const { state, waking, retry } = useWakingRequest(fetchHealth);
 
   // A build-time config mistake, not a network problem: no point retrying.
   if (!API_URL) {
     return (
-      <p className="font-mono text-sm font-semibold text-ink" role="status">
+      <p className="px-1 font-mono text-xs font-semibold text-ink" role="status">
         NEXT_PUBLIC_API_URL is not set
       </p>
     );
   }
 
   return (
-    <div className="font-mono text-sm" role="status" aria-live="polite">
-      {state.kind === "loading" && (
-        <p className="text-graphite/70">
-          {waking ? `Waking the server up… (${Math.floor(elapsedMs / 1_000)}s)` : "Checking the API…"}
-        </p>
-      )}
+    // The line's height is held while there is nothing to say.
+    <div className="min-h-5 px-1 font-mono text-xs" role="status" aria-live="polite">
+      {state.kind === "loading" && waking && <p className="text-graphite/70">The server is waking up.</p>}
 
       {state.kind === "done" && (
         // Ink and graphite only: the classification colours are reserved for move classifications.

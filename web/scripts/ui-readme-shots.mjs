@@ -41,7 +41,7 @@ async function shot(name, selector, margin = 16) {
   console.log("saved", file);
 }
 
-// 1. Landing: the hero after "the print develops" has finished (~5.7 s) and the notes are placed.
+// 1. Landing: the first screen once the print has developed (~4 s) and the note on one move is placed.
 await viewport(1280, 840);
 await page.navigate(base + P.landing.path);
 await waitFor(page, P.landing.ready, 90_000);

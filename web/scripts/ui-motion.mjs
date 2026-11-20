@@ -17,7 +17,8 @@
 //  - every .bar-x has no animation left, so its transform is the one in its style;
 //  - nothing still waiting to be revealed in the viewport (.reveal-wait);
 //  - every "Ask the coach" figure in view has its rule fully drawn (page coach-ask);
-//  - landing: the hero counter reads 200, all notes shown, Replay enabled (= finished);
+//  - landing: the print's counter reads its final text ("200 games · 990 errors found") and,
+//    at the top of the page, the note on the dive's move is shown;
 //  - every canvas is unchanged over 300 ms (not mid-drawing).
 import { BASE, launch, PAGES, scrollThrough, sleep, waitFor } from "./ui-cdp.mjs";
 
@@ -35,13 +36,13 @@ const FINAL = `((core) => {
   document.querySelectorAll('.reveal-wait').forEach((e) => { const r = e.getBoundingClientRect(); if (r.top < vh && r.bottom > 0) issues.push('unrevealed in view: ' + e.tagName); });
   // "Ask the coach" figures: the teal rule under each number fully drawn (globals.css figure-in).
   document.querySelectorAll('.figure-rule').forEach((e) => { const r = e.getBoundingClientRect(); if (r.top < vh && r.bottom > 0 && getComputedStyle(e).backgroundSize !== '100% 2px') issues.push('figure rule not drawn: ' + e.textContent.trim().slice(0, 30)); });
-  const counter = document.querySelector('figure p.font-mono span[aria-hidden="true"]');
   if (location.pathname === '/') {
-    if (counter?.textContent.trim() !== '200') issues.push('hero counter ' + counter?.textContent);
-    const replay = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Replay');
-    if (replay && replay.disabled) issues.push('hero not finished (Replay disabled)');
-    const notes = [...document.querySelectorAll('.hero-in')].filter((e) => getComputedStyle(e).opacity !== '1' && e.tagName !== 'path' && e.tagName !== 'text');
-    if (notes.length) issues.push(notes.length + ' hero notes/rings not shown');
+    // The dive's first screen (components/landing/Dive.tsx): the counter carries its final text.
+    const counter = document.querySelector('[data-dive-counter]');
+    if (!counter) issues.push('no dive counter');
+    else if (counter.textContent.trim() !== counter.dataset.diveCounter) issues.push('dive counter "' + counter.textContent.trim() + '"');
+    const note = document.querySelector('[data-el="note"]');
+    if (scrollY < 2 && note && getComputedStyle(note).opacity !== '1') issues.push('the dive note is not shown');
   }
   return issues;
 })(window.__core)`;

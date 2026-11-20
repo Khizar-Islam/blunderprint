@@ -175,13 +175,14 @@ blunderprint/
 │  │                          OpeningsTable, charts/ (StackedBars, AnimatedNumber, scale.ts, sample.ts);
 │  │                          coach/: CoachButton, CoachPage, AgentTrace, PatternCard, StatLine,
 │  │                          EvidenceBoard, FingerprintLens + lens.ts, AskCoach, AnswerCard, Figure;
-│  │                          landing/: HeroPrint (canvas) + heroTimeline.ts, demoData.ts)
+│  │                          landing/: Dive (the scroll-driven dive, canvas + board) + diveTimeline.ts,
+│  │                          heroTimeline.ts (the first screen's timing), demoData.ts)
 │  ├─ src/data/demo.json     (committed landing snapshot of the frozen demo player)
 │  ├─ src/engine/            (stockfish.ts worker wrapper, uci.ts parsing, analyseGame.ts,
 │  │                          replay.ts, scheduler.ts claim/analyse/post + Web Lock,
 │  │                          useAnalysis.ts React hook, throughput.ts s/game)
 │  ├─ scripts/copy-engine.mjs (predev/prebuild: copies the engine from node_modules/stockfish)
-│  ├─ scripts/snapshot-demo.mjs (by hand, npm run snapshot:demo: live API → src/data/demo.json)
+│  ├─ scripts/snapshot-demo.mjs (by hand, npm run snapshot:demo: live API → src/data/demo.json, incl. the dive's move)
 │  ├─ scripts/og-image.mjs   (by hand, npm run og:image, with the built site running: demo.json → src/app/opengraph-image.png)
 │  ├─ scripts/make-pieces.mjs (by hand: react-chessboard's 12 piece drawings → public/pieces/*.svg, committed)
 │  ├─ scripts/ui-*.mjs       (Stage 7 checks over headless Chrome, run comments at the top of each:
@@ -622,18 +623,35 @@ Rules:
 ## 12. Frontend: pages, design and animation
 
 ### Pages
-- `/`: landing. A pre-analysed demo player's Blunderprint animating, plus one input: username and platform toggle. **As built (Stage 7 chunk A):**
-  - Headline "Your mistakes leave a print.", the search form, and the hero **"the print develops"** (`landing/HeroPrint.tsx`, phases in `heroTimeline.ts`): 200 faint rows arrive (0–0.9 s, counter ticks up), an ink scan line colours the player's moves (1.2–4 s), then three real evidence moves from the demo report get a ring, a hairline leader and a margin note (move, clock, win-chance cost, the pattern's label and code-written number). ~5.7 s, then the notes take turns being highlighted (desktop only). Hover the print to read a game, click to open it; Replay.
-  - Data: the committed snapshot `src/data/demo.json` (`npm run snapshot:demo`; it refuses unless the player is a frozen demo player, every game analysed and the report current). Never a live fetch: the hero must not wait on a sleeping Render.
+- `/`: landing. The headline, one input (username and platform toggle), and the demo player's print, followed all the way down to one move. **As built (UI pass, 20 Nov 2026; it replaced Stage 7's hero with three margin notes and the "How it works" section):**
+  - Headline "Your mistakes leave a print.", the search form, the demo links ("No account? Explore the demo: Open this Blunderprint · Read the coach report": most recruiters have no chess account). These words are rendered on the server in `app/page.tsx` and handed to the dive as children.
+  - **The dive** (`landing/Dive.tsx`; phases and layout as pure functions in `diveTimeline.ts`, the first screen's timing in `heroTimeline.ts`): one tall block (560 screen heights) with a stage pinned inside it (`position: sticky`). How far the block has been scrolled is one number p from 0 to 1, and p alone decides the picture:
+    - **First screen (time, not scroll):** 200 quiet rows arrive (0–0.9 s), an ink scan line passes and the errors take their colours behind it (1.2–4 s, the counter "N games · M errors found" runs with it), then one mark gets a ring and a note ("47. Nd4?? · 0:04 left · −49 points. One of 990 marks. Scroll to follow it.").
+    - **A (p 0.03–0.30):** the print parts around that game; its line opens into single moves. Caption: "Every row is one game. This is one of them."
+    - **B (0.33–0.55):** the strip zooms sideways until one move is a square, with the moves' names under it. "Every mark is one move. This one, with 0:04 on the clock."
+    - **C (0.57–0.68):** that brick square grows into the board (the position before the move).
+    - **D (0.70–0.87):** the piece slides along a rust arrow, slides back, a teal arrow draws the better move.
+    - **E (0.88–0.99):** the coach's finding: the pattern's label and number (code's), ONE sentence of the report's explanation that names this move (the model's own words, already verified), the move's own figure underlined by a teal rule, and "✓ 49.4 is this move's own figure. Code checked it, and every other number in the report, against the games." Then "Read the whole report" and "Open this Blunderprint".
+  - **Which move:** `scripts/snapshot-demo.mjs` picks it: of the three notes, the costliest whose move is named in a sentence of its pattern's explanation and has both moves as squares. It writes `dive: { note, sentence, figure, sans }` into `src/data/demo.json` (`sans`: that game's moves, replayed from its PGN with chess.js in the script, never in the browser). `diveTimeline.test.ts` checks the block against the snapshot.
+  - **Everything on the stage is placed with transforms and opacity,** never `top`/`left` (a moved `top` counts as layout shift; measured through the load and a full scroll: CLS 0.0001 at 1280 px, 0.0003 at 390 px). The stage's parts are found by a `data-el` name and styled directly, so a scroll never re-renders React. One canvas for the print and the strip; the board is 64 divs and our own piece images (`public/pieces/`, fetched 1.5 s after load, so not in the first screen's way).
+  - **The canvas is kept on whole device pixels** (`snap` in `Dive.tsx`): the words above the stage can end on a fraction of a pixel (562.84 px at 390 px wide), and a canvas of 1 px rows drawn that far off is resampled by the browser: on a 1x screen the print came out dark and colourless (found in a screenshot; the canvas's own pixels were right).
+  - **The captions have their own band of bone** (the other games' rows run behind them), and the final heading is `text-balance`.
+  - **"Play the dive"** (first screen): the same scroll, played by the page over 11 s; any wheel, key, touch or click of the visitor's takes over.
+  - **Layout:** from 1280 px the words sit over the stage's left third and fade as the print takes the stage; below that they come first in the normal flow and the stage follows. A screen too short for 200 rows of 3 px (a 1366×768 laptop) gets 2 px rows. Phones: the board is large while its story is told (half the screen), then shrinks to what the coach's words leave under it (`stageBox` `small`, measured from the real heights). Checked at 1280×900, 1366×650, 768, 390 and 360×640: no sideways scroll, nothing cut.
+  - **The headline is the LCP element, and the dive can't delay it:**
+    - The words are server-rendered; the dive's script only fades them.
+    - **The landing skips the route fade** (`globals.css`: `.anim-fade:has([data-dive])`). A text first painted at opacity 0 is never counted as Largest Contentful Paint, so with `template.tsx`'s fade the "largest" element was a small line written by script (the old hero's counter: on live, LCP 2.3 s). Without the fade the hero text is the LCP at first paint. Lighthouse mobile on the local build: 99 / 100 / 99, LCP 0.77 s (before: 93–94, LCP 3.15 s). **The other pages still fade in, so their LCP is still a script-painted element** (not changed in this step).
+  - **No animation frames:** if no frame has run 400 ms after load, the first screen is drawn final at once and a scroll paints directly (no `requestAnimationFrame`). A timer also lands the final first screen at 5.3 s.
+  - **Reduced motion:** no pinned stage (`motion-reduce:` un-pins it and gives the block its natural height). The first screen's final print with its note, then a second, still stage with the dive's final picture (board, both arrows, the coach's words). No "Play the dive". Read in the effect with `matchMedia`, not kept in React state (a `useSyncExternalStore` version rendered the animated stage first).
+  - A screen reader gets one hidden sentence that says what the dive shows.
   - **Link-preview picture (Stage 8 chunk D step e, 19 Nov 2026):** `src/app/opengraph-image.png` (1200×630, committed) + `opengraph-image.alt.txt`. Next serves it and writes the `og:image` / `twitter:image` tags by the file's name; `layout.tsx` sets `metadataBase` (the site's address, so the tags are absolute URLs), the Open Graph title and description, and the large Twitter card. Every page shows the same picture.
     - **Made by `npm run og:image`** (`scripts/og-image.mjs`, from `web/`, with `npm run build && npx next start -p 3000` running): the headline, and the print of all 200 snapshot games painted by the real `drawRows` (it runs in Node against a recording canvas context, and the rectangles are replayed on a real canvas in headless Chrome, with the site's own fonts). Not Next's `ImageResponse`: that renderer only knows flexbox, and the print is ~16,000 ticks.
     - **Re-run rule: after every `npm run snapshot:demo`, run `npm run og:image` too** and commit both, or the preview shows older games than the landing page.
     - The player's name is not on the picture (a shared preview shouldn't read as an endorsement). No `og:url`: set in the layout it would name the home page on every page.
     - If the site's address changes: `SITE_URL` in `layout.tsx`.
-  - Time-based, not frame-counted; timers land the final canvas and every note even with no animation frames; no frames offscreen. Reduced motion: the final print and all notes at once.
-  - **Demo path on the first screen:** right under the form, "No account? Explore the demo: Open this Blunderprint · Read the coach report" (most recruiters have no chess account).
-  - Layout: text and hero side by side only from 1280 px (narrower, the text column wraps the demo links below the fold); below that the hero sits under the text. The notes stay beside the print while the print keeps ≥ 400 px, else they become a numbered list under it. Rows 1 + 0.5 px below a 480 px box (300 px for 200 games). Phones: full-width 44 px controls. Checked at 390, 768, 1024 and 1280 px (no horizontal overflow).
-  - Caption: "Lichess · DrNykterstein · 200 public games, analysed in the browser · as of <date>" and "Not affiliated with the player". The footer's health check is the API prewarm.
+  - **Under the dive:** one line for a technical reader, each part a link to its README section: "engine in your browser · an agent with tools · code checks every claim" (the last goes to `<a name="verify">` in the README's coach section); then "The demo: Lichess · DrNykterstein · 200 public games, analysed in the browser · as of <date>. Not affiliated with the player: these are the account's public games."; then the health line.
+  - **The health line is quiet** (`HealthStatus.tsx`, used only here): "API ok · DB ok" in small type; while the API wakes, "The server is waking up." with no counter (nothing on this page waits for the API). The check is still the API prewarm.
+  - Data: the committed snapshot `src/data/demo.json` (`npm run snapshot:demo`; it refuses unless the player is a frozen demo player, every game analysed and the report current). Never a live fetch.
 - `/p/[platform]/[username]`: dashboard. Import progress, then analysis progress, then the patterns dashboard (built in Stage 3), then the full games list (never filtered), and later a "Coach me" button.
   - **Filters** (colour, speed, played: all time / 30 days / 90 days / 1 year) live in the URL (`?color=&speed=&range=`) and are pushed with `history.pushState`, so links can be shared and the back button steps through them. The URL keeps the preset, the API gets a `from` date.
   - **Data:** `GET /summary`. The last answer stays on screen while a new filter loads, so the charts animate from the old values. Refetches when the engine stores a game or an import finishes, at most every 10 s, and keeps polling while `extracting`; none while the tab is hidden.
@@ -716,7 +734,7 @@ Rules:
 - **`?perf=1`** on any page shows the smoothness probe (frame gaps, long animation frames, dropped frames, heap, LCP/CLS, "Copy results"); without it the code isn't downloaded. Results and Lighthouse numbers: README "Performance".
 
 ### The cold-start UX
-Render's free API sleeps after 15 minutes. The first request can take up to about a minute. Show a "Waking the server up… (Ns)" counter after 3 seconds, the same pattern as Interview Prep.
+Render's free API sleeps after 15 minutes. The first request can take up to about a minute. Show a "Waking the server up… (Ns)" counter after 3 seconds, the same pattern as Interview Prep. The landing page is the exception: nothing on it waits for the API, so its footer only says "The server is waking up." (no counter).
 
 ---
 

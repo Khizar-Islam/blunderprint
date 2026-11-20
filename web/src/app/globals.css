@@ -200,10 +200,15 @@ body {
     height 260ms var(--ease-out-quint);
 }
 
+/* The landing page (the one with the dive, data-dive) skips the route fade of app/template.tsx.
+   A text first painted at opacity 0 is never counted as the page's Largest Contentful Paint,
+   and the landing's headline, which the server sends, must be it: with the fade, the "largest"
+   element was a small line that the dive's script writes. */
+.anim-fade:has([data-dive]) {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  /* The landing hero (components/landing/HeroPrint.tsx) appears by CSS transitions; its
-     component shows the final state and this removes the transition. */
-  .hero-in,
   .bar-x,
   .anim-fade,
   .anim-rise,

@@ -2,105 +2,56 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { PLY_CAP } from "../patterns/geometry";
 import { demo } from "./demoData";
-import {
-  ARRIVE_MS,
-  clockText,
-  heroDurationMs,
-  heroFrame,
-  heroLayout,
-  noteStartMs,
-  placeNotes,
-  SCAN_END_MS,
-  SCAN_START_MS,
-} from "./heroTimeline";
+import { ARRIVE_MS, clockText, heroFrame, SCAN_END_MS, SCAN_START_MS } from "./heroTimeline";
 
-// The landing hero's timeline (heroTimeline.ts) and the committed demo snapshot it draws.
+// The landing's first screen (heroTimeline.ts) and the committed demo snapshot it draws.
 
 const L = { columns: 100, tickW: 4 };
 
 describe("heroFrame: the phases", () => {
   test("before it starts: nothing shown", () => {
-    const f = heroFrame(-1, 200, L, 3);
+    const f = heroFrame(-1, 200, L);
     assert.equal(f.games, 0);
     assert.equal(f.rowAlpha(0), 0);
     assert.equal(f.colouredUpTo, 0);
-    assert.equal(f.notes, 0);
-    assert.equal(f.done, false);
   });
 
   test("games arrive top to bottom and the counter follows", () => {
-    const mid = heroFrame(ARRIVE_MS / 2, 200, L, 3);
+    const mid = heroFrame(ARRIVE_MS / 2, 200, L);
     assert.equal(mid.rowAlpha(0), 1);
     assert.equal(mid.rowAlpha(199), 0);
     assert.ok(mid.games > 90 && mid.games < 110, `games ${mid.games}`);
-    const arrived = heroFrame(ARRIVE_MS, 200, L, 3);
+    const arrived = heroFrame(ARRIVE_MS, 200, L);
     assert.equal(arrived.games, 200);
     assert.equal(arrived.colouredUpTo, 0, "nothing coloured before the engine pass");
     assert.equal(arrived.scanX, null);
   });
 
   test("the engine pass colours the print left to right behind the scan line", () => {
-    const mid = heroFrame((SCAN_START_MS + SCAN_END_MS) / 2, 200, L, 3);
+    const mid = heroFrame((SCAN_START_MS + SCAN_END_MS) / 2, 200, L);
     assert.equal(mid.colouredUpTo, 50);
     assert.equal(mid.scanX, 200);
-    const later = heroFrame(SCAN_END_MS - 100, 200, L, 3);
+    const later = heroFrame(SCAN_END_MS - 100, 200, L);
     assert.ok(later.colouredUpTo > mid.colouredUpTo);
-    const over = heroFrame(SCAN_END_MS, 200, L, 3);
+    const over = heroFrame(SCAN_END_MS, 200, L);
     assert.equal(over.colouredUpTo, Infinity);
     assert.equal(over.scanX, null);
+    assert.ok(SCAN_END_MS <= 4_500, "the first screen is final in under 5 s");
   });
 
-  test("the coach's notes come one by one, then it's done", () => {
-    assert.equal(heroFrame(noteStartMs(0) - 1, 200, L, 3).notes, 0);
-    assert.equal(heroFrame(noteStartMs(0), 200, L, 3).notes, 1);
-    assert.equal(heroFrame(noteStartMs(2), 200, L, 3).notes, 3);
-    assert.equal(heroFrame(heroDurationMs(3) - 1, 200, L, 3).done, false);
-    assert.equal(heroFrame(heroDurationMs(3), 200, L, 3).done, true);
-    assert.ok(heroDurationMs(3) <= 6_000, "the hero finishes in about 6 s");
-  });
-
-  test("Infinity is the final state (reduced motion, the safety timer)", () => {
-    const f = heroFrame(Infinity, 200, L, 3);
+  test("Infinity is the final state (reduced motion, no frames, a scrolled page)", () => {
+    const f = heroFrame(Infinity, 200, L);
     assert.equal(f.games, 200);
     assert.equal(f.rowAlpha(0), 1);
     assert.equal(f.rowAlpha(199), 1);
     assert.equal(f.colouredUpTo, Infinity);
     assert.equal(f.scanX, null);
-    assert.equal(f.notes, 3);
-    assert.equal(f.done, true);
   });
 
   test("a skipped stretch of frames lands on the right phase (time-based, not frame-counted)", () => {
     // The same t gives the same frame whatever came before it.
-    assert.deepEqual(
-      { ...heroFrame(4100, 200, L, 3), rowAlpha: null },
-      { ...heroFrame(4100, 200, L, 3), rowAlpha: null },
-    );
-    assert.equal(heroFrame(4100, 200, L, 3).colouredUpTo, Infinity);
-  });
-});
-
-describe("heroLayout", () => {
-  test("200 games: 600 px on desktop, 300 px on a phone", () => {
-    const lengths = new Array(200).fill(80);
-    assert.equal(heroLayout(480, lengths, false).height, 600);
-    assert.equal(heroLayout(350, lengths, true).height, 300);
-    assert.equal(heroLayout(350, lengths, true).rowH, 1);
-  });
-});
-
-describe("placeNotes", () => {
-  test("notes far apart stay level with their move", () => {
-    assert.deepEqual(placeNotes([10, 200, 400], 600, 90), [10, 200, 400]);
-  });
-  test("close notes are pushed apart, in input order", () => {
-    assert.deepEqual(placeNotes([300, 100, 120], 600, 90), [300, 100, 190]);
-  });
-  test("a stack that runs past the bottom is pulled back up", () => {
-    assert.deepEqual(placeNotes([500, 520, 540], 600, 90), [330, 420, 510]);
-  });
-  test("never above the top", () => {
-    assert.deepEqual(placeNotes([-20, 0], 600, 90), [0, 90]);
+    assert.deepEqual({ ...heroFrame(3100, 200, L), rowAlpha: null }, { ...heroFrame(3100, 200, L), rowAlpha: null });
+    assert.equal(heroFrame(4100, 200, L).colouredUpTo, Infinity);
   });
 });
 

@@ -1,7 +1,7 @@
 {
   "platform": "lichess",
   "username": "DrNykterstein",
-  "takenAt": "2026-11-20T08:14:56.740Z",
+  "takenAt": "2026-11-20T13:26:31.224Z",
   "lastImportedAt": "2026-11-06T08:45:38.673Z",
   "reportGeneratedAt": "2026-11-20T08:10:15.696Z",
   "analysedGames": 200,
@@ -118,6 +118,12 @@
       }
     }
   ],
+  "dive": {
+    "note": 1,
+    "sentence": "In these positions, rook and knight moves such as Re3 and Nd4 cost 58.7 and 49.4 win-chance points.",
+    "figure": "49.4 win-chance points",
+    "sans": ["a3","g6","h3","Bg7","Nf3","c5","Nc3","Nc6","Na2","d5","Nh2","e5","e3","f5","b4","Be6","bxc5","Qe7","Rb1","Nf6","d4","Ne4","Nf3","O-O","Nb4","f4","Nxc6","bxc6","Rb3","fxe3","Bxe3","exd4","Nxd4","Bd7","Be2","Nxc5","Rc3","Ne4","Rd3","c5","Nf3","d4","O-O","Bb5","Bc1","Nc3","Rxc3","Bxe2","Re3","Qxe3","fxe3","Bxd1","Rxd1","Rad8","e4","c4","e5","d3","cxd3","cxd3","Be3","Rfe8","Bxa7","Bxe5","Kf1","Bf4","Bc5","d2","Bb4","Rd3","Nxd2","Red8","Ke2","Re3+","Kf2","g5","Rb1","Red3","Nf3","Re3","g3","Rde8","gxf4","Re2+","Kf1","gxf4","Re1","R2e3","Rxe3","fxe3","Ke2","Re4","Nd4","Re6","Nxe6","Kf7","Nf4","h5","Kxe3","h4","Kf3","Kf6","Kg4","Ke5","Kxh4","Ke4","Kh5","Kd4","Kg6","Kc4","h4","Kb3","h5","Ka4","h6","Kb3","h7","Ka4","h8=Q","Kb3","Qd4","Ka4","Nd5","Kb5","Qd3+","Ka4","Qc3"]
+  },
   "ribbons": [
     {"gameId":"6ae4e9925599b736e9db138b","playedAt":"2026-10-14T18:10:02.854Z","color":"white","result":"win","speed":"blitz","classes":"gggggggigggggggggggggggigigggggiggggggmiggggiigggiggigxggggigxggxxxggxgggggggggiggggggggggg"},
     {"gameId":"6ae4e9925599b736e9db138c","playedAt":"2026-10-14T18:03:50.949Z","color":"black","result":"win","speed":"blitz","classes":"ggggggggggggggggigxggggggggiggmggg"},

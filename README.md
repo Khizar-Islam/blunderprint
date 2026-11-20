@@ -10,7 +10,7 @@ The API runs on a free tier that sleeps after 15 minutes, so the first request c
 
 <!-- DEMO GIF: record it with the shot list (60 s), save it as docs/img/demo.gif, then replace the
      landing screenshot below with:  ![The 60-second demo](docs/img/demo.gif) -->
-![The landing page: 200 games as a print, with three of the coach's findings pinned to real moves](docs/img/landing.png)
+![The landing page: 200 games as a print, with one move marked; scrolling follows that move down to its position and the coach's sentence about it](docs/img/landing.png)
 
 ## Contents
 
@@ -126,7 +126,7 @@ One MongoDB aggregation then builds every number on the dashboard in a single pa
 1. **Candidates come from code.** A tool computes every group of moves (a phase, a clock bucket, an opening, a speed…) where the player is at least 15% worse than their own average, on enough games and moves. For the demo player that is 49 groups; the top 12 by z-score go to the model.
 2. **Investigate.** The model calls read-only tools against MongoDB: the player's profile, breakdowns, example mistakes. Tools take the player from the server, never from the model, and return compact aggregated JSON.
 3. **Answer.** One call with a fixed JSON shape. The model writes no number and no title; it names a candidate and points at example positions.
-4. **Verify** (code, not AI): the candidate must have come from the tool in this run; the evidence must come from a matching examples step, from at least 2 different games, with no position used twice; digits and chess moves in the text must match named fields, and a sentence may not claim an outcome or an intensity nothing measured ("cost you the game", "dearly"): what a move cost is said only as its win-chance figure. A tool's field name written into a sentence ("winPctLost") is caught the same way. The statistic and its label are copied from the candidate.
+4. <a name="verify"></a>**Verify** (code, not AI): the candidate must have come from the tool in this run; the evidence must come from a matching examples step, from at least 2 different games, with no position used twice; digits and chess moves in the text must match named fields, and a sentence may not claim an outcome or an intensity nothing measured ("cost you the game", "dearly"): what a move cost is said only as its win-chance figure. A tool's field name written into a sentence ("winPctLost") is caught the same way. The statistic and its label are copied from the candidate.
 5. **Repair once.** The model is told exactly what failed. Whatever still fails is trimmed or the pattern is dropped.
 
 Every step streams to the page as a live trace, and stays readable afterwards. This is the demo report's own trace: the verifier found 5 issues in 4 patterns, the repair round fixed what it could, and 3 patterns were kept.

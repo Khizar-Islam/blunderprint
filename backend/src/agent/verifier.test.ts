@@ -5,6 +5,8 @@ import {
   allowedProseNumbers,
   candidatesIn,
   checkProse,
+  fieldNameAdvice,
+  fieldNamesIn,
   examplesIn,
   allowedProseMoves,
   filtersEqual,
@@ -297,5 +299,56 @@ describe("colour: outcome and intensity claims (agent/colour.ts)", () => {
       withoutUnbackedSentences("You rush king moves in the endgame. Moves like Ke3 cost you dearly. The rook then checks from behind.", allowed),
       "You rush king moves in the endgame. The rook then checks from behind.",
     );
+  });
+});
+
+describe("field names in prose (H1.1)", () => {
+  // The four sentences of the live v7 report (20 Nov 2026), as written.
+  const LEAKS = [
+    "These inaccuracies result in a winPctLost of 10 or 9.9 in the middlegame.",
+    "Moves like Ke3 surrender 60.3 or 58.7 winPctLost when the clock runs low.",
+    "King moves such as Kg6 result in 67.4 or 65.3 winPctLost.",
+    "Here you lose 32.5 or 30.7 winPctLost by pushing the pawn.",
+  ];
+
+  it("the four leaked sentences of the v7 report are each caught", () => {
+    for (const s of LEAKS) assert.deepEqual(fieldNamesIn(s), ["winPctLost"], s);
+  });
+
+  it("any camelCase identifier and any bucket label counts; once per name", () => {
+    assert.deepEqual(fieldNamesIn("Your per100Moves rises when clockBucket is under10, and per100Moves again."), ["per100Moves", "clockBucket", "under10"]);
+    assert.deepEqual(fieldNamesIn("With from25to50 or over50 of the clock, matchingErrors and blunderPer100 stay low."), ["matchingErrors", "blunderPer100", "from25to50", "over50"]);
+  });
+
+  it("moves, openings, names and ordinary words are left alone", () => {
+    for (const s of [
+      "You played Nf3, exd5, bxa1=Q, e8=Q+, O-O-O and Rxf7+ in these games.",
+      "The McDonnell Attack (B21) and the Caro-Kann lead you into the same endgames.",
+      "You lose 18.4 win-chance points with under 10 percent of your clock left, per 100 moves.",
+      "Your games, moves and errors in this phase come from the opening.",
+      "Kxb2 and fxe5 were played when Qa3 was better.",
+    ]) {
+      assert.deepEqual(fieldNamesIn(s), [], s);
+    }
+  });
+
+  it("the advice names how to write it, for a report and for an answer's slots", () => {
+    assert.equal(fieldNameAdvice("winPctLost"), 'write "N win-chance points"');
+    assert.equal(fieldNameAdvice("winPctLost", { slots: true }), 'the slot already says "18.4 win-chance points": remove the field name');
+    assert.equal(fieldNameAdvice("blunderPer100"), 'write "per 100 moves"');
+    assert.equal(fieldNameAdvice("clockLeftSeconds"), 'write "N seconds left on the clock"');
+    assert.match(fieldNameAdvice("clockBucket"), /describe the clock in words/);
+    assert.match(fieldNameAdvice("under10"), /describe the clock in words/);
+    assert.equal(fieldNameAdvice("scorePct"), 'write "N%"');
+    assert.equal(fieldNameAdvice("rankScore"), "say it in plain words");
+  });
+
+  it("checkProse reports it and withoutUnbackedSentences removes the sentence", () => {
+    const allowed = { numbers: [67.4, 65.3], moves: ["Kg6"] };
+    const explanation = `You rush king moves when the clock is low. ${LEAKS[2]} The rook then checks from behind.`;
+    assert.deepEqual(checkProse({ explanation, drill: "Replay the evidence positions and name the safe king square before moving." }, allowed), [
+      { field: "explanation", fieldName: "winPctLost" },
+    ]);
+    assert.equal(withoutUnbackedSentences(explanation, allowed), "You rush king moves when the clock is low. The rook then checks from behind.");
   });
 });

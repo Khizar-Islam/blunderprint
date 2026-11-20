@@ -492,8 +492,10 @@ describe("enough text", () => {
 
 describe("prompt v6 and v7", () => {
   it("v7: what a move cost is only its win-chance figure", () => {
-    assert.equal(PROMPT_VERSION, 7);
-    assert.match(SYSTEM_PROMPT, /WHAT A MOVE COST: say it only as its winPctLost figure, or not at all/);
+    assert.equal(PROMPT_VERSION, 8);
+    assert.match(SYSTEM_PROMPT, /WHAT A MOVE COST: say it only as its win-chance figure, written "N win-chance points"/);
+    assert.match(SYSTEM_PROMPT, /NEVER A FIELD NAME IN THE TEXT: winPctLost, per100Moves, clockBucket/);
+    assert.match(SYSTEM_PROMPT, /Never put an intensity word before a kind of error \("severe blunders"/);
     assert.match(SYSTEM_PROMPT, /never write an outcome \("cost you the game"/);
   });
 
@@ -867,5 +869,22 @@ describe("thinking levels and thought tokens", () => {
     assert.equal(result.usage.totalTokens, result.usage.inputTokens + result.usage.outputTokens + 1_000);
     // A model that reports none (the scripted ones) counts as 0.
     assert.equal((await thinkingRun(turns)).result.usage.thoughtTokens, 0);
+  });
+});
+
+describe("a field name in a report (prompt v8)", () => {
+  it("'winPctLost' in the explanation is a repair issue that says how to write it; if it stays, its sentence is removed", async () => {
+    const leaky = (req: ModelRequest) =>
+      endgamePattern(req, {
+        explanation:
+          "Once the queens come off you move your king to the wrong square. These king moves give up a lot of winPctLost. The opposing king or rook then walks in and the position falls apart.",
+      });
+    const { result, requests } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [leaky(req)] }), (req) => answer({ patterns: [leaky(req)] })]);
+    assert.match(lastUserText(requests[4]!), /the explanation writes the field name "winPctLost", which a reader has never seen: write "N win-chance points"/);
+    assert.equal(
+      result.report!.patterns[0]!.explanation,
+      "Once the queens come off you move your king to the wrong square. The opposing king or rook then walks in and the position falls apart.",
+    );
+    assert.match(result.report!.trimmed[0]!.reasons[0]!, /field name "winPctLost"/);
   });
 });

@@ -234,6 +234,7 @@ export interface ProseProblem {
   word?: string; // a number written as a word
   move?: string; // a chess move that isn't one of the evidence's moves
   phrase?: string; // an outcome or intensity claim nothing backs (agent/colour.ts)
+  fieldName?: string; // a tool field's name written into the prose ("winPctLost")
 }
 
 // What a pattern's prose may cite: numbers (allowedProseNumbers) and moves (allowedProseMoves).
@@ -253,6 +254,39 @@ export const normalizeSan = (san: string) => san.replace(/[+#!?]+$/, "").replace
 export function sanMovesIn(text: string): string[] {
   return [...text.matchAll(SAN_MOVE)].map((m) => m[0]);
 }
+
+// Field names in prose (Stage 8 chunk H1.1). The v7 report wrote the tools' own identifiers into
+// its sentences: "result in a winPctLost of 10 or 9.9", "surrender 60.3 or 58.7 winPctLost". A
+// reader has never seen those names. Caught here:
+//   - any camelCase word (a lowercase start, then a capital: winPctLost, per100Moves,
+//     clockBucket). No ordinary English word and no SAN move has that shape ("exd5", "Nf3" and
+//     "McDonnell" don't match); moves are taken out first all the same;
+//   - a clock bucket's label (under10, from25to50, over50), which is a field VALUE.
+// Field names that are also plain words (games, moves, errors, phase) can't be told apart from
+// prose and aren't flagged.
+const CAMEL_CASE = /\b[a-z]+[0-9]*[A-Z][A-Za-z0-9]*\b/g;
+const BUCKET_WORD = /\b(?:under|over|from)\d+(?:to\d+)?\b/g;
+export function fieldNamesIn(text: string): string[] {
+  const prose = text.replace(SAN_MOVE, " ");
+  return [...new Set([...prose.matchAll(CAMEL_CASE), ...prose.matchAll(BUCKET_WORD)].map((m) => m[0]))];
+}
+
+// How to say it instead, for the repair round. `slots`: an answer's figures are slots that
+// already carry their unit, so there the fix is to drop the name.
+export function fieldNameAdvice(name: string, { slots = false }: { slots?: boolean } = {}): string {
+  const n = name.toLowerCase();
+  const say = (words: string) => (slots ? `the slot already says "${words}": remove the field name` : `write "${words}"`);
+  if (n === "winpctlost") return say(slots ? "18.4 win-chance points" : "N win-chance points");
+  if (n.includes("per100")) return say(slots ? "7.9 errors per 100 moves" : "per 100 moves");
+  if (n.includes("pergame")) return say(slots ? "1.25 errors per game" : "per game");
+  if (n === "clockleftseconds") return say(slots ? "12 seconds" : "N seconds left on the clock");
+  if (n === "clockbucket" || /^(?:under|over|from)\d/.test(n)) return `describe the clock in words ("short on time", "with plenty of time")`;
+  if (n === "movenumber") return say(slots ? "move 23" : "move N");
+  if (n.endsWith("pct")) return say(slots ? "54.2%" : "N%");
+  return "say it in plain words";
+}
+export const fieldNameIssue = (where: string, name: string, opts: { slots?: boolean } = {}) =>
+  `${where} writes the field name "${name}", which a reader has never seen: ${fieldNameAdvice(name, opts)}`;
 
 // The moves a pattern's prose may name: the played and better moves of its own evidence.
 export function allowedProseMoves(evidence: { played: string; betterMove: string | null }[]): string[] {
@@ -296,6 +330,7 @@ export function checkProse(p: { explanation: string; drill: string }, allowed: P
     for (const word of numberWordsIn(p[field])) problems.push({ field, word });
     for (const move of sanMovesIn(p[field])) if (unbackedMove(move, allowed.moves)) problems.push({ field, move });
     for (const phrase of colourIn(p[field])) problems.push({ field, phrase });
+    for (const fieldName of fieldNamesIn(p[field])) problems.push({ field, fieldName });
   }
   return problems;
 }
@@ -303,7 +338,7 @@ export function checkProse(p: { explanation: string; drill: string }, allowed: P
 export const sentencesOf = (text: string) => text.split(/(?<=[.!?])\s+/).filter((s) => s.trim() !== "");
 
 // The text without the sentences that contain an unbacked number, a number word, a move that
-// isn't one of the evidence's, or an outcome/intensity claim (agent/colour.ts).
+// isn't one of the evidence's, an outcome/intensity claim (agent/colour.ts), or a field name.
 export function withoutUnbackedSentences(text: string, allowed: ProseAllowance): string {
   return sentencesOf(text)
     .filter(
@@ -311,6 +346,7 @@ export function withoutUnbackedSentences(text: string, allowed: ProseAllowance):
         proseNumbers(sentence).every((n) => allowed.numbers.some((a) => matchesValue(n, a))) &&
         numberWordsIn(sentence).length === 0 &&
         colourIn(sentence).length === 0 &&
+        fieldNamesIn(sentence).length === 0 &&
         sanMovesIn(sentence).every((m) => !unbackedMove(m, allowed.moves)),
     )
     .join(" ")
@@ -453,9 +489,11 @@ export async function verifyReport(ctx: AgentContext, report: DraftReport, log: 
       numbers: allowedProseNumbers(candidate, "problem" in step ? undefined : step, valid),
       moves: allowedProseMoves(valid),
     };
-    for (const { field, value, word, move, phrase } of checkProse(p, allowed)) {
+    for (const { field, value, word, move, phrase, fieldName } of checkProse(p, allowed)) {
       problems.push(
-        phrase !== undefined
+        fieldName !== undefined
+          ? fieldNameIssue(`the ${field}`, fieldName)
+          : phrase !== undefined
           ? `the ${field} says "${phrase}", ${COLOUR_RULE}`
           : move !== undefined
           ? `the ${field} names the move ${move}, which isn't a played or better move of this pattern's evidence`

@@ -405,7 +405,8 @@ describe("runTask with the ask task", () => {
 
 describe("colour in an answer (ask prompt v7)", () => {
   it("the prompt says it; 'cost you the game' and 'cost you dearly' are issues, then their sentences go", async () => {
-    assert.match(ASK_SYSTEM_PROMPT, /WHAT A MOVE COST: say it only as that position's winPctLost slot/);
+    assert.match(ASK_SYSTEM_PROMPT, /WHAT A MOVE COST: say it only as a slot pointing at that position's win-chance figure/);
+    assert.match(ASK_SYSTEM_PROMPT, /NEVER A FIELD NAME IN A SENTENCE: winPctLost, per100Moves, clockBucket/);
     const { log, examples } = await realLog();
     // The live answer of 12 Nov 2026, in this fixture's terms.
     const d = draft({
@@ -433,5 +434,25 @@ describe("colour in an answer (ask prompt v7)", () => {
       { final: false },
     );
     assert.deepEqual(issues, []);
+  });
+});
+
+describe("field names and intensity before an error kind in an answer (ask prompt v8)", () => {
+  it("'winPctLost' in a sentence is an issue that says the slot already carries the unit; 'severe blunders' too; then both sentences go", async () => {
+    const { log, examples } = await realLog();
+    const d = draft({
+      sentences: ["Overall you make {{a}}.", "Playing Nf3 there gave up {{b}} winPctLost.", "These are severe blunders when you are under10 on the clock."],
+      slots: [SLOT_A, { name: "b", step: 2, path: "examples[0].winPctLost" }],
+      evidenceStep: 2,
+      evidence: examples.slice(0, 2),
+    });
+    const first = await verifyAnswer(ctx, d, log, { final: false });
+    assert.deepEqual(first.issues, [
+      'sentence 2 writes the field name "winPctLost", which a reader has never seen: the slot already says "18.4 win-chance points": remove the field name',
+      'sentence 3 says "severe blunders", an outcome or intensity no tool result backs: state what a move cost only as its win-chance figure, or leave it out',
+      'sentence 3 writes the field name "under10", which a reader has never seen: describe the clock in words ("short on time", "with plenty of time")',
+    ]);
+    const final = await verifyAnswer(ctx, d, log, { final: true });
+    assert.deepEqual(final.output.sentences, ["Overall you make {{a}}."]);
   });
 });

@@ -25,6 +25,26 @@ describe("colourIn: outcome and intensity claims no tool result backs", () => {
     assert.deepEqual(colourIn("A disastrous, devastating and fatal mistake."), ["disastrous", "devastating", "fatal"]);
   });
 
+  it("an intensity adjective right before an error kind; the adjective alone is fine", () => {
+    assert.deepEqual(colourIn("You make severe blunders and critical blunders in the endgame."), ["severe blunders", "critical blunders"]);
+    assert.deepEqual(colourIn("A serious mistake, a costly inaccuracy, terrible mistakes, huge blunders, a big blunder and major inaccuracies."), [
+      "serious mistake",
+      "costly inaccuracy",
+      "terrible mistakes",
+      "huge blunders",
+      "big blunder",
+      "major inaccuracies",
+    ]);
+    for (const text of [
+      "This is a critical position: the major pieces are still on and a big pawn centre gives White space.",
+      "A serious attempt to hold the ending, and the blunder came later.",
+      "Your blunders here are severe tests of the clock.",
+      "The positions below are among your costliest errors.",
+    ]) {
+      assert.deepEqual(colourIn(text), [], text);
+    }
+  });
+
   it("the cost as a figure is fine, in a report and in an answer template", () => {
     for (const text of [
       "Playing Ke3 cost you 18.4 win-chance points with 3 seconds left.",

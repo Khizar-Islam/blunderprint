@@ -6,7 +6,7 @@ import type { AgentTask } from "./loop.js";
 import type { ModelRequest } from "./model.js";
 import { dropDoubledNouns, fillSlot, placeholdersIn, SLOT_NAME, type FilledSlot } from "./slots.js";
 import { moveNumberOf, round1, uciToSan } from "./tools/format.js";
-import {
+import { fieldNameIssue, fieldNamesIn,
   allowedProseMoves,
   examplesIn,
   factsOf,
@@ -56,7 +56,10 @@ import {
 // v7 (Stage 8 chunk H): no outcome or intensity claims ("cost you the game", "cost you
 //     dearly": both in a live answer of 12 Nov 2026): what a move cost is said only as its
 //     winPctLost slot. Checked by code (agent/colour.ts): a repair issue, then the sentence goes.
-export const ASK_PROMPT_VERSION = 7;
+// v8 (Stage 8 chunk H1.1, after the v7 report wrote "67.4 or 65.3 winPctLost"): never a field
+//     name in a sentence (the slot already carries the unit); no intensity adjective before an
+//     error kind ("severe blunders"). Both checked by code.
+export const ASK_PROMPT_VERSION = 8;
 export const MAX_QUESTION_CHARS = 300;
 export const MAX_ANSWER_SENTENCES = 5;
 export const MAX_ANSWER_EVIDENCE = 3;
@@ -214,7 +217,8 @@ THE ANSWER
 - MOVES: name a move (Bd3, exd5, O-O) only if it is the played or betterMove of one of your evidence positions, copied exactly, as plain text in the sentence. A move is never a slot (no slot path ending in .played or .betterMove).
 - Plain sentences only: no lists, markdown, links, headings or emoji. Never mention tools, steps, slots, ids or JSON in the text.
 - Only what the data shows: never claim results, trends or reasons no tool returned.
-- WHAT A MOVE COST: say it only as that position's winPctLost slot ("Ke3 on {{c}} lost {{d}}"), or not at all. The tools never say a game was lost BECAUSE of one move, so never write an outcome ("cost you the game", "costing you games", "lost you a point", "threw away the win", "game-losing") and never an intensity nothing measured ("dearly", "massive swings", "catastrophic", "disastrous", "devastating", "fatal"). Sentences with such words are removed.
+- NEVER A FIELD NAME IN A SENTENCE: winPctLost, per100Moves, clockBucket, clockLeftSeconds, scorePct, "under10" and the like are names inside the tool results; the player has never seen them. They belong in a slot's path only. The slot's text already carries the unit ("18.4 win-chance points", "12 seconds").
+- WHAT A MOVE COST: say it only as a slot pointing at that position's win-chance figure ("Ke3 on {{c}} lost {{d}}", where {{d}} reads "18.4 win-chance points"), or not at all. Never put an intensity word before a kind of error ("severe blunders", "a critical mistake", "a big inaccuracy"): the kind already says how bad it was. The tools never say a game was lost BECAUSE of one move, so never write an outcome ("cost you the game", "costing you games", "lost you a point", "threw away the win", "game-losing") and never an intensity nothing measured ("dearly", "massive swings", "catastrophic", "disastrous", "devastating", "fatal"). Sentences with such words are removed.
 - kind "cannot_answer" with a reason, and no sentences, when:
   - "no_data": ONLY when a tool returned zero games for it (e.g. get_opening_breakdown with name shows matching games 0);
   - "too_few_games": the whole sample the question is about is a handful of games, too few to say anything reliable (a small category inside a big sample is answered with shares instead);
@@ -237,7 +241,7 @@ export function askRepairPrompt(issues: string[]): string {
     "Your answer failed verification against the data:",
     ...issues.map((i) => `- ${i}`),
     "",
-    "Fix ONLY these problems, using the tool results above (no more tools are available). Every figure must be a {{name}} placeholder whose slot points at an allowed numeric field of a tool result (never a number in the text, in digits or words); name moves only from your evidence positions; never claim an outcome or an intensity (such as cost you the game, dearly, massive swings): what a move cost is only its winPctLost slot; evidence only from the find_example_mistakes result evidenceStep names; plain sentences, no markdown or links. Remove any sentence you can't back up. Then return the complete corrected JSON answer.",
+    "Fix ONLY these problems, using the tool results above (no more tools are available). Every figure must be a {{name}} placeholder whose slot points at an allowed numeric field of a tool result (never a number in the text, in digits or words); name moves only from your evidence positions; never claim an outcome or an intensity (such as cost you the game, dearly, severe blunders): what a move cost is only a slot for its win-chance figure; never write a field name (winPctLost, per100Moves, clockBucket) in a sentence; evidence only from the find_example_mistakes result evidenceStep names; plain sentences, no markdown or links. Remove any sentence you can't back up. Then return the complete corrected JSON answer.",
   ].join("\n");
 }
 
@@ -460,6 +464,7 @@ export async function verifyAnswer(ctx: AgentContext, draft: AskDraft, log: Tool
       );
     }
     for (const phrase of colourIn(prose)) problems.push(`sentence ${n} says "${phrase}", ${COLOUR_RULE}`);
+    for (const name of fieldNamesIn(prose)) problems.push(fieldNameIssue(`sentence ${n}`, name, { slots: true }));
     if (URL_LIKE.test(prose)) problems.push(`sentence ${n} contains a link: plain sentences only`);
     if (MARKDOWN.test(sentence)) problems.push(`sentence ${n} uses markdown or a list: plain sentences only`);
     return problems;

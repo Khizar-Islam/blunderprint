@@ -27,6 +27,10 @@ const PATTERNS: RegExp[] = [
   // "massive" only as "massive swing(s)" (a live report, Nov 2026): a massive pawn centre is
   // ordinary chess prose.
   /\bmassive\s+swings?\b/gi,
+  // An intensity adjective right before an error kind: "severe blunders", "a critical mistake"
+  // (the v7 report, 20 Nov 2026). The kind (inaccuracy / mistake / blunder) already says how bad
+  // a move was. Only in that position: "a critical position" is ordinary chess prose.
+  /\b(?:severe|critical|serious|costly|terrible|huge|big|major)\s+(?:blunders?|mistakes?|inaccurac(?:y|ies))\b/gi,
   /\b(?:dearly|catastroph(?:e|ic|ically)|disast(?:er|rous|rously)|devastat(?:ing|ingly|ed)|fatal(?:ly)?)\b/gi,
 ];
 

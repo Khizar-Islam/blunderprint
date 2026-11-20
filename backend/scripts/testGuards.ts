@@ -1,3 +1,4 @@
+import type { Evictor } from "../src/lib/eviction.js";
 import type { GuardLimits, Guards } from "../src/lib/guards.js";
 import type { StorageGate } from "../src/lib/storage.js";
 import { createVisitorKey } from "../src/lib/visitor.js";
@@ -12,13 +13,14 @@ export function fakeStorage(usedMb: number | null = 10, limitMb = 120): StorageG
     limitMb,
     usedMb: async () => used,
     full: async () => used !== null && used >= limitMb,
+    reset() {},
     set(mb) {
       used = mb;
     },
   };
 }
 
-export function testGuards(limits: Partial<GuardLimits> = {}, storage: StorageGate = fakeStorage(), now?: () => Date): Guards {
+export function testGuards(limits: Partial<GuardLimits> = {}, storage: StorageGate = fakeStorage(), now?: () => Date, evictor?: Evictor): Guards {
   return {
     visitorKey: createVisitorKey(TEST_SALT),
     limits: {
@@ -35,5 +37,6 @@ export function testGuards(limits: Partial<GuardLimits> = {}, storage: StorageGa
     },
     storage,
     ...(now ? { now } : {}),
+    ...(evictor ? { evictor } : {}),
   };
 }

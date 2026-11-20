@@ -23,8 +23,12 @@ const playerSchema = new Schema(
     // Precomputed dashboard aggregates (Stage 3).
     summary: Schema.Types.Mixed,
     summaryVersion: Number,
-    // Read by the storage guard (Stage 4) to evict the least-recently-viewed players.
+    // Read by the storage eviction (lib/eviction.ts): the least recently viewed players go first.
     lastViewedAt: Date,
+    // Set while this player is being evicted (lib/eviction.ts). At the same moment usernameLower
+    // becomes a tombstone ("~evicting:<id>"), so no route finds the player any more. Normally
+    // gone within a second; a crash leaves it set, and the next eviction round finishes the job.
+    evictingAt: Date,
     // What a re-import needs to fetch only what's new.
     importMeta: {
       // Chess.com month ETags, keyed "YYYY/MM". A 304 for a month means nothing changed in it.
@@ -45,7 +49,7 @@ const playerSchema = new Schema(
 // /api/players/:platform/:username route.
 playerSchema.index({ platform: 1, usernameLower: 1 }, { unique: true });
 
-// Storage guard: scan players oldest-viewed first and evict until we're under budget.
+// Storage eviction: scan players oldest-viewed first and evict until we're under budget.
 playerSchema.index({ lastViewedAt: 1 });
 
 export type PlayerFields = InferSchemaType<typeof playerSchema>;

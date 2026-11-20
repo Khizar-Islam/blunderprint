@@ -168,16 +168,22 @@ export function playersRouter({
 
     // A new import really starts here, so the Stage 6 guards apply (never to a demo player,
     // whose first import seeds the demo). Cheapest and global first, the visitor's own counters
-    // last, so a refusal for a full database doesn't use up the visitor's imports.
+    // after them, so a refusal for a full queue doesn't use up the visitor's imports. The storage
+    // eviction comes LAST of all: it deletes other players' data, so it must only run for an
+    // import that every other check has already let through.
     let taken: Taken[] = [];
     if (guards && !demo) {
       const now = guards.now?.() ?? new Date();
       // "New" = nothing stored yet. A stored player's re-import replaces games, it doesn't add a player.
       const newPlayer = !player;
-      if (newPlayer && (await guards.storage.full())) {
+      // The storage gate: a cheap, cached reading. Full means room has to be made, but not yet
+      // (see below). With no evictor there is nothing to make room with: refuse now, as before.
+      const needRoom = newPlayer && (await guards.storage.full());
+      const refuseFull = async () => {
         logRefusal(res, "storage", { usedMb: await guards.storage.usedMb(), limitMb: guards.storage.limitMb });
         return sendFriendly(res, 503, "storage_full");
-      }
+      };
+      if (needRoom && !guards.evictor) return refuseFull();
       // Served by the { status, runAfter } index (status prefix).
       const queued = await Job.countDocuments({ status: "queued", type: "import" });
       if (queued >= guards.limits.importQueueMax) {
@@ -201,6 +207,22 @@ export function playersRouter({
           return sendFriendly(res, 503, "limit_new_players", { retryAfterMs: global.retryAfterMs });
         }
         taken.push(global.taken);
+      }
+      // Every other check has passed, so this import would start: only now evict the least
+      // recently viewed players until it fits (lib/eviction.ts). "ok" = there is room, and the
+      // rest of the clean-up carries on in the background. Otherwise the counters taken above
+      // are handed back: the visitor didn't get an import.
+      if (needRoom) {
+        const room = await guards.evictor!.makeRoom();
+        if (room !== "ok") {
+          await Promise.all(taken.map(refund));
+          if (room === "busy") {
+            // Another request's eviction is still running; it will have made room in a moment.
+            logRefusal(res, "eviction_busy");
+            return sendFriendly(res, 503, "busy", { queue: "eviction", retryAfterMs: BUSY_RETRY_MS });
+          }
+          return refuseFull();
+        }
       }
     }
     const giveBack = () => Promise.all(taken.map(refund));
@@ -235,7 +257,8 @@ export function playersRouter({
     ]);
     if (!player && !activeJob) throw new HttpError(404, "Player not found");
 
-    // Viewing a player marks it recently used, so the storage guard (Stage 4) evicts it last.
+    // Viewing a player marks it recently used: the storage eviction (lib/eviction.ts) takes the
+    // least recently viewed first and never one viewed in the last 7 days.
     // At most once an hour: the filter re-checks the age, so simultaneous loads write once.
     // timestamps: false, because a view isn't a change to the player's data (updatedAt stays).
     const touchBefore = new Date(Date.now() - VIEW_TOUCH_MS);

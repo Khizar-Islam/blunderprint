@@ -4,11 +4,13 @@ import { fakeStorage, testGuards } from "../../scripts/testGuards.js";
 import { clearDb, startTestDb } from "../../scripts/testDb.js";
 import { startTestServer } from "../../scripts/testServer.js";
 import { createApp, type AppOptions } from "../app.js";
+import { Game } from "../db/models/game.js";
 import { Job } from "../db/models/job.js";
 import { Player } from "../db/models/player.js";
 import { Usage } from "../db/models/usage.js";
 import { createQueue } from "../jobs/queue.js";
 import { demoChecker } from "../lib/demo.js";
+import { createEvictor, type Evictor } from "../lib/eviction.js";
 import type { GuardLimits } from "../lib/guards.js";
 import type { StorageGate } from "../lib/storage.js";
 
@@ -28,11 +30,12 @@ beforeEach(clearDb);
 interface Opts {
   limits?: Partial<GuardLimits>;
   storage?: StorageGate;
+  evictor?: Evictor;
   hops?: number;
   queue?: AppOptions["queue"];
 }
 
-async function withApp({ limits, storage, hops = 0, queue }: Opts, fn: (api: string) => Promise<void>): Promise<void> {
+async function withApp({ limits, storage, evictor, hops = 0, queue }: Opts, fn: (api: string) => Promise<void>): Promise<void> {
   const server = await startTestServer(
     createApp({
       corsOrigins: ["http://localhost:3000"],
@@ -41,7 +44,7 @@ async function withApp({ limits, storage, hops = 0, queue }: Opts, fn: (api: str
       queue: queue ?? createQueue(),
       version: "test",
       isDemo: demoChecker(["lichess:demoguy"]),
-      guards: testGuards(limits, storage),
+      guards: testGuards(limits, storage, undefined, evictor),
     }),
   );
   try {
@@ -332,5 +335,196 @@ describe("which visitor is it, behind proxies (TRUST_PROXY_HOPS)", () => {
     }
     assert.ok(lines.some((l) => l.includes('"limit_refused"')), "the refusal was logged");
     assert.ok(lines.every((l) => !l.includes("203.0.113.7") && !l.includes("1.1.1.1")), lines.join("\n"));
+  });
+});
+
+describe("storage eviction at the gate (lib/eviction.ts)", () => {
+  const MB = 1024 * 1024;
+  // A stored player with that many MB of games, last viewed that many days ago.
+  async function oldPlayer(username: string, viewedDaysAgo: number, mb = 1) {
+    const p = await Player.create({
+      platform: "lichess",
+      username,
+      usernameLower: username.toLowerCase(),
+      importState: "ready",
+      lastImportedAt: new Date(Date.now() - 2 * DAY),
+      lastViewedAt: new Date(Date.now() - viewedDaysAgo * DAY),
+    });
+    await Game.collection.insertOne({ playerId: p._id, platform: "lichess", sourceId: username, playedAt: new Date(), analysis: { status: "done" }, pgn: "x".repeat(mb * MB) });
+    return p;
+  }
+  const names = async () => (await Player.find({}, { username: 1 }).sort({ username: 1 }).lean()).map((p) => p.username);
+
+  it("gate full with an evictable player: the old player goes and the new import is accepted", async () => {
+    // 120.5 MB at a 120 MB gate: under the gate by the 2 MB margin takes 3 MB.
+    const storage = fakeStorage(120.5, 120);
+    const evictor = createEvictor({ storage, evictToMb: 100, demoKeys: ["lichess:demoguy"] });
+    await withApp({ storage, evictor }, async (api) => {
+      await oldPlayer("ancient", 90, 3);
+      await oldPlayer("recent", 1);
+      const res = await postImport(api, "newbie");
+      assert.equal(res.status, 202);
+      await evictor.idle();
+      assert.deepEqual(await names(), ["recent"]);
+      assert.equal(await Game.countDocuments({}), 1);
+      assert.equal(await Job.countDocuments({ key: "import:lichess:newbie", status: "queued" }), 1);
+      // The evicted player's own page is an ordinary "not found" now.
+      assert.equal((await fetch(`${api}/players/lichess/ancient`)).status, 404);
+    });
+  });
+
+  it("gate full with nobody evictable: 503 storage_full, nothing deleted, no import counted", async () => {
+    const storage = fakeStorage(120, 120);
+    const evictor = createEvictor({ storage, evictToMb: 100, demoKeys: ["lichess:demoguy"] });
+    await withApp({ storage, evictor }, async (api) => {
+      await oldPlayer("recent", 1);
+      await oldPlayer("DemoGuy", 400);
+      const res = await postImport(api, "newbie");
+      assert.equal(res.status, 503);
+      assert.equal((await body(res)).code, "storage_full");
+      assert.deepEqual(await names(), ["DemoGuy", "recent"]);
+      assert.equal(await Usage.countDocuments({ count: { $gt: 0 } }), 0, "nothing stays counted");
+    });
+  });
+
+  it("a stored player's refresh, a demo player and a gate that isn't full never trigger an eviction", async () => {
+    let calls = 0;
+    const spy: Evictor = {
+      makeRoom: async () => {
+        calls++;
+        return "ok";
+      },
+      idle: async () => {},
+    };
+    const storage = fakeStorage(120, 120);
+    await withApp({ storage, evictor: spy }, async (api) => {
+      await storedPlayer("alice");
+      assert.equal((await postImport(api, "alice")).status, 202);
+      assert.equal((await postImport(api, "demoguy")).status, 202);
+      assert.equal(calls, 0);
+      storage.set(50);
+      assert.equal((await postImport(api, "newbie")).status, 202);
+      assert.equal(calls, 0);
+      storage.set(120);
+      assert.equal((await postImport(api, "another")).status, 202);
+      assert.equal(calls, 1);
+    });
+  });
+
+  // Every counter is back at 0 (a refunded counter's document stays, with count 0).
+  const countersInUse = () => Usage.countDocuments({ count: { $gt: 0 } });
+
+  it("an eviction already running: 503 busy in its own words, Retry-After, and the counters are refunded", async () => {
+    const busy: Evictor = { makeRoom: async () => "busy", idle: async () => {} };
+    await withApp({ storage: fakeStorage(120, 120), evictor: busy }, async (api) => {
+      const res = await postImport(api, "newbie");
+      assert.equal(res.status, 503);
+      const b = await body(res);
+      assert.equal(b.code, "busy");
+      assert.equal(b.error, "We're making room for new players. Try again in a minute.");
+      assert.equal(res.headers.get("retry-after"), "60");
+      assert.equal(await Usage.countDocuments({}), 3, "the visitor's hour + day and the new-player day were taken...");
+      assert.equal(await countersInUse(), 0, "...and all handed back");
+    });
+  });
+
+  // The eviction deletes other players' data, so it runs LAST: a request another check refuses
+  // must never get that far.
+  it("visitor over their import limit + gate full: 429 limit_imports and NOTHING evicted", async () => {
+    const storage = fakeStorage(120.5, 120);
+    let calls = 0;
+    const real = createEvictor({ storage, evictToMb: 100, demoKeys: [] });
+    const evictor: Evictor = { makeRoom: () => (calls++, real.makeRoom()), idle: real.idle };
+    await withApp({ storage, evictor, limits: { importsPerHour: 1 } }, async (api) => {
+      await oldPlayer("ancient", 90, 3);
+      // The visitor's one import this hour: a stored player's refresh (no eviction for those).
+      await storedPlayer("alice");
+      assert.equal((await postImport(api, "alice")).status, 202);
+      const res = await postImport(api, "newbie");
+      assert.equal(res.status, 429);
+      assert.equal((await body(res)).code, "limit_imports");
+      assert.equal(calls, 0, "the evictor wasn't even asked");
+      assert.deepEqual(await names(), ["alice", "ancient"]);
+      assert.equal(await Game.countDocuments({}), 1);
+    });
+  });
+
+  it("new-player cap reached + gate full: 503 limit_new_players and nothing evicted", async () => {
+    const storage = fakeStorage(50, 120);
+    let calls = 0;
+    const real = createEvictor({ storage, evictToMb: 100, demoKeys: [] });
+    const evictor: Evictor = { makeRoom: () => (calls++, real.makeRoom()), idle: real.idle };
+    await withApp({ storage, evictor, limits: { newPlayersPerDay: 1 } }, async (api) => {
+      await oldPlayer("ancient", 90, 3);
+      assert.equal((await postImport(api, "first")).status, 202, "the day's one new player, with room to spare");
+      storage.set(120.5);
+      const res = await postImport(api, "second");
+      assert.equal(res.status, 503);
+      assert.equal((await body(res)).code, "limit_new_players");
+      assert.equal(calls, 0);
+      assert.deepEqual(await names(), ["ancient"]);
+      assert.equal(await Game.countDocuments({}), 1);
+    });
+  });
+
+  it("import queue full + gate full: 503 busy (imports) and nothing evicted", async () => {
+    const storage = fakeStorage(120.5, 120);
+    let calls = 0;
+    const evictor: Evictor = { makeRoom: async () => (calls++, "ok"), idle: async () => {} };
+    await withApp({ storage, evictor, limits: { importQueueMax: 1 } }, async (api) => {
+      await Job.create({ type: "import", key: "import:lichess:waiting", payload: {}, status: "queued", runAfter: new Date() });
+      const res = await postImport(api, "newbie");
+      assert.equal(res.status, 503);
+      assert.match((await body(res)).error, /A lot of imports are waiting/);
+      assert.equal(calls, 0);
+    });
+  });
+
+  it("eviction can't make room after the counters were taken: 503 storage_full and the counters are refunded", async () => {
+    const storage = fakeStorage(120.5, 120);
+    const evictor = createEvictor({ storage, evictToMb: 100, demoKeys: [] });
+    await withApp({ storage, evictor }, async (api) => {
+      await oldPlayer("recent", 1); // nobody evictable
+      const res = await postImport(api, "newbie");
+      assert.equal(res.status, 503);
+      assert.equal((await body(res)).code, "storage_full");
+      assert.equal(await Usage.countDocuments({}), 3, "hour + day + new players were taken...");
+      assert.equal(await countersInUse(), 0, "...and all handed back");
+      assert.deepEqual(await names(), ["recent"]);
+      assert.equal(await Job.countDocuments({}), 0);
+      // The refund is real: with a limit of one import an hour, the visitor can still import.
+    });
+    await clearDb();
+    await withApp({ storage, evictor, limits: { importsPerHour: 1, newPlayersPerDay: 1 } }, async (api) => {
+      await oldPlayer("recent", 1);
+      assert.equal((await postImport(api, "newbie")).status, 503);
+      storage.set(50);
+      assert.equal((await postImport(api, "newbie")).status, 202, "neither the visitor's hour nor the day's new-player slot was used up");
+    });
+  });
+
+  it("a player left marked by a crash is 404 on its pages, and importing the name again works", async () => {
+    const storage = fakeStorage(118.5, 118.5);
+    const crashing = createEvictor({
+      storage,
+      evictToMb: 100,
+      demoKeys: [],
+      afterStep: (step) => {
+        if (step === "games") throw new Error("crash");
+      },
+    });
+    await withApp({ storage, evictor: crashing }, async (api) => {
+      await oldPlayer("ancient", 90);
+      // The crash leaves the round unfinished, so this import is refused...
+      assert.equal((await postImport(api, "newbie")).status, 503);
+      assert.equal(await Player.countDocuments({ evictingAt: { $ne: null } }), 1);
+      // ...and the half-evicted player is simply "not found" everywhere.
+      for (const path of ["", "/games", "/summary"]) {
+        assert.equal((await fetch(`${api}/players/lichess/ancient${path}`)).status, 404, path || "player");
+      }
+      // Its name is free: a new import of it is an ordinary new-player import.
+      storage.set(50);
+      assert.equal((await postImport(api, "ancient")).status, 202);
+    });
   });
 });

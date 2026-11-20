@@ -37,6 +37,9 @@ export interface StorageGate {
   // imports: the import itself would fail anyway if the database were really down, and Atlas's
   // own quota is the hard backstop.
   full(): Promise<boolean>;
+  // Forget the cached reading: the next call reads dbStats again. Used after an eviction
+  // (lib/eviction.ts), when the cached number is known to be out of date.
+  reset(): void;
 }
 
 const readDbStats = async (): Promise<DbSizes> => {
@@ -71,6 +74,9 @@ export function createStorageGate({ limitMb, cacheMs = 5 * 60_000, readStats = r
     async full() {
       const used = await usedMb();
       return used !== null && used >= limitMb;
+    },
+    reset() {
+      cached = null;
     },
   };
 }

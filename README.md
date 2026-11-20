@@ -165,11 +165,17 @@ The site has no sign-in, so everything is limited per visitor and globally.
 | Requests per visitor | 300 a minute (flood guard) |
 | AI requests, everyone together | 400 a day (Google's free limit is 500) |
 | New players, everyone together | 40 a day |
-| Storage | no new player once the database reaches 120 MB of Atlas's 512 MB |
+| Storage | at 120 MB of Atlas's 512 MB, the least recently viewed players are evicted to make room for a new one |
 
 - **A visitor is a salted HMAC of the IP address.** The raw IP is never stored or logged.
 - **Counters are atomic.** One `findOneAndUpdate` with upsert per take (`count < limit → $inc 1`), in fixed hour and day windows that expire by TTL index. A take that doesn't lead to work is refunded.
 - **Only real work counts.** A cached report, a cached answer, an up-to-date player or a job someone else already started is free.
+- **Storage eviction.** When the database reaches 120 MB and a new player arrives, the players nobody has opened for the longest time are deleted: in the request, just enough to let that import through; in the background, down to 100 MB, so the next ~20 new players need no eviction. There is no job and no timer: under 120 MB this code never runs.
+  - **Never evicted:** the demo player, a player viewed in the last 7 days, a player with a queued or running job or coach run, and a player whose games a browser's engine is working on. If nobody can be evicted, the new player gets the "database is full" message instead.
+  - **Crash-safe without transactions.** The first step is one atomic update that marks the player and replaces its lookup key, so from that moment every page says "not found" and the name is free for a new import. Then the answers, reports, runs and games are deleted, and the player document last. A crash in between leaves a marked player, and the next round finishes it first.
+  - **Measured:** one 200-game player (about 1 MB) takes ~20 ms against the tests' local MongoDB (13 database calls). On Render, with the database a network hop away, I expect a few tenths of a second per player; not measured there, because the live database is at 9 MB.
+  - **Honest status:** this is covered by tests (every exclusion, a crash after each step, the background part), but it has never triggered in production: the live database is at about 9 MB, far below the 120 MB where it starts.
+  - **It runs last.** A request that would be refused anyway (the visitor's import limit, the day's new-player cap, a full queue) never gets as far as deleting anything.
 - **Refusals are friendly.** Every failure a visitor can see is a fixed message with a code, and says how long to wait when that is known. The real error only goes to the logs.
 
 **Two drills on the live site** (12 Nov 2026), each done by changing one environment variable on Render and then restoring it:
@@ -314,17 +320,17 @@ In `web/.env.local`, set `NEXT_PUBLIC_API_URL=http://localhost:5000`.
 ## Tests and checks
 
 ```
-cd backend && npm run typecheck && npm test                    645 tests
+cd backend && npm run typecheck && npm test                    680 tests
 cd web && npm run typecheck && npm run lint && npm test        272 tests
 ```
 
-All passing on 18 Nov 2026. Line coverage of the source files the tests load (test files not counted; Node's built-in coverage): backend 99.2%, web 95.6%. The React components and hooks are not loaded by these tests; the browser checks below cover them. GitHub Actions runs the same commands on every push and pull request to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); no job needs a secret. Its first red runs were timing races in the tests themselves (a test read a job before the worker had marked it finished), found by reading the failed logs and fixed. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.
+All passing on 20 Nov 2026. Line coverage of the source files the tests load (test files not counted; Node's built-in coverage): backend 99.2%, web 95.6%. The React components and hooks are not loaded by these tests; the browser checks below cover them. GitHub Actions runs the same commands on every push and pull request to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); no job needs a secret. Its first red runs were timing races in the tests themselves (a test read a job before the worker had marked it finished), found by reading the failed logs and fixed. The backend tests run the queue, the importers (against a fake fetch), the pipelines and the whole coach loop (against a scripted model) on an in-memory MongoDB. Among them: a fabricated statistic and a fabricated position are each caught by the verifier, and injected instructions (in a question, and in an opening name inside a tool result) don't change the answer.
 
 `web/scripts/ui-*.mjs` are checks over headless Chrome: hover, press and focus feedback on every control (`ui-audit`), reduced motion and no-animation-frame browsers at 390 px (`ui-motion`), layout shift (`ui-cls`), long frames (`ui-frames`) and screen-reader labels (`ui-labels`). `ui-readme-shots.mjs` takes this README's screenshots from the live demo pages.
 
 ## Roadmap
 
-- **Your move against millions of games.** A position-statistics collection built offline from the Lichess game database (CC0): for a position from your game, what players in your rating band play there and how it scores, shown in the game review and available to the coach as a tool. The plan and the storage budget (300 MB of the 512) are written; the import is waiting on disk space on my laptop. With it, openings will be named by position instead of by ECO code, and a storage guard will evict the least recently viewed players.
+- **Your move against millions of games.** A position-statistics collection built offline from the Lichess game database (CC0): for a position from your game, what players in your rating band play there and how it scores, shown in the game review and available to the coach as a tool. The plan and the storage budget (300 MB of the 512) are written; the import is waiting on disk space on my laptop. With it, openings will be named by position instead of by ECO code.
 - **Hardening:** a rule against unverifiable colour in answers (the model can still write "cost you the game"), and a paid Gemini tier with a spending cap.
 - **Later ideas, deliberately not in this version:** accounts, saved favourites, puzzles generated from your own mistakes, more languages.
 

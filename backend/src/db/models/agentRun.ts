@@ -52,6 +52,10 @@ const agentRunSchema = new Schema(
 // spare single runs. The old index must be dropped by hand on Atlas (Mongoose never drops one).
 agentRunSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+// "Does this player have a queued or running run?" and "delete this player's runs": both asked
+// by the storage eviction (lib/eviction.ts).
+agentRunSchema.index({ playerId: 1, status: 1 });
+
 export const RUN_TTL_MS = 14 * 24 * 60 * 60_000;
 export const runExpiresAt = (from = new Date()) => new Date(from.getTime() + RUN_TTL_MS);
 

@@ -65,7 +65,7 @@ There is a **separate companion document**, `blunderprint-chat-companion.md`, fo
   ├─ Job worker loop (same process): import → extract → aggregate → report
   ├─ Importers: Chess.com PubAPI, Lichess API (serial, polite, retrying)
   ├─ Coach agent: Gemini (Interactions API) ↔ tools (read-only Mongo queries), own worker lane
-  └─ Guards: rate limits (per IP), AI budget, storage guard, error handler
+  └─ Guards: rate limits (per IP), AI budget, storage gate + eviction, error handler
             │
             ▼
   MongoDB Atlas M0 (free, 512 MB) via Mongoose
@@ -138,7 +138,8 @@ blunderprint/
 │  │  └─ lib/                (logger.ts + log context, processErrors.ts uncaught errors (Stage 8), sse.ts helpers, cursor.ts pagination cursors,
 │  │                          validate.ts zod → 400, sleep.ts, version.ts (+ deploy commit), explain.ts explain summaries,
 │  │                          demo.ts frozen demo players; Stage 6: visitor.ts IP hash, quota.ts atomic
-│  │                          counting windows, storage.ts storage gate, guards.ts limits from env)
+│  │                          counting windows, storage.ts storage gate, guards.ts limits from env;
+│  │                          Stage 8: eviction.ts storage eviction at the gate)
 │  ├─ scripts/               (test helpers: testDb, testServer, fakeFetch, fixtures, sseClient;
 │  │                          importOnce, explainGames, explainSummary, extractFeatures (backfill),
 │  │                          fetchDivisionFixture; coach: coachTools, coachCli, coachFixture, fakeModel;
@@ -236,7 +237,8 @@ Field names in camelCase. Every collection gets `createdAt`/`updatedAt` unless n
   gamesCount, analysedCount,
   summary, summaryVersion, // the cached UNFILTERED dashboard summary (stats/summary.ts), rebuilt by the
                           // extract and import jobs; another SUMMARY_VERSION is ignored and rebuilt
-  lastViewedAt,           // used by the storage guard (LRU eviction)
+  lastViewedAt,           // used by the storage eviction (least recently viewed first); written at most once an hour
+  evictingAt?,            // Stage 8: set while the player is being evicted; usernameLower is then "~evicting:<id>"
   importMeta: {           // what a re-import needs to fetch only what's new
     monthEtags: { "YYYY/MM": etag },  // Chess.com month ETags; a 304 means that month is unchanged
     newestGameAt,         // newest stored game in platform time (Chess.com end_time, Lichess createdAt,
@@ -344,7 +346,22 @@ answers: { playerId, questionKey, question, analysedGamesHash, promptVersion, mo
 
 **Storage gate (Stage 6, built):** no NEW player is imported once `dataSize + indexSize` (`dbStats`) reaches `STORAGE_NEW_PLAYER_LIMIT_MB` (120 MB): 503 `storage_full`. Stored players can still be refreshed. `lib/storage.ts` caches the reading for 5 minutes and fails open (a failed `dbStats` logs a warning and isn't cached). `/api/health` shows `storageMb` and `storageLimitMb`.
 
-A **storage guard** job (Stage 4) runs after imports. It reads `dbStats`, and over the threshold it evicts the least-recently-viewed players (their games, reports and runs), never the demo players (`DEMO_PLAYERS` env). Atlas M0 storage limits must be confirmed in Stage 0. The guard keeps us safe either way.
+**Storage eviction (Stage 8 chunk E, built 20 Nov 2026; `lib/eviction.ts`).** It replaced the planned "storage guard job": there is no job and no timer.
+- **When:** only when POST import finds the gate full for a NEW player, and only as that route's LAST check, right before the enqueue (§10 "POST import check order"): a visitor over their limit, the day's new-player cap or a full queue is refused first, and nothing is deleted for them. Below the gate the code never runs. **Tested, but it has never triggered in production** (the live database is at ~9 MB).
+- **How much:** in the request, the least recently viewed players are evicted until the ESTIMATE is 2 MB under the gate (`EVICT_GATE_MARGIN_MB`), then the import goes through. The same round continues in the background, not awaited, down to `STORAGE_EVICT_TO_MB` (100), so the next ~20 new players need none. At most 25 players per round (`EVICT_MAX_PER_ROUND`). If the request can't get under the gate: 503 `storage_full`, and the counters the request had taken are refunded.
+- **One round at a time per process:** a new player arriving while a round runs gets 503 `busy` in its own words ("We're making room for new players…", `queue: "eviction"` in `friendly.ts`) + Retry-After 60 s, counters refunded.
+- **The estimate:** the gate's reading minus the BSON size of each evicted player's games (one `$bsonSize` aggregation; reports, answers and runs aren't counted, so it errs toward evicting slightly more). The gate's 5-minute cache is cleared when the round ends (`StorageGate.reset()`).
+- **Never evicted:** a demo player (left out of the query AND checked in code); a player viewed in the last **7 days** (`EVICT_PROTECT_VIEWED_MS`: recruiters come back to their own import days later); a player with a queued or running job (import by name, extract / report / ask by id); a player with a queued or running coach run; a player with games under an unexpired engine claim.
+- **One player, in this order:**
+  1. **Mark:** one atomic update sets `evictingAt` and replaces `usernameLower` with `~evicting:<id>` ("~" can't be in a username). Every route finds a player by `{ platform, usernameLower }`, so the player is 404 everywhere from that moment with no route knowing about eviction, and an import of the same name creates a fresh player. The update's filter repeats "not viewed in 7 days", so a view that lands first wins.
+  2. **Re-check** jobs, runs and claims; if one appeared, the mark is undone (if the name was taken meanwhile, the old player stays marked for a later round).
+  3. Delete answers → reports → agentRuns → games → the player document **last**.
+- **A crash mid-way** leaves a marked player; every round finishes marked players first (from step 2), even when the gate is no longer full.
+- **Jobs are not deleted:** active ones block eviction, finished ones expire by TTL.
+- **Logs:** `eviction_started` / `eviction_done` per phase (`request` / `background`: used, target, evicted, freed, reached, ms), `player_evicted` per player (name, last viewed, counts, ms), `eviction_skipped` (a count per reason: demo, viewed, active_job, coach_run, claimed_games), `eviction_failed`. A refusal while a round runs is `limit_refused` with guard `eviction_busy`.
+- **Not closed (no transactions):** a request that read the player just before the mark and enqueues a job just after the re-check. That job finds no player and fails with the usual "player not found".
+- **Measured:** one 200-game player (~1 MB), 13 database calls: 17–27 ms against the tests' in-memory MongoDB. On Render it is network-bound; expect a few tenths of a second per player (NOT measured on Render: the live database is at 9 MB, far from the gate). The request part is normally 2–3 players.
+- New index for it: `agentRuns { playerId: 1, status: 1 }`.
 
 ---
 
@@ -493,7 +510,7 @@ A follow-up question about the player's own games, answered with the same read-o
 ### Guards
 - **Per-visitor limits (Stage 6 chunk A, built):** 5 imports/hour and 15/day (`LIMIT_IMPORTS_PER_HOUR`, `LIMIT_IMPORTS_PER_DAY`), 3 reports/day (`LIMIT_REPORTS_PER_DAY`), 6 questions/hour and 20/day (`LIMIT_ASKS_PER_HOUR`, `LIMIT_ASKS_PER_DAY`, chunk B, their own `ip:<hash>|asks` counters). Only work that really starts counts: a cached report, a rejoined job, an up-to-date or frozen player are free, and a count is refunded if the enqueue fails or someone else's identical job was rejoined.
   - **Visitor = HMAC-SHA256 of the IP** with `IP_HASH_SALT` (first 32 hex chars, `lib/visitor.ts`); IPv6 is reduced to its /64 first (`ipKeyGenerator(ip, 64)`, which also folds IPv4-mapped addresses). Raw IPs are never stored or logged; refusal logs carry only the first 8 chars of the hash. Changing the salt resets everyone's counters. Production refuses to start without a salt of ≥ 32 characters; locally an empty one means a random salt per process.
-  - **POST import check order** (cheapest and global first, the visitor's own counters last, so a refusal for a full database doesn't use up their imports): storage gate (new players only, 503 `storage_full`) → queue cap (`IMPORT_QUEUE_MAX` 10 queued imports, 503 `busy`, Retry-After 60 s) → the visitor's import limits (429 `limit_imports`) → the global new-player cap (`NEW_PLAYERS_PER_DAY` 40 per Pacific day, 503 `limit_new_players`; refunds the visitor's count). Demo players skip all of it.
+  - **POST import check order** (cheapest and global first, then the visitor's own counters, the eviction LAST because it deletes other players' data): storage gate reading (new players only; full just sets "room is needed", or 503 `storage_full` at once when there is no evictor) → queue cap (`IMPORT_QUEUE_MAX` 10 queued imports, 503 `busy`, Retry-After 60 s) → the visitor's import limits (429 `limit_imports`) → the global new-player cap (`NEW_PLAYERS_PER_DAY` 40 per Pacific day, 503 `limit_new_players`; refunds the visitor's count) → **if room is needed, the storage eviction (§7)**: `full` → 503 `storage_full`, `busy` → 503 `busy` ("We're making room for new players. Try again in a minute.", Retry-After 60 s); both refund every counter taken. So a request another check refuses never evicts anyone. Demo players skip all of it.
   - **Automatic refreshes don't count:** `?trigger=auto|user` (query string, so no CORS preflight; default `user`, unknown values 400). `auto` for an already STORED, non-demo player skips the visitor's import counters but is held to one per player per 6 h by `importMeta.lastAutoRefreshAt`, claimed atomically (of two tabs, one starts it; the other gets 200 `upToDate`). A refusal (queue full) or a failed enqueue hands the slot back. New players always count, whatever the trigger. The dashboard sends `auto` on load and `user` after a Try again / Retry click.
   - **POST report:** the visitor's report limit is taken after the budget check (429 `limit_reports`) and refunded if the run doesn't start.
   - **POST ask:** the coach queue cap (`COACH_QUEUE_MAX` 5 queued report/ask jobs, 503 `busy`, Retry-After 60 s) comes before the visitor's question limit (429 `limit_questions`), so a full queue doesn't use up a question; joining a running question and a cached answer are free; a failed enqueue refunds the count and deletes the run it created.
@@ -708,6 +725,7 @@ IP_HASH_SALT=           # Stage 6: secret key of the visitor hash; ≥ 32 random
 LIMIT_IMPORTS_PER_HOUR=5 LIMIT_IMPORTS_PER_DAY=15 LIMIT_REPORTS_PER_DAY=3
 LIMIT_REQUESTS_PER_MINUTE=300   # flood guard
 STORAGE_NEW_PLAYER_LIMIT_MB=120 NEW_PLAYERS_PER_DAY=40 IMPORT_QUEUE_MAX=10
+STORAGE_EVICT_TO_MB=100         # Stage 8: at the gate, evict in the background down to this (§7)
 LIMIT_ASKS_PER_HOUR=6 LIMIT_ASKS_PER_DAY=20 COACH_QUEUE_MAX=5               # Stage 6 chunk B
 ASK_MAX_MODEL_CALLS=6 ASK_MAX_REPAIR_CALLS=1 ASK_MAX_REQUESTS=10 ASK_RUN_TIMEOUT_MS=120000
 PORT=5000
@@ -732,7 +750,7 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | **5. Coach agent** ✅ done 6 Nov 2026 (tools d2c510c; loop + verifier 3af51cb, a0e7f4f; API 7286ca4; overload fix cf4d685; coach page 6a065a5; wrap-up docs) | Tools, loop, verifier, structured output, live trace over SSE, caching | "Coach me" end to end | Verifier tests: a fabricated stat or evidence is caught and repaired or dropped |
 | **6. Ask + guards** (chunk A guards ✅ 11 Nov 2026, 259eca3; chunk B ask backend ✅ 12 Nov 2026, 37d6d0e; chunk C ask UI + demo pre-answers ✅ 12 Nov 2026, 7b869f8, 3fd4384, 877db29; chunk D: ops:status 6d83254, live drills 12 Nov 2026, README rewrite 18 Nov 2026, c11485d) | Follow-up questions, per-IP limits, global AI budget, kill switch, demo players pre-analysed | Recruiter can ask follow-ups safely | Budget exhaustion shows the friendly message; demo players never evicted |
 | **7. Landing + animation pass** ✅ done 7 Nov 2026 (frozen demo players 62c9a96, landing 97cf88e, animation pass c721a72, perf probe + parallel summary 2f2456f, perf fixes in the "perf: no layout shift on the dashboard…" commit) | Landing page, motion polish everywhere, reduced-motion support | The full 60-second demo | Smooth on my laptop with dev tools closed |
-| **8. Hardening + README** (chunk A logs + process safety ✅ 4613b59; chunk G CI ✅ 23fa3a7, eb97a8a; chunk B games list in one request ✅ a480478; chunk C tests ✅ 18 Nov 2026: 68995a2, add8fe5, 758ccb5 (CI races), 8f0570b, e76cb78; backend 612 → 645 tests, web 195 → 257. Chunk D web hardening, in steps: a Next.js 16.4.6 ✅ 829f93f; b the games list's render ✅ 6bc1b06; c security headers, CSP in Report-Only ✅ 48156e2; d 404 + error pages ✅ 751a62d; e link-preview picture ✅ 82d81c1; f readable text (WCAG AA contrast) ✅ 91cc819; the CSP enforced ✅ 19 Nov 2026. Chunk D done. Chunk F licences (AGPL-3.0-or-later, THIRD_PARTY_NOTICES.md, footer) built 20 Nov 2026. Next: E eviction, H colour rule + model switch) | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences (done in chunk F): the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), react-chessboard's piece set (Colin M.L. Burnett's, used under BSD), and the repo's own licence (AGPL-3.0-or-later; lila, which the classification is ported from, is AGPL too). Update the Ask privacy note once the paid Gemini tier is on (paid data isn't used for training). The model may still add unverifiable colour to an answer ("cost you the game"): consider a rule or verifier check | Portfolio-ready | Everything in section 16 has a fallback in place |
+| **8. Hardening + README** (chunk A logs + process safety ✅ 4613b59; chunk G CI ✅ 23fa3a7, eb97a8a; chunk B games list in one request ✅ a480478; chunk C tests ✅ 18 Nov 2026: 68995a2, add8fe5, 758ccb5 (CI races), 8f0570b, e76cb78; backend 612 → 645 tests, web 195 → 257. Chunk D web hardening, in steps: a Next.js 16.4.6 ✅ 829f93f; b the games list's render ✅ 6bc1b06; c security headers, CSP in Report-Only ✅ 48156e2; d 404 + error pages ✅ 751a62d; e link-preview picture ✅ 82d81c1; f readable text (WCAG AA contrast) ✅ 91cc819; the CSP enforced ✅ 19 Nov 2026. Chunk D done. Chunk F licences (AGPL-3.0-or-later, THIRD_PARTY_NOTICES.md, footer) ✅ c6469ac. Chunk E storage eviction at the gate (`lib/eviction.ts`, §7) built 20 Nov 2026. Next: H colour rule + model switch) | Tests for all core logic, structured logs, README (architecture, decisions, numbers, demo GIF), then the one-off AI credit with a spending cap (done through the Claude.ai chat). Credits and licences (done in chunk F): the Stockfish GPL-3.0 credit (README + `/engine/Copying.txt`, `SOURCE.txt`), react-chessboard's piece set (Colin M.L. Burnett's, used under BSD), and the repo's own licence (AGPL-3.0-or-later; lila, which the classification is ported from, is AGPL too). Update the Ask privacy note once the paid Gemini tier is on (paid data isn't used for training). The model may still add unverifiable colour to an answer ("cost you the game"): consider a rule or verifier check | Portfolio-ready | Everything in section 16 has a fallback in place |
 
 ---
 
@@ -747,7 +765,7 @@ Deploy at the end of **Stage 0** and keep deploying after every stage. That way,
 | Chess.com blocks or 429s us | Low–Medium | Imports fail | Strictly serial requests, User-Agent with contact, ETag caching, clear user message |
 | Parquet schema differs or parsing is slow on 8 GB | Medium | Stage 4 delay | Inspect the schema first, stream in chunks, one shard at a time, run with dev servers stopped |
 | Render sleeps mid-job | Certain | Jobs pause | By design: leases expire and the jobs resume on wake |
-| Abuse (someone imports thousands of users) | Low | Storage and quota drain | Per-IP limits, storage guard, max games per player |
+| Abuse (someone imports thousands of users) | Low | Storage and quota drain | Per-IP limits, the storage gate and eviction, max games per player |
 | GPL-3.0 engine code in the repo | Certain | Licence obligation | Keep the repo public, ship Stockfish's licence file, credit it in the README. Since Stage 8 chunk F the repo is AGPL-3.0-or-later (`LICENSE`), the footer on every page links to the source, and `THIRD_PARTY_NOTICES.md` lists every third-party work: **add a new dependency, port, font or asset there, with the licence read from its source**. Not legal advice: keep it simple and open |
 | Scope creep (accounts, puzzles, multiplayer…) | High | Never finished | Out of scope until Stage 8 is done (section 18) |
 

@@ -49,3 +49,20 @@ test("an unreadable size is null, does not block imports, and is not cached", as
   assert.equal(await gate.full(), true);
   assert.equal(reads, 3);
 });
+
+test("reset forgets the cached reading: the next call reads again", async () => {
+  let reads = 0;
+  const gate = createStorageGate({
+    limitMb: 120,
+    readStats: async () => {
+      reads++;
+      return { dataSize: (reads === 1 ? 121 : 117) * MB, indexSize: 0 };
+    },
+  });
+  assert.equal(await gate.full(), true);
+  assert.equal(await gate.usedMb(), 121);
+  gate.reset();
+  assert.equal(await gate.usedMb(), 117);
+  assert.equal(await gate.full(), false);
+  assert.equal(reads, 2);
+});

@@ -40,8 +40,9 @@ export interface FriendlyVars {
   resetsInMs?: number;
   // How long until a limit's window ends (also sent as Retry-After).
   retryAfterMs?: number;
-  // busy: which queue is full (the import route's by default).
-  queue?: "imports" | "coach";
+  // busy: which queue is full (the import route's by default); "eviction" = the storage
+  // eviction is making room right now (lib/eviction.ts).
+  queue?: "imports" | "coach" | "eviction";
 }
 
 const hoursText = (ms: number | undefined) => {
@@ -91,7 +92,9 @@ export function friendly(code: FriendlyCode, vars: FriendlyVars = {}): FriendlyE
     busy: () =>
       vars.queue === "coach"
         ? "The coach has a lot of questions waiting right now. Try again in a minute."
-        : "A lot of imports are waiting right now. Try again in a minute.",
+        : vars.queue === "eviction"
+          ? "We're making room for new players. Try again in a minute."
+          : "A lot of imports are waiting right now. Try again in a minute.",
   };
   return { code, message: messages[code]() };
 }

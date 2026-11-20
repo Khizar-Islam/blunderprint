@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import type { Env } from "../config/env.js";
+import { createEvictor, type Evictor } from "./eviction.js";
 import { logger } from "./logger.js";
 import type { QuotaRule } from "./quota.js";
 import { createStorageGate, type StorageGate } from "./storage.js";
@@ -25,6 +26,8 @@ export interface Guards {
   visitorKey: VisitorKey;
   limits: GuardLimits;
   storage: StorageGate;
+  // Makes room when the gate is full (lib/eviction.ts). Left out = a full gate just refuses.
+  evictor?: Evictor;
   now?: () => Date;
 }
 
@@ -41,11 +44,14 @@ type GuardEnv = Pick<
   | "NEW_PLAYERS_PER_DAY"
   | "IMPORT_QUEUE_MAX"
   | "STORAGE_NEW_PLAYER_LIMIT_MB"
+  | "STORAGE_EVICT_TO_MB"
+  | "demoPlayers"
 >;
 
 export function guardsFromEnv(env: GuardEnv): Guards {
   // config/env.ts refuses to start in production without a salt; locally a random one is fine.
   if (!env.IP_HASH_SALT) logger.warn("ip_salt_missing", { detail: "IP_HASH_SALT is not set: using a random salt for this process (development only)" });
+  const storage = createStorageGate({ limitMb: env.STORAGE_NEW_PLAYER_LIMIT_MB });
   return {
     visitorKey: createVisitorKey(env.IP_HASH_SALT || randomSalt()),
     limits: {
@@ -59,7 +65,8 @@ export function guardsFromEnv(env: GuardEnv): Guards {
       importQueueMax: env.IMPORT_QUEUE_MAX,
       coachQueueMax: env.COACH_QUEUE_MAX,
     },
-    storage: createStorageGate({ limitMb: env.STORAGE_NEW_PLAYER_LIMIT_MB }),
+    storage,
+    evictor: createEvictor({ storage, evictToMb: env.STORAGE_EVICT_TO_MB, demoKeys: env.demoPlayers }),
   };
 }
 

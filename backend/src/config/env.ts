@@ -140,6 +140,10 @@ const envSchema = z.object({
   // Storage: no NEW player is imported once the database's dataSize + indexSize (what Atlas M0's
   // 512 MB counts) reaches this. Players already stored can still refresh.
   STORAGE_NEW_PLAYER_LIMIT_MB: z.coerce.number().positive().default(120),
+  // When that limit is reached and a new player arrives, the least recently viewed players are
+  // evicted (lib/eviction.ts): just enough to let the import through, then in the background
+  // down to this many MB.
+  STORAGE_EVICT_TO_MB: z.coerce.number().positive().default(100),
   // At most this many new players a day (Pacific), across all visitors.
   NEW_PLAYERS_PER_DAY: z.coerce.number().int().positive().default(40),
   // At most this many queued imports: past it, a new import gets 503 busy.

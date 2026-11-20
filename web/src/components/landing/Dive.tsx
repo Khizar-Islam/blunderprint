@@ -149,6 +149,8 @@ function Stage({ at, className }: { at?: number; className: string }) {
         box = stageBox(W, H, false, ROWS.length, room);
       }
       if (wide) style("boardCap", { width: `${box.board}px` });
+      // The print's caption is as wide as the print (beside the words, that is the right part of the stage).
+      style("cue", { width: `${W - box.hx}px` });
       style("board", { width: `${box.board}px`, height: `${box.board}px` });
       capH = cap?.offsetHeight ?? 44;
       return true;
@@ -311,7 +313,10 @@ function Stage({ at, className }: { at?: number; className: string }) {
       const noteOn = devT >= SCAN_END_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
       put("note", Math.max(0, Math.min(W - 262, xT0 + 14)), hy + ROW * pitch0 + 16, noteOn);
       const cueOn = (devT >= SCAN_END_MS + 900 ? 1 : 0) * (1 - seg(p, 0, 0.04));
-      put("cue", 0, wide ? H - 48 : hy + ROWS.length * pitch0 + 12, cueOn);
+      // Right under the print, in the print's own column. It used to sit at the bottom of the
+      // whole stage: on a short laptop screen that put it across the words, between the demo's
+      // label and its links.
+      put("cue", hx, hy + ROWS.length * pitch0 + 12, cueOn);
 
       // ---- A, B: the game, and what the eye is on ----------------------------------------------
       put("gameCap", 0, yT - (wide ? lerp(34, 44, b) : lerp(44, 66, b)), a * (1 - seg(p, 0.58, 0.64)));

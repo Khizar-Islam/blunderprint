@@ -59,6 +59,12 @@ try {
   await page.viewport(W, H);
   await page.navigate(base + "/"); // the landing page loads all three fonts
   await waitFor(page, `!!document.querySelector('canvas')`, 60_000, "the landing page");
+  // Wait until React has taken over the page (it marks the elements it owns with a __reactFiber
+  // key), then let it settle. The canvas is already in the server's HTML, so replacing the body
+  // right away can come BEFORE React starts, and React then draws the landing page back over the
+  // picture (20 Nov 2026: the script wrote a screenshot of the landing page and said nothing).
+  await waitFor(page, `Object.keys(document.querySelector('canvas')).some((k) => k.startsWith('__reactFiber'))`, 60_000, "React to take over the page");
+  await sleep(1500);
   await page.evaluate(`(async () => {
     document.body.innerHTML = ${JSON.stringify(html)};
     const ctx = document.getElementById('print').getContext('2d');
@@ -68,6 +74,7 @@ try {
   await sleep(500);
   const fonts = await page.evaluate(`['76px Newsreader', '25px Geist', '17px "Geist Mono"'].map((f) => document.fonts.check(f))`);
   if (fonts.includes(false)) throw new Error(`a font isn't loaded (Newsreader, Geist, Geist Mono: ${fonts.join(", ")})`);
+  if (!(await page.evaluate(`!!document.getElementById('og') && !!document.getElementById('print')`))) throw new Error("the picture was replaced by the page before the screenshot");
   await page.screenshot(OUT);
 } finally {
   page.close();

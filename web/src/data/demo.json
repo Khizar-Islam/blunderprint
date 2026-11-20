@@ -1,9 +1,9 @@
 {
   "platform": "lichess",
   "username": "DrNykterstein",
-  "takenAt": "2026-11-06T11:22:06.195Z",
+  "takenAt": "2026-11-20T08:14:56.740Z",
   "lastImportedAt": "2026-11-06T08:45:38.673Z",
-  "reportGeneratedAt": "2026-11-06T08:49:41.285Z",
+  "reportGeneratedAt": "2026-11-20T08:10:15.696Z",
   "analysedGames": 200,
   "notes": [
     {
@@ -57,26 +57,26 @@
         "errors": 80
       },
       "evidence": {
-        "gameId": "6ae4e9925599b736e9db1397",
-        "ply": 117,
-        "moveNumber": 59,
+        "gameId": "6ae4e9925599b736e9db138e",
+        "ply": 93,
+        "moveNumber": 47,
         "kind": "blunder",
-        "played": "Ke3",
-        "betterMove": "Ke2",
-        "winPctLost": 60.3,
-        "fen": "8/R3b3/4k1p1/5p1p/5P1P/5KP1/8/8 w - -",
+        "played": "Nd4",
+        "betterMove": "Kd3",
+        "winPctLost": 49.4,
+        "fen": "6k1/7p/8/8/1B2r3/P3pN1P/4K3/8 w - -",
         "facts": {
           "speed": "bullet",
           "phase": "endgame",
           "clockBucket": "under10",
-          "clockLeftSeconds": 4.3,
+          "clockLeftSeconds": 4.46,
           "opening": {
-            "eco": "A50",
-            "name": "Queen's Indian Accelerated"
+            "eco": "A00",
+            "name": "Anderssen's Opening"
           }
         },
-        "playedUci": "f3e3",
-        "betterUci": "f3e2",
+        "playedUci": "f3d4",
+        "betterUci": "e2d3",
         "color": "white"
       }
     },

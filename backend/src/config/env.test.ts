@@ -157,3 +157,21 @@ test("loadEnv: the Stage 6 guard defaults, and the IP hash salt is required in p
   }
   assert.throws(() => loadEnv({ ...BASE, LIMIT_IMPORTS_PER_HOUR: "0" }), /LIMIT_IMPORTS_PER_HOUR/);
 });
+
+test("loadEnv: thinking levels are optional; empty means unset; an unknown level stops startup", () => {
+  const none = loadEnv(BASE);
+  assert.equal(none.GEMINI_THINKING_INVESTIGATE, undefined);
+  assert.equal(none.GEMINI_THINKING_ANSWER, undefined);
+  const blank = loadEnv({ ...BASE, GEMINI_THINKING_INVESTIGATE: "", GEMINI_THINKING_ANSWER: "" });
+  assert.equal(blank.GEMINI_THINKING_INVESTIGATE, undefined);
+  assert.equal(blank.GEMINI_THINKING_ANSWER, undefined);
+  const set = loadEnv({ ...BASE, GEMINI_THINKING_INVESTIGATE: "low", GEMINI_THINKING_ANSWER: "medium" });
+  assert.equal(set.GEMINI_THINKING_INVESTIGATE, "low");
+  assert.equal(set.GEMINI_THINKING_ANSWER, "medium");
+  assert.throws(() => loadEnv({ ...BASE, GEMINI_THINKING_ANSWER: "maximum" }), /GEMINI_THINKING_ANSWER/);
+});
+
+test("loadEnv: the out-of-credit scripted scenario is for local development only", () => {
+  assert.equal(loadEnv({ ...BASE, COACH_MODEL: "scripted", COACH_SCRIPTED_SCENARIO: "out-of-credit" }).COACH_SCRIPTED_SCENARIO, "out-of-credit");
+  assert.throws(() => loadEnv({ ...BASE, COACH_SCRIPTED_SCENARIO: "out-of-credit", RENDER: "true" }), /local development only/);
+});

@@ -28,6 +28,12 @@ export interface FunctionTool {
   parameters: Record<string, unknown>;
 }
 
+// How much the model may reason before it answers (Interactions API generation_config
+// .thinking_level). Thinking is billed as output tokens. Not every model takes every level:
+// gemini-3.8-flash takes low / medium / high and thinks at medium when nothing is sent.
+export const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 export interface ModelRequest {
   system: string;
   input: Step[];
@@ -35,12 +41,16 @@ export interface ModelRequest {
   tools?: FunctionTool[];
   // A JSON Schema the answer must follow (structured output).
   responseSchema?: Record<string, unknown>;
+  // Left out = nothing is sent and the model uses its own default.
+  thinking?: ThinkingLevel;
   signal: AbortSignal;
 }
 
 export interface ModelUsage {
   input: number;
   output: number;
+  // Tokens spent thinking, reported separately from the output (0 or absent when it didn't).
+  thought?: number;
   total: number;
 }
 
@@ -62,7 +72,9 @@ export interface Model {
 //                then the fallback model
 //   timeout / server / network → one more try
 //   bad_request / auth → stop: trying again won't help
-export type ModelErrorKind = "rate_limited" | "overloaded" | "timeout" | "server" | "network" | "bad_request" | "auth";
+//   out_of_credit → stop at once: the prepaid credit is used up (HTTP 402). No retry and no
+//                   fallback model (the same account pays for both); see agent/credit.ts
+export type ModelErrorKind = "rate_limited" | "overloaded" | "timeout" | "server" | "network" | "bad_request" | "auth" | "out_of_credit";
 
 export class ModelError extends Error {
   constructor(

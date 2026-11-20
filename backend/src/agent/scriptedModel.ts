@@ -141,20 +141,27 @@ function askAnswer(request: ModelRequest): ModelResponse {
   return respond(request, [text(JSON.stringify(answer))], "completed");
 }
 
-export type ScriptedScenario = "ok" | "overload-switch" | "fail-overloaded" | "slow";
+export type ScriptedScenario = "ok" | "overload-switch" | "fail-overloaded" | "slow" | "out-of-credit";
 export const SCRIPTED_FALLBACK_NAME = "scripted-fallback";
 
 const overloaded = () => new ModelError("overloaded", "Scripted 503 UNAVAILABLE: This model is currently experiencing high demand.", { status: 503 });
 
+const outOfCredit = () => new ModelError("out_of_credit", "Scripted 402: Your prepayment credits are depleted.", { status: 402 });
+
 // delayMs: a pause per call, so the live trace ticks in like a real run's. failFirst: that many
 // requests answer 503 first; Infinity = every request.
-export function createScriptedModel({ delayMs = 600, name = SCRIPTED_MODEL_NAME, failFirst = 0 }: { delayMs?: number; name?: string; failFirst?: number } = {}): Model {
+export function createScriptedModel({
+  delayMs = 600,
+  name = SCRIPTED_MODEL_NAME,
+  failFirst = 0,
+  failWith = overloaded,
+}: { delayMs?: number; name?: string; failFirst?: number; failWith?: () => ModelError } = {}): Model {
   let requests = 0;
   return {
     name,
     async call(request) {
       if (delayMs > 0) await sleep(delayMs, request.signal);
-      if (requests++ < failFirst) throw overloaded();
+      if (requests++ < failFirst) throw failWith();
       if (isAskRequest(request)) return request.tools?.length ? askInvestigate(request) : askAnswer(request);
       return request.tools?.length ? investigate(request) : answer(request);
     },
@@ -174,6 +181,12 @@ export function scriptedPair(scenario: ScriptedScenario): { model: Model; fallba
       };
     case "slow":
       return { model: createScriptedModel({ delayMs: 2_500 }) };
+    // The fallback is there to show it's never tried: a 402 ends the run at the first request.
+    case "out-of-credit":
+      return {
+        model: createScriptedModel({ failFirst: Infinity, failWith: outOfCredit, delayMs: 300 }),
+        fallback: createScriptedModel({ name: SCRIPTED_FALLBACK_NAME, delayMs: 300 }),
+      };
     default:
       return { model: createScriptedModel() };
   }

@@ -13,6 +13,7 @@ describe("friendly messages", () => {
       [{ code: "ai_disabled", message: "x" }, "ai_disabled"],
       [{ code: "ai_budget_exhausted", message: "x" }, "ai_budget_exhausted"],
       [{ code: "model_error", message: "x", modelErrorKind: "rate_limited" }, "ai_busy"],
+      [{ code: "model_error", message: "x", modelErrorKind: "out_of_credit" }, "ai_out_of_credit"],
       [{ code: "model_error", message: "x", modelErrorKind: "timeout" }, "ai_unavailable"],
       [{ code: "model_error", message: "x", modelErrorKind: "server" }, "ai_unavailable"],
       [{ code: "model_error", message: "x", modelErrorKind: "network" }, "ai_unavailable"],
@@ -62,4 +63,10 @@ test("chunk B: the question limit, and busy names the queue that's full", () => 
   assert.match(friendly("limit_questions", { retryAfterMs: 40 * 60_000 }).message, /ask another in about 40 minutes/);
   assert.match(friendly("busy").message, /imports are waiting/);
   assert.match(friendly("busy", { queue: "coach" }).message, /coach has a lot of questions waiting/);
+});
+
+test("chunk H: out of AI credit has its own wording, with no time promised and nothing internal", () => {
+  const f = friendlyFromAgent({ code: "model_error", message: "Gemini 402 FAILED_PRECONDITION: Your prepayment credits are depleted", modelErrorKind: "out_of_credit" }, { resetsInMs: 3_600_000 });
+  assert.deepEqual(f, { code: "ai_out_of_credit", message: "The coach is resting: its AI allowance has run out. Reports already written are still shown." });
+  assert.ok(!/midnight|hour|402|Gemini|credit/i.test(f.message), f.message);
 });

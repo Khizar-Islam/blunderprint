@@ -3,6 +3,7 @@ import { sleep as realSleep, type Sleep } from "../lib/sleep.js";
 import { BudgetRefused } from "./budget.js";
 import type { AgentContext } from "./context.js";
 import { functionCallsOf, ModelError, textOf, userInput, type Model, type ModelErrorKind, type ModelResponse, type Step } from "./model.js";
+import type { ThinkingLevel } from "./model.js";
 import type { Pacer } from "./pacer.js";
 import { buildSystemPrompt, FINAL_PROMPT, FORMAT_RETRY_PROMPT, repairPrompt, TASK_PROMPT } from "./prompts.js";
 import { parseReport, REPORT_JSON_SCHEMA, type DraftReport } from "./schema.js";
@@ -100,7 +101,7 @@ export interface TaskResult<Output> {
   status: "done" | "failed";
   output?: Output;
   error?: AgentError;
-  usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
+  usage: { calls: number; inputTokens: number; outputTokens: number; thoughtTokens: number; totalTokens: number };
   durationMs: number;
   trace: TraceStep[];
   // The model that wrote the answer the run ended with (the fallback, if the run switched).
@@ -111,7 +112,7 @@ export interface AgentResult {
   status: "done" | "failed";
   report?: AgentReport;
   error?: AgentError;
-  usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
+  usage: { calls: number; inputTokens: number; outputTokens: number; thoughtTokens: number; totalTokens: number };
   durationMs: number;
   trace: TraceStep[];
   // The model that wrote the report the run ended with (the fallback, if the run switched).
@@ -150,12 +151,20 @@ export interface RunAgentOptions {
   fallback?: Model;
   pacer: Pacer;
   limits: AgentLimits;
+  // Thinking levels for the MAIN model, per phase (the repair round uses investigate's). Never
+  // sent to the fallback: it's another model, with its own levels.
+  thinking?: ThinkingLevels;
   signal?: AbortSignal;
   onStep?: (step: TraceStep) => void;
   now?: () => number;
   sleep?: Sleep;
   // For the backoff jitter (tests pass a fixed one).
   random?: () => number;
+}
+
+export interface ThinkingLevels {
+  investigate?: ThinkingLevel;
+  answer?: ThinkingLevel;
 }
 
 // Internal: the investigation reached the requests kept back for the answer.
@@ -270,7 +279,8 @@ export async function runTask<Draft, Output>(opts: RunAgentOptions & { task: Age
   const input: Step[] = [userInput(task.taskPrompt)];
   const log: ToolLog = new Map();
   const trace: TraceStep[] = [];
-  const usage = { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const usage = { calls: 0, inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 };
+  const thinking = opts.thinking ?? {};
   let toolSteps = 0;
 
   const emit = (step: Omit<TraceStep, "n">) => {
@@ -316,16 +326,21 @@ export async function runTask<Draft, Output>(opts: RunAgentOptions & { task: Age
       const t0 = now();
       // The run's deadline also cuts a call short; the model adds its own per-call timeout.
       const callSignal = AbortSignal.any([outer, AbortSignal.timeout(Math.max(1, deadline - now()))]);
+      // Only the main model gets a thinking level (the answer its own, everything else the
+      // investigation's).
+      const level = model === opts.model ? (phase === "answer" ? thinking.answer : thinking.investigate) : undefined;
       try {
         const res = await model.call({
           system: SYSTEM_PROMPT,
           input,
           ...(withTools ? { tools } : { responseSchema: task.responseSchema }),
+          ...(level ? { thinking: level } : {}),
           signal: callSignal,
         });
         slot.settle(res.usage.total);
         usage.inputTokens += res.usage.input;
         usage.outputTokens += res.usage.output;
+        usage.thoughtTokens += res.usage.thought ?? 0;
         usage.totalTokens += res.usage.total;
         const asked = functionCallsOf(res.steps).map((c) => c.name);
         emit({
@@ -352,6 +367,9 @@ export async function runTask<Draft, Output>(opts: RunAgentOptions & { task: Age
           error: err.message,
         });
         overloadStreak = err.kind === "overloaded" ? overloadStreak + 1 : 0;
+        // Out of prepaid credit: waiting won't help and the fallback is paid from the same
+        // account, so the run ends here (agent/credit.ts holds new runs back for a while).
+        if (err.kind === "out_of_credit") throw new StopRun("model_error", err.message, { modelErrorKind: err.kind, phase });
 
         if (err.kind === "rate_limited" && rateLimited < MAX_RATE_LIMIT_RETRIES) {
           rateLimited++;

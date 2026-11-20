@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CoachEvidence, CoachInfo, CoachReport, CoachStat } from "./api";
-import { coachButtonState, factsLine, failureAction, fenAfterMove, moveCaption, msUntilPacificMidnight, statText, uciSquares } from "./coach";
+import { blockedBy, blockedText, coachButtonState, factsLine, failureAction, fenAfterMove, moveCaption, msUntilPacificMidnight, statText, uciSquares } from "./coach";
 
 const REPORT = { id: "rep" } as CoachReport;
 const info = (over: Partial<CoachInfo> = {}): CoachInfo => ({
@@ -30,6 +30,16 @@ describe("coachButtonState", () => {
     assert.deepEqual(coachButtonState(info({ report: REPORT, stale: true, staleReason: "new_version" })), { kind: "report", stale: { reason: "new_version" }, note: null });
     assert.deepEqual(coachButtonState(info({ ai: { enabled: false, budgetLeft: 0, canStart: false } })), { kind: "off" });
     assert.deepEqual(coachButtonState(info({ ai: { enabled: true, budgetLeft: 3, canStart: false } })), { kind: "resting" });
+    // Out of AI credit (Stage 8 chunk H): its own state, even with budget left; "off" still wins.
+    assert.deepEqual(coachButtonState(info({ ai: { enabled: true, budgetLeft: 140, canStart: false, outOfCredit: true } })), { kind: "no_credit" });
+    assert.deepEqual(coachButtonState(info({ ai: { enabled: false, budgetLeft: 0, canStart: false, outOfCredit: true } })), { kind: "off" });
+    const stale = coachButtonState(info({ report: REPORT, ai: { enabled: true, budgetLeft: 140, canStart: false, outOfCredit: true }, stale: true, staleReason: "new_games", newGames: 2 }));
+    assert.equal((stale as { note: string }).note, "no_credit");
+    assert.equal(blockedBy({ enabled: true, budgetLeft: 140, canStart: true }), null);
+    // No time is promised when the credit is gone; the daily budget names midnight Pacific.
+    assert.equal(blockedText("no_credit"), "The coach is resting: its AI allowance has run out.");
+    assert.equal(blockedText("off"), "The coach is switched off right now.");
+    assert.match(blockedText("resting", new Date("2026-11-20T20:00:00Z")), /^The coach is resting until midnight Pacific (.+).$/);
   });
 
   test("a report stays reachable when AI is off or resting; the note only matters when it's stale", () => {
@@ -125,6 +135,7 @@ describe("failureAction", () => {
   test("what each friendly code offers", () => {
     assert.equal(failureAction("ai_disabled"), "none");
     assert.equal(failureAction("ai_budget_exhausted"), "wait");
+    assert.equal(failureAction("ai_out_of_credit"), "none");
     assert.equal(failureAction("limit_reports"), "wait");
     assert.equal(failureAction("not_enough_games"), "dashboard");
     assert.equal(failureAction("player_not_found"), "import");

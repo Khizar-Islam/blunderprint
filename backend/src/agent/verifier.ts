@@ -1,3 +1,4 @@
+import { colourIn, COLOUR_RULE } from "./colour.js";
 import { Types } from "mongoose";
 import { FEATURES_VERSION } from "../chess/features.js";
 import { Game } from "../db/models/game.js";
@@ -232,6 +233,7 @@ export interface ProseProblem {
   value?: number; // a number in digits that isn't backed
   word?: string; // a number written as a word
   move?: string; // a chess move that isn't one of the evidence's moves
+  phrase?: string; // an outcome or intensity claim nothing backs (agent/colour.ts)
 }
 
 // What a pattern's prose may cite: numbers (allowedProseNumbers) and moves (allowedProseMoves).
@@ -293,20 +295,22 @@ export function checkProse(p: { explanation: string; drill: string }, allowed: P
     }
     for (const word of numberWordsIn(p[field])) problems.push({ field, word });
     for (const move of sanMovesIn(p[field])) if (unbackedMove(move, allowed.moves)) problems.push({ field, move });
+    for (const phrase of colourIn(p[field])) problems.push({ field, phrase });
   }
   return problems;
 }
 
 export const sentencesOf = (text: string) => text.split(/(?<=[.!?])\s+/).filter((s) => s.trim() !== "");
 
-// The text without the sentences that contain an unbacked number, a number word, or a move that
-// isn't one of the evidence's.
+// The text without the sentences that contain an unbacked number, a number word, a move that
+// isn't one of the evidence's, or an outcome/intensity claim (agent/colour.ts).
 export function withoutUnbackedSentences(text: string, allowed: ProseAllowance): string {
   return sentencesOf(text)
     .filter(
       (sentence) =>
         proseNumbers(sentence).every((n) => allowed.numbers.some((a) => matchesValue(n, a))) &&
         numberWordsIn(sentence).length === 0 &&
+        colourIn(sentence).length === 0 &&
         sanMovesIn(sentence).every((m) => !unbackedMove(m, allowed.moves)),
     )
     .join(" ")
@@ -449,9 +453,11 @@ export async function verifyReport(ctx: AgentContext, report: DraftReport, log: 
       numbers: allowedProseNumbers(candidate, "problem" in step ? undefined : step, valid),
       moves: allowedProseMoves(valid),
     };
-    for (const { field, value, word, move } of checkProse(p, allowed)) {
+    for (const { field, value, word, move, phrase } of checkProse(p, allowed)) {
       problems.push(
-        move !== undefined
+        phrase !== undefined
+          ? `the ${field} says "${phrase}", ${COLOUR_RULE}`
+          : move !== undefined
           ? `the ${field} names the move ${move}, which isn't a played or better move of this pattern's evidence`
           : word !== undefined
             ? `the ${field} spells out a number ("${word}"); numbers must be in digits and come from the candidate or its examples`

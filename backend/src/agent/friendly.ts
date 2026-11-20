@@ -11,6 +11,7 @@ export type FriendlyCode =
   | "not_enough_games"
   | "ai_disabled"
   | "ai_budget_exhausted"
+  | "ai_out_of_credit"
   | "ai_busy"
   | "ai_unavailable"
   | "coach_timeout"
@@ -69,6 +70,9 @@ export function friendly(code: FriendlyCode, vars: FriendlyVars = {}): FriendlyE
     ai_disabled: () => "The coach is switched off right now. Your dashboard and game reviews still work.",
     ai_budget_exhausted: () =>
       `The coach has used up today's AI allowance. It resets at midnight Pacific time${hoursText(vars.resetsInMs)}. Reports already written are still shown.`,
+    // The prepaid AI credit is used up (HTTP 402, agent/credit.ts). No time is promised: it
+    // comes back when I add credit.
+    ai_out_of_credit: () => "The coach is resting: its AI allowance has run out. Reports already written are still shown.",
     ai_busy: () => "The AI service is busy right now. Try again in a minute.",
     ai_unavailable: () => "The AI service didn't respond. Try again in a few minutes.",
     coach_timeout: () => "The coach ran out of time on this one. Try again in a few minutes.",
@@ -117,6 +121,8 @@ export function friendlyFromAgent(error: AgentError | undefined, vars: FriendlyV
       return friendly("coach_interrupted");
     case "model_error":
       switch (error.modelErrorKind) {
+        case "out_of_credit":
+          return friendly("ai_out_of_credit");
         case "rate_limited":
           return friendly("ai_busy");
         case "overloaded":

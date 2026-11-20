@@ -19,6 +19,10 @@ const agentRunSchema = new Schema(
     // MAX_RUN_TOKENS. Streaming an ask run needs one of the tokens; the tokens themselves are
     // never stored, so reading the database doesn't give them away.
     tokenHashes: { type: [String], default: undefined },
+    // The usage counters (lib/quota.ts ids) the visitor who started this run paid with. Given
+    // back if the run fails for lack of AI credit: our fault, not theirs (Stage 8 chunk H).
+    // Removed when refunded, so it can only happen once. Never sent to the browser.
+    refundIds: { type: [String], default: undefined },
     jobId: Schema.Types.ObjectId,
     status: { type: String, enum: RUN_STATUSES, default: "queued" },
     // +1 on every change a viewer can see; the SSE event id, like jobs.rev.
@@ -30,7 +34,7 @@ const agentRunSchema = new Schema(
     analysedGamesHash: String,
     // TraceStep[] (agent/loop.ts), capped at MAX_RUN_STEPS.
     steps: { type: [Schema.Types.Mixed], default: [] },
-    usage: { calls: Number, inputTokens: Number, outputTokens: Number, totalTokens: Number },
+    usage: { calls: Number, inputTokens: Number, outputTokens: Number, thoughtTokens: Number, totalTokens: Number },
     reportId: Schema.Types.ObjectId,
     // Always a friendly pair from agent/friendly.ts, never an internal error message.
     error: { code: String, message: String },

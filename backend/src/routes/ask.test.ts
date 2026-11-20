@@ -10,6 +10,8 @@ import { ASK_PROMPT_VERSION, questionKey } from "../agent/ask.js";
 import { analysedBasis } from "../agent/basis.js";
 import { pacificDay } from "../agent/budget.js";
 import { createCoachRuntime, type CoachRuntime } from "../agent/coach.js";
+import { createCreditGate, type CreditGate } from "../agent/credit.js";
+import { ModelError as CreditModelError } from "../agent/model.js";
 import type { Model } from "../agent/model.js";
 import { hashToken, tokenMatches } from "../agent/runTokens.js";
 import { SUGGESTED_QUESTIONS } from "../agent/suggestions.js";
@@ -95,8 +97,9 @@ async function setup({
   guards,
   queue = createQueue(),
   handler,
-}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; guards?: Guards; handler?: AskHandlerOptions; queue?: Pick<Queue, "enqueue" | "depth"> & Partial<Queue> } = {}): Promise<Setup> {
-  const coach = createCoachRuntime({ ...ENV, ...env }, { model: model ?? createScriptedModel({ delayMs: 10 }) });
+  credit,
+}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; guards?: Guards; handler?: AskHandlerOptions; credit?: CreditGate; queue?: Pick<Queue, "enqueue" | "depth"> & Partial<Queue> } = {}): Promise<Setup> {
+  const coach = createCoachRuntime({ ...ENV, ...env }, { model: model ?? createScriptedModel({ delayMs: 10 }), ...(credit ? { credit } : {}) });
   const server = await startTestServer(
     createApp({ corsOrigins: [], trustProxyHops: 0, getDbStatus: () => true, queue, version: "test", coach, sseHeartbeatMs: 1_000, guards }),
   );
@@ -670,5 +673,43 @@ describe("the production coach lane", () => {
     const { lanes, handlers, coach } = createJobSystem({ ...ENV, CONTACT_EMAIL: "test@example.com", MAX_GAMES_PER_PLAYER: 200 });
     assert.deepEqual(lanes.coach, { type: { $in: ["report", "ask"] }, "payload.model": coach.modelName });
     assert.ok(handlers.ask);
+  });
+});
+
+describe("out of AI credit (HTTP 402)", () => {
+  const broke = () =>
+    createScriptedModel({ delayMs: 5, failFirst: Infinity, failWith: () => new CreditModelError("out_of_credit", "Gemini 402: Your prepayment credits are depleted.", { status: 402 }) });
+  const askCounters = async () => (await Usage.find({ _id: /\|asks\|/ }).lean()).map((d) => d.count);
+
+  it("the question fails with ai_out_of_credit, both of the asker's counters (hour and day) are refunded, and the next question is refused up front", async () => {
+    const credit = createCreditGate();
+    const s = await setup({ model: broke(), credit, guards: testGuards({ asksPerHour: 2, asksPerDay: 5 }) });
+    const { runId, token } = await accepted(await ask(s, QUESTION));
+    const events = await streamAll(streamUrl(s, runId, token));
+    assert.equal(events.at(-1)!.event, "failed");
+    assert.deepEqual((events.at(-1)!.data as { error: unknown }).error, {
+      code: "ai_out_of_credit",
+      message: "The coach is resting: its AI allowance has run out. Reports already written are still shown.",
+    });
+    assert.deepEqual(await askCounters(), [0, 0]);
+    assert.equal((await AgentRun.findById(runId).lean())!.refundIds, undefined);
+    assert.equal(JSON.stringify(events).includes("refundIds"), false);
+
+    const refused = await ask(s, "How is my opening play?");
+    assert.equal(refused.status, 503);
+    assert.equal(((await refused.json()) as { code: string }).code, "ai_out_of_credit");
+    assert.equal(await AgentRun.countDocuments(), 1);
+    assert.deepEqual(await askCounters(), [0, 0]);
+  });
+
+  it("an answer already cached is still served while the coach is out of credit", async () => {
+    const credit = createCreditGate();
+    const s = await setup({ credit });
+    const { runId, token } = await accepted(await ask(s, QUESTION));
+    await streamAll(streamUrl(s, runId, token));
+    credit.mark();
+    const cached = await ask(s, QUESTION);
+    assert.equal(cached.status, 200);
+    assert.equal(((await cached.json()) as { cached: boolean }).cached, true);
   });
 });

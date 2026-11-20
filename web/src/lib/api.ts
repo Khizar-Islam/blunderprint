@@ -381,7 +381,9 @@ export interface CoachInfo {
   newGames: number;
   eligibility: { analysed: number; needed: number; ok: boolean };
   activeRun: { runId: string; status: string } | null;
-  ai: { enabled: boolean; budgetLeft: number; canStart: boolean };
+  // outOfCredit: the AI account's prepaid credit ran out a moment ago (backend agent/credit.ts):
+  // nothing new can start, and no time can be promised. Absent from an older API.
+  ai: { enabled: boolean; budgetLeft: number; canStart: boolean; outOfCredit?: boolean };
   // "Ask the coach" chips (Stage 6 chunk C). answered: a click is served from the answer cache
   // at once (no AI call, even with the AI off). Optional: an older API doesn't send it.
   ask?: { suggestions: AskSuggestion[] };

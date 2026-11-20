@@ -50,9 +50,16 @@ const input = [
 console.log(`probe: ${modelId}, answer-shaped (no tools, report schema ${JSON.stringify(REPORT_JSON_SCHEMA).length} chars)`);
 const t0 = Date.now();
 try {
-  const res = await model.call({ system: buildSystemPrompt(), input, responseSchema: REPORT_JSON_SCHEMA, signal: new AbortController().signal });
+  const res = await model.call({
+    system: buildSystemPrompt(),
+    input,
+    responseSchema: REPORT_JSON_SCHEMA,
+    // The answer call's thinking level, as the API would send it (unset = the model's default).
+    ...(env.GEMINI_THINKING_ANSWER ? { thinking: env.GEMINI_THINKING_ANSWER } : {}),
+    signal: new AbortController().signal,
+  });
   const text = res.steps.filter((s) => s.type === "model_output").map((s) => JSON.stringify((s as { content?: unknown }).content ?? "")).join("");
-  console.log(`OK status=${res.status} in ${Date.now() - t0} ms, tokens ${res.usage.input} in / ${res.usage.output} out`);
+  console.log(`OK status=${res.status} in ${Date.now() - t0} ms, tokens ${res.usage.input} in / ${res.usage.output} out / ${res.usage.thought ?? 0} thinking`);
   console.log(`answer starts: ${text.slice(0, 200)}`);
 } catch (err) {
   console.log(`FAILED after ${Date.now() - t0} ms: ${err instanceof Error ? `${(err as { kind?: string }).kind ?? ""} ${err.message}` : String(err)}`);

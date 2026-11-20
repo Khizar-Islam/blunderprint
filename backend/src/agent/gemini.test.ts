@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { jsonResponse, recordingFetch } from "../../scripts/fakeFetch.js";
-import { createGeminiModel, INTERACTIONS_URL, retryAfterMs } from "./gemini.js";
+import { createGeminiModel, INTERACTIONS_URL, isOutOfCredit, retryAfterMs } from "./gemini.js";
 import { ModelError, userInput, type ModelRequest } from "./model.js";
 
 const KEY = "test-key-never-printed-123";
@@ -71,7 +71,8 @@ describe("gemini client", () => {
 
     assert.equal(res.status, "requires_action");
     assert.deepEqual(res.steps, OK.steps);
-    assert.deepEqual(res.usage, { input: 76, output: 18, total: 94 });
+    assert.deepEqual(res.usage, { input: 76, output: 18, thought: 0, total: 94 });
+    assert.equal("generation_config" in body, false, "no thinking level unless one is asked for");
   });
 
   it("no tools: the field is left out, so the model must answer", async () => {
@@ -113,6 +114,40 @@ describe("gemini client", () => {
     assert.equal(busy.details.status, 503);
     assert.equal((await failure(() => new Response("oops", { status: 500 }))).kind, "server");
     assert.equal((await failure(() => jsonResponse(errorBody(500, "UNAVAILABLE", "The service is overloaded"), { status: 500 }))).kind, "overloaded");
+  });
+
+  it("out of prepaid credit: a 402, or any status whose message says the credits are depleted; an ordinary 429 is not", async () => {
+    const broke = await failure(() => jsonResponse(errorBody(402, "FAILED_PRECONDITION", "Payment required"), { status: 402 }));
+    assert.equal(broke.kind, "out_of_credit");
+    assert.equal(broke.details.status, 402);
+    // A 402 with a body that isn't JSON at all.
+    assert.equal((await failure(() => new Response("Payment Required", { status: 402 }))).kind, "out_of_credit");
+    // The older form: a 429 that must NOT be waited out and retried.
+    const old = await failure(() => jsonResponse(errorBody(429, "RESOURCE_EXHAUSTED", "Your prepayment credits are depleted. Add credits in AI Studio."), { status: 429 }));
+    assert.equal(old.kind, "out_of_credit");
+    assert.equal(old.details.retryAfterMs, undefined);
+    // An ordinary quota 429 mentions billing too, and stays a rate limit.
+    const quota = await failure(() =>
+      jsonResponse(errorBody(429, "RESOURCE_EXHAUSTED", "You exceeded your current quota, please check your plan and billing details."), { status: 429 }),
+    );
+    assert.equal(quota.kind, "rate_limited");
+    assert.equal(isOutOfCredit(403, { error: { message: "API key not valid" } }), false);
+    assert.equal(isOutOfCredit(400, { error: { message: "The project's credits have been depleted" } }), true);
+  });
+
+  it("a thinking level goes out as generation_config.thinking_level; thought tokens come back on their own", async () => {
+    const { fetch, calls } = recordingFetch(() =>
+      jsonResponse({ ...OK, usage: { total_input_tokens: 100, total_output_tokens: 20, total_thought_tokens: 300, total_tokens: 420 } }),
+    );
+    const res = await createGeminiModel({ apiKey: KEY, model: "gemini-3.8-flash", timeoutMs: 5_000, fetch }).call(request({ thinking: "low" }));
+    assert.deepEqual(JSON.parse(calls[0]!.body!).generation_config, { thinking_level: "low" });
+    assert.deepEqual(res.usage, { input: 100, output: 20, thought: 300, total: 420 });
+  });
+
+  it("no total in the usage: input + output + thought", async () => {
+    const { fetch } = recordingFetch(() => jsonResponse({ ...OK, usage: { total_input_tokens: 100, total_output_tokens: 20, total_thought_tokens: 30 } }));
+    const res = await createGeminiModel({ apiKey: KEY, model: "m", timeoutMs: 5_000, fetch }).call(request());
+    assert.equal(res.usage.total, 150);
   });
 
   it("a network failure and a 200 without a status", async () => {

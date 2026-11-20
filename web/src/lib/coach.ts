@@ -14,17 +14,32 @@ export type CoachButtonState =
       // Why the report is out of date, when it is.
       stale: null | { reason: "new_games"; newGames: number } | { reason: "new_version" };
       // A new report can't be started right now (the report itself is still there).
-      note: null | "off" | "resting";
+      note: null | Blocked;
     }
   | { kind: "locked"; analysed: number; needed: number }
   | { kind: "off" }
   | { kind: "resting" }
+  | { kind: "no_credit" }
   | { kind: "start" };
+
+// Why a new report can't start right now: the kill switch, the AI account out of credit (no
+// time can be promised), or today's budget used up (back at midnight Pacific).
+export type Blocked = "off" | "no_credit" | "resting";
+export function blockedBy(ai: CoachInfo["ai"]): Blocked | null {
+  return !ai.enabled ? "off" : ai.outOfCredit ? "no_credit" : !ai.canStart ? "resting" : null;
+}
+
+// The note for each, in the page's words. `now` only matters for "resting".
+export function blockedText(blocked: Blocked, now: Date = new Date()): string {
+  if (blocked === "off") return "The coach is switched off right now.";
+  if (blocked === "no_credit") return "The coach is resting: its AI allowance has run out.";
+  return `The coach is resting until midnight Pacific (${hoursText(msUntilPacificMidnight(now))}).`;
+}
 
 export function coachButtonState(info: CoachInfo | null): CoachButtonState {
   if (!info) return { kind: "loading" };
   if (info.activeRun) return { kind: "running", runId: info.activeRun.runId };
-  const blocked = !info.ai.enabled ? "off" : !info.ai.canStart ? "resting" : null;
+  const blocked = blockedBy(info.ai);
   if (info.report) {
     const stale = !info.stale
       ? null
@@ -171,6 +186,7 @@ export type FailureAction = "retry" | "none" | "wait" | "dashboard" | "import" |
 export function failureAction(code: string | undefined): FailureAction {
   switch (code) {
     case "ai_disabled":
+    case "ai_out_of_credit": // trying again can't help: it comes back when credit is added
       return "none";
     case "ai_budget_exhausted":
     case "limit_reports": // this visitor's reports for today (Stage 6)

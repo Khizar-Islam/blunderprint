@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ApiError, fetchCoachInfo, fetchFinishedRun, startReport, type CoachInfo, type CoachReport, type Platform, type PublicRun } from "@/lib/api";
-import { failureAction, hoursText, msUntilPacificMidnight } from "@/lib/coach";
+import { blockedBy, blockedText, failureAction } from "@/lib/coach";
 import { fullDate } from "@/lib/format";
 import { isFinished } from "@/lib/runStream";
 import { useRunStream } from "@/lib/useRunStream";
@@ -144,11 +144,8 @@ function StaleBand({ info, starting, onRefresh }: { info: CoachInfo; starting: b
       : info.newGames > 0
         ? `${info.newGames} new analysed game${info.newGames === 1 ? "" : "s"} since this report.`
         : "Your analysed games have changed since this report.";
-  const blocked = !info.ai.enabled
-    ? "The coach is switched off right now."
-    : !info.ai.canStart
-      ? `The coach is resting until midnight Pacific (${hoursText(msUntilPacificMidnight(new Date()))}).`
-      : null;
+  const why = blockedBy(info.ai);
+  const blocked = why ? blockedText(why) : null;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-ink/15 py-3" role="status">
       <p className="text-sm text-ink">{what}</p>
@@ -267,7 +264,7 @@ function Failure({
   if (action === "wait") {
     return <Notice title={error?.code === "limit_reports" ? "You've reached today's reports" : "The coach is resting"}>{message}</Notice>;
   }
-  return <Notice title="The coach is switched off">{message}</Notice>;
+  return <Notice title={error?.code === "ai_out_of_credit" ? "The coach is resting" : "The coach is switched off"}>{message}</Notice>;
 }
 
 function Notice({

@@ -24,7 +24,7 @@ const reportSchema = new Schema(
     // StoredPattern): stat, evidence positions with FEN, moves in SAN and UCI, and facts.
     patterns: { type: [Schema.Types.Mixed], default: [] },
     analysedGames: { type: Number, required: true },
-    usage: { calls: Number, inputTokens: Number, outputTokens: Number, totalTokens: Number },
+    usage: { calls: Number, inputTokens: Number, outputTokens: Number, thoughtTokens: Number, totalTokens: Number },
     durationMs: Number,
     // For the logs and the README; never sent to visitors.
     dropped: { type: [Schema.Types.Mixed], default: [] },

@@ -83,7 +83,7 @@ export interface SaveReportInput {
   answeredBy: string;
   runId: Types.ObjectId;
   report: AgentReport;
-  usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
+  usage: { calls: number; inputTokens: number; outputTokens: number; thoughtTokens: number; totalTokens: number };
   durationMs: number;
 }
 

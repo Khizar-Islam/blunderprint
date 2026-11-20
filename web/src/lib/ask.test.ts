@@ -92,6 +92,7 @@ describe("askErrorView", () => {
     for (const code of ["ai_disabled", "ai_budget_exhausted", "not_enough_games"]) assert.equal(askErrorView({ code, message: msg }).action, "none");
     assert.equal(askErrorView({ code: "ai_disabled", message: msg }).title, "New questions are paused");
     assert.equal(askErrorView({ code: "ai_budget_exhausted", message: msg }).title, "The coach is resting");
+    assert.deepEqual(askErrorView({ code: "ai_out_of_credit", message: msg }), { title: "The coach is resting", message: msg, action: "none" });
   });
   test("a failed run, a lost stream or anything unknown: Try again now, with the API's message", () => {
     for (const code of ["coach_timeout", "ai_unavailable", "stream_lost", undefined, "something_new"]) {

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ApiError, startReport, type CoachInfo, type Platform } from "@/lib/api";
-import { coachButtonState, hoursText, msUntilPacificMidnight } from "@/lib/coach";
+import { blockedText, coachButtonState } from "@/lib/coach";
 import { AnimatedNumber } from "../patterns/charts/AnimatedNumber";
 
 // The dashboard's door to the coach. Its state comes from GET /report (lib/coach.ts
@@ -38,7 +38,6 @@ export function CoachButton({ info, platform, username }: { info: CoachInfo | nu
     }
   }
 
-  const resting = `The coach is resting until midnight Pacific (${hoursText(msUntilPacificMidnight(new Date()))}).`;
 
   // Keyed by the state: when it changes (locked → "Coach me" → working → report), the new
   // content fades in where the old one was (a CSS animation; the frame itself stays put).
@@ -66,13 +65,13 @@ export function CoachButton({ info, platform, username }: { info: CoachInfo | nu
                       ? `${state.stale.newGames} new game${state.stale.newGames === 1 ? "" : "s"} analysed since your last report.`
                       : "Your analysed games changed since your last report."}
                   {state.note === "off" && " A new report can't start while the coach is switched off."}
-                  {state.note === "resting" && ` ${resting}`}
+                  {(state.note === "resting" || state.note === "no_credit") && ` ${blockedText(state.note)}`}
                 </p>
               )}
             </>
           )}
           {state.kind === "off" && <p className="text-sm text-graphite">The coach is switched off right now. Your dashboard and game reviews still work.</p>}
-          {state.kind === "resting" && <p className="text-sm text-graphite">{resting}</p>}
+          {(state.kind === "resting" || state.kind === "no_credit") && <p className="text-sm text-graphite">{blockedText(state.kind)}</p>}
           {error && (
             <p className="text-sm text-blunder-text" role="alert">
               {error}

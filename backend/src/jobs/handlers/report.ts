@@ -5,7 +5,7 @@ import { friendly, friendlyFromAgent } from "../../agent/friendly.js";
 import { runAgent } from "../../agent/loop.js";
 import { PROMPT_VERSION } from "../../agent/prompts.js";
 import { publicReportOf, saveReport, toPublicReport } from "../../agent/reportStore.js";
-import { createStepWriter, runStore } from "../../agent/runs.js";
+import { createStepWriter, refundRunQuota, runStore } from "../../agent/runs.js";
 import { AgentRun, runExpiresAt } from "../../db/models/agentRun.js";
 import type { JobDoc } from "../../db/models/job.js";
 import { Player } from "../../db/models/player.js";
@@ -45,10 +45,18 @@ export async function startReportRun(
   queue: Pick<Queue, "enqueue">,
   playerId: Types.ObjectId,
   modelName: string,
+  // What the visitor paid with (lib/quota.ts): given back if the run fails for lack of AI credit.
+  refundIds?: string[],
 ): Promise<{ runId: string; created: boolean }> {
   // expiresAt: deleted by the TTL index 14 days from now, unless it ends up behind a demo
   // player's report (agent/runExpiry.ts).
-  const run = await AgentRun.create({ playerId, model: modelName, promptVersion: PROMPT_VERSION, expiresAt: runExpiresAt() });
+  const run = await AgentRun.create({
+    playerId,
+    model: modelName,
+    promptVersion: PROMPT_VERSION,
+    expiresAt: runExpiresAt(),
+    ...(refundIds?.length ? { refundIds } : {}),
+  });
   const payload: ReportPayload = { runId: String(run._id), model: modelName };
   const { job, created } = await queue.enqueue({
     type: "report",
@@ -109,7 +117,7 @@ export function createReportHandler(
         model: coach.modelName,
       });
       if (cached) {
-        await runStore.done(runId, { reportId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 } }, await publicReportOf(cached));
+        await runStore.done(runId, { reportId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 } }, await publicReportOf(cached));
         logger.info("report_cached", log);
         return;
       }
@@ -123,6 +131,7 @@ export function createReportHandler(
           ...(coach.fallback ? { fallback: coach.fallback } : {}),
           pacer: coach.pacer,
           limits: coach.limits,
+          thinking: coach.thinking,
           signal,
           onStep: (step) => steps.push(step),
         }),
@@ -198,6 +207,7 @@ export function createReportHandler(
           trimmed: result.report.trimmed.length,
           calls: result.usage.calls,
           tokens: result.usage.totalTokens,
+          thoughtTokens: result.usage.thoughtTokens,
           ms: result.durationMs,
         });
         return;
@@ -216,6 +226,8 @@ export function createReportHandler(
         calls: result.usage.calls,
         ms: result.durationMs,
       });
+      // Out of AI credit is our fault, not the visitor's: their report count comes back.
+      if (f.code === "ai_out_of_credit") await refundRunQuota(runId);
       await runStore.fail(runId, f, result.usage);
       throw new FatalError(f.code, f.message);
     },

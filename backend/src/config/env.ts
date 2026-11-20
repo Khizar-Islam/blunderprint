@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { THINKING_LEVELS } from "../agent/model.js";
 import { logger } from "../lib/logger.js";
 
 // Origins that are always allowed: local dev and the live Vercel production domain.
@@ -63,6 +64,9 @@ export function parseDemoPlayers(raw: string | undefined): string[] {
   return [...new Set(keys)];
 }
 
+// A thinking level, or nothing: an empty value in .env means "not set".
+const thinkingLevel = z.preprocess((v) => (v === "" ? undefined : v), z.enum(THINKING_LEVELS).optional());
+
 const envSchema = z.object({
   MONGODB_URI: z.string().regex(/^mongodb(\+srv)?:\/\//, "must be a mongodb:// or mongodb+srv:// URI"),
   // Optional until Stage 5 (the coach agent), so the API can boot without them.
@@ -73,6 +77,12 @@ const envSchema = z.object({
   // aistudio.google.com/docs, checked 5 Nov 2026); shuts down 7 May 2027 (deprecations page).
   // "none" turns the fallback off.
   GEMINI_FALLBACK_MODEL: z.string().default("gemini-3.1-flash-lite"),
+  // How much the MAIN model thinks (Stage 8 chunk H): tool-calling turns and the repair round
+  // (INVESTIGATE), and the answer (ANSWER). Unset = nothing is sent and the model uses its own
+  // default. Never sent to the fallback model. Thinking is billed as output tokens.
+  // gemini-3.8-flash: low / medium / high (default medium). Planned: investigate low, answer medium.
+  GEMINI_THINKING_INVESTIGATE: thinkingLevel,
+  GEMINI_THINKING_ANSWER: thinkingLevel,
   AI_ENABLED: z.stringbool().default(true),
   AI_DAILY_CALL_BUDGET: z.coerce.number().int().nonnegative().default(400),
   // The model's free-tier limits, from the AI Studio rate-limit page (project "blunderprint",
@@ -116,7 +126,9 @@ const envSchema = z.object({
   //   overload-switch two 503s, then the run switches to a scripted fallback (slower calls)
   //   fail-overloaded every request is a 503: the run fails with ai_unavailable
   //   slow            a normal run with ~2.5 s per call, to watch the trace
-  COACH_SCRIPTED_SCENARIO: z.enum(["ok", "overload-switch", "fail-overloaded", "slow"]).default("ok"),
+  //   out-of-credit   every request is a 402: the run fails with ai_out_of_credit, the visitor's
+  //                   count is refunded and new runs are refused for 15 minutes
+  COACH_SCRIPTED_SCENARIO: z.enum(["ok", "overload-switch", "fail-overloaded", "slow", "out-of-credit"]).default("ok"),
   // Goes in the User-Agent of every Chess.com / Lichess request, so they can reach us
   // instead of blocking us. Required: the importers must not run without it.
   CONTACT_EMAIL: z.email(),

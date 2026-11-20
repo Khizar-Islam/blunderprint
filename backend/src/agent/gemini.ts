@@ -50,6 +50,15 @@ export function isOverloaded(status: number, body: ApiErrorBody | undefined): bo
   return /UNAVAILABLE|overload|high demand/i.test(text);
 }
 
+// The prepaid credit is used up (paid tier): HTTP 402 Payment Required. Google's older form
+// of the same thing was a 429 whose message says the prepayment credits are depleted, so the
+// message is checked whatever the status. An ordinary 429 ("quota exceeded… check your plan and
+// billing details") must NOT match: that one is worth waiting out.
+export function isOutOfCredit(status: number, body: ApiErrorBody | undefined): boolean {
+  if (status === 402) return true;
+  return /prepay(?:ment)?\s+credits?|credits?\s+(?:are|is|have\s+been)\s+depleted/i.test(body?.error?.message ?? "");
+}
+
 export function createGeminiModel({ apiKey, model, timeoutMs, fetch = globalThis.fetch }: GeminiOptions): Model {
   return {
     name: model,
@@ -63,6 +72,7 @@ export function createGeminiModel({ apiKey, model, timeoutMs, fetch = globalThis
         ...(request.responseSchema
           ? { response_format: { type: "text", mime_type: "application/json", schema: request.responseSchema } }
           : {}),
+        ...(request.thinking ? { generation_config: { thinking_level: request.thinking } } : {}),
       };
 
       // The run's signal (shutdown, run deadline) or this call's own timeout, whichever first.
@@ -92,6 +102,8 @@ export function createGeminiModel({ apiKey, model, timeoutMs, fetch = globalThis
       if (!res.ok) {
         const errBody = json as ApiErrorBody | undefined;
         const message = describe(res.status, errBody);
+        // Before the 429 branch: an "out of credit" 429 must not be waited out and retried.
+        if (isOutOfCredit(res.status, errBody)) throw new ModelError("out_of_credit", message, { status: res.status });
         if (res.status === 429) {
           throw new ModelError("rate_limited", message, { status: 429, retryAfterMs: retryAfterMs(errBody, res.headers.get("retry-after")) });
         }
@@ -101,14 +113,17 @@ export function createGeminiModel({ apiKey, model, timeoutMs, fetch = globalThis
         throw new ModelError("bad_request", message, { status: res.status });
       }
 
-      const data = json as { status?: string; steps?: Step[]; usage?: { total_input_tokens?: number; total_output_tokens?: number; total_tokens?: number } } | undefined;
+      const data = json as { status?: string; steps?: Step[]; usage?: { total_input_tokens?: number; total_output_tokens?: number; total_thought_tokens?: number; total_tokens?: number } } | undefined;
       if (!data || typeof data.status !== "string") throw new ModelError("server", "Gemini returned a response without a status");
       const input = data.usage?.total_input_tokens ?? 0;
       const output = data.usage?.total_output_tokens ?? 0;
+      // Thinking is counted on its own line, next to input and output (the three add up to
+      // total_tokens in Google's examples).
+      const thought = data.usage?.total_thought_tokens ?? 0;
       return {
         status: data.status,
         steps: Array.isArray(data.steps) ? data.steps : [],
-        usage: { input, output, total: data.usage?.total_tokens ?? input + output },
+        usage: { input, output, thought, total: data.usage?.total_tokens ?? input + output + thought },
       };
     },
   };

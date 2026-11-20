@@ -402,3 +402,36 @@ describe("runTask with the ask task", () => {
     assert.ok(out.evidence.length >= 2);
   });
 });
+
+describe("colour in an answer (ask prompt v7)", () => {
+  it("the prompt says it; 'cost you the game' and 'cost you dearly' are issues, then their sentences go", async () => {
+    assert.match(ASK_SYSTEM_PROMPT, /WHAT A MOVE COST: say it only as that position's winPctLost slot/);
+    const { log, examples } = await realLog();
+    // The live answer of 12 Nov 2026, in this fixture's terms.
+    const d = draft({
+      sentences: ["Overall you make {{a}}.", "For instance, playing Nf3 cost you the game.", "Another time, playing Nf3 cost you dearly."],
+      slots: [SLOT_A],
+      evidenceStep: 2,
+      evidence: examples.slice(0, 2),
+    });
+    const first = await verifyAnswer(ctx, d, log, { final: false });
+    assert.deepEqual(first.issues, [
+      'sentence 2 says "cost you the game", an outcome or intensity no tool result backs: state what a move cost only as its win-chance figure, or leave it out',
+      'sentence 3 says "dearly", an outcome or intensity no tool result backs: state what a move cost only as its win-chance figure, or leave it out',
+    ]);
+    const final = await verifyAnswer(ctx, d, log, { final: true });
+    assert.deepEqual(final.output.sentences, ["Overall you make {{a}}."]);
+    assert.equal(final.output.evidence.length, 2);
+  });
+
+  it("the cost as a slot is fine", async () => {
+    const { log, examples } = await realLog();
+    const { issues } = await verifyAnswer(
+      ctx,
+      draft({ sentences: ["Overall you make {{a}}.", "Playing Nf3 there lost {{b}}."], slots: [SLOT_A, { name: "b", step: 2, path: "examples[0].winPctLost" }], evidenceStep: 2, evidence: examples.slice(0, 2) }),
+      log,
+      { final: false },
+    );
+    assert.deepEqual(issues, []);
+  });
+});

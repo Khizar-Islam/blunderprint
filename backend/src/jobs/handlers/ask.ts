@@ -6,7 +6,7 @@ import type { CoachRuntime } from "../../agent/coach.js";
 import { friendly, friendlyFromAgent } from "../../agent/friendly.js";
 import { runTask } from "../../agent/loop.js";
 import { newRunToken } from "../../agent/runTokens.js";
-import { createStepWriter, runStore } from "../../agent/runs.js";
+import { createStepWriter, refundRunQuota, runStore } from "../../agent/runs.js";
 import { AgentRun, runExpiresAt } from "../../db/models/agentRun.js";
 import { Answer } from "../../db/models/answer.js";
 import type { JobDoc } from "../../db/models/job.js";
@@ -42,6 +42,8 @@ export async function startAskRun(
   playerId: Types.ObjectId,
   modelName: string,
   question: string,
+  // What the asker paid with (lib/quota.ts): given back if the run fails for lack of AI credit.
+  refundIds?: string[],
 ): Promise<{ runId: string; created: true; token: string } | { runId: string; created: false }> {
   const { token, hash } = newRunToken();
   const run = await AgentRun.create({
@@ -52,6 +54,7 @@ export async function startAskRun(
     promptVersion: ASK_PROMPT_VERSION,
     tokenHashes: [hash],
     expiresAt: runExpiresAt(),
+    ...(refundIds?.length ? { refundIds } : {}),
   });
   const payload: AskPayload = { runId: String(run._id), model: modelName };
   let enqueued: Awaited<ReturnType<Queue["enqueue"]>>;
@@ -107,7 +110,7 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
 
       const cached = await Answer.findOne({ playerId: player._id, questionKey: qKey, analysedGamesHash: basis.hash, promptVersion: ASK_PROMPT_VERSION, model: coach.modelName });
       if (cached) {
-        await runStore.doneAsk(runId, { answerId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 } }, publicAnswerOf(cached));
+        await runStore.doneAsk(runId, { answerId: cached._id, usage: { calls: 0, inputTokens: 0, outputTokens: 0, thoughtTokens: 0, totalTokens: 0 } }, publicAnswerOf(cached));
         logger.info("ask_cached", log);
         return;
       }
@@ -123,6 +126,7 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
           ...(coach.fallback ? { fallback: coach.fallback } : {}),
           pacer: coach.pacer,
           limits: coach.askLimits,
+          thinking: coach.thinking,
           signal,
           onStep: (step) => steps.push(step),
         }),
@@ -180,6 +184,7 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
           answeredBy: result.answerModel,
           calls: result.usage.calls,
           tokens: result.usage.totalTokens,
+          thoughtTokens: result.usage.thoughtTokens,
           ms: result.durationMs,
         });
         return;
@@ -197,6 +202,8 @@ export function createAskHandler(coach: CoachRuntime, { saveRetryDelaysMs = [500
         calls: result.usage.calls,
         ms: result.durationMs,
       });
+      // Out of AI credit is our fault, not the asker's: their question count comes back.
+      if (f.code === "ai_out_of_credit") await refundRunQuota(runId);
       await runStore.fail(runId, f, result.usage);
       throw new FatalError(f.code, f.message);
     },

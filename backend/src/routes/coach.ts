@@ -27,6 +27,7 @@ import { parsePlayerParams } from "./players.js";
 //      3. a report for exactly this data         200 { report, cached: true } (no AI call)
 //      4. under COACH_MIN_ANALYSED_GAMES        409 not_enough_games
 //      5. AI switched off / no model            503 ai_disabled
+//      5b. the AI account ran out of credit a moment ago  503 ai_out_of_credit (agent/credit.ts)
 //      6. budget under one worst-case run       429 ai_budget_exhausted (+ Retry-After)
 //      7. this visitor's reports today used up  429 limit_reports (+ Retry-After), Stage 6
 //      8. otherwise                             202 { runId }
@@ -87,6 +88,7 @@ export function coachRouter({ queue, coach, guards }: CoachRouterOptions): Route
     const newVersion = !!latest && (latest.promptVersion !== PROMPT_VERSION || latest.model !== coach.modelName);
     const newData = !!latest && latest.analysedGamesHash !== basis.hash;
     const stale = newVersion || newData;
+    const outOfCredit = coach.available && coach.credit.out();
 
     res.json({
       report: latest ? await publicReportOf(latest) : null,
@@ -96,7 +98,14 @@ export function coachRouter({ queue, coach, guards }: CoachRouterOptions): Route
       newGames: latest && newData ? Math.max(0, basis.analysed - latest.analysedGames) : 0,
       eligibility: { analysed: basis.analysed, needed: coach.minAnalysed, ok: basis.analysed >= coach.minAnalysed },
       activeRun: active,
-      ai: { enabled: coach.available, budgetLeft, canStart: coach.available && budgetLeft >= coach.worstCaseCalls },
+      // outOfCredit: the AI account's prepaid credit ran out a moment ago (agent/credit.ts);
+      // nothing new can start, and the page says so without promising a time.
+      ai: {
+        enabled: coach.available,
+        budgetLeft,
+        canStart: coach.available && !outOfCredit && budgetLeft >= coach.worstCaseCalls,
+        outOfCredit,
+      },
       ask: { suggestions },
     });
   });
@@ -123,6 +132,7 @@ export function coachRouter({ queue, coach, guards }: CoachRouterOptions): Route
       return sendFriendly(res, 409, "not_enough_games", { analysed: basis.analysed, needed: coach.minAnalysed });
     }
     if (!coach.available) return sendFriendly(res, 503, "ai_disabled");
+    if (coach.credit.out()) return sendFriendly(res, 503, "ai_out_of_credit");
     // Don't start a run that couldn't finish: the budget must cover one worst-case run. Each
     // model request still checks the budget for itself (agent/budget.ts).
     if ((await coach.budget.remaining()) < coach.worstCaseCalls) {
@@ -138,7 +148,7 @@ export function coachRouter({ queue, coach, guards }: CoachRouterOptions): Route
     }
     let started: Awaited<ReturnType<typeof startReportRun>>;
     try {
-      started = await startReportRun(queue, player._id, coach.modelName);
+      started = await startReportRun(queue, player._id, coach.modelName, mine?.ok ? mine.taken.ids : undefined);
     } catch (err) {
       if (mine?.ok) await refund(mine.taken).catch(() => {});
       throw err;

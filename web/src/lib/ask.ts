@@ -100,6 +100,7 @@ export function askErrorView(error: { code?: string; message: string; retryAfter
     case "ai_disabled":
       return { title: "New questions are paused", message, action: "none" };
     case "ai_budget_exhausted":
+    case "ai_out_of_credit":
       return { title: "The coach is resting", message, action: "none" };
     case "not_enough_games":
       return { title: "Not enough analysed games yet", message, action: "none" };

@@ -10,7 +10,7 @@ import { friendlyFromAgent } from "./friendly.js";
 import { ANSWER_RESERVE_REQUESTS, runAgent, summarizeArgs, type AgentLimits } from "./loop.js";
 import { ModelError, type ModelRequest } from "./model.js";
 import { createPacer } from "./pacer.js";
-import { buildSystemPrompt, SYSTEM_PROMPT } from "./prompts.js";
+import { buildSystemPrompt, PROMPT_VERSION, SYSTEM_PROMPT } from "./prompts.js";
 
 let db: Awaited<ReturnType<typeof startTestDb>>;
 before(async () => {
@@ -490,7 +490,13 @@ describe("enough text", () => {
   });
 });
 
-describe("prompt v6", () => {
+describe("prompt v6 and v7", () => {
+  it("v7: what a move cost is only its win-chance figure", () => {
+    assert.equal(PROMPT_VERSION, 7);
+    assert.match(SYSTEM_PROMPT, /WHAT A MOVE COST: say it only as its winPctLost figure, or not at all/);
+    assert.match(SYSTEM_PROMPT, /never write an outcome \("cost you the game"/);
+  });
+
   it("states the move, exact-filter and length rules", () => {
     assert.match(SYSTEM_PROMPT, /Name a move .* only if it is the "played" or "betterMove" of one of THIS pattern's evidence positions/);
     assert.match(SYSTEM_PROMPT, /called with EXACTLY that candidate's exampleFilter: no extra filters and none missing/);
@@ -740,5 +746,126 @@ describe("summarizeArgs", () => {
   it("short and readable", () => {
     assert.equal(summarizeArgs({}), "");
     assert.equal(summarizeArgs({ groupBy: "phase", filters: { color: "white" } }), "groupBy: phase, filters: {color: white}");
+  });
+});
+
+describe("colour in a report (prompt v7)", () => {
+  it("'cost you the game' is a repair issue naming the phrase; if it stays, its sentence is removed", async () => {
+    const coloured = (req: ModelRequest) =>
+      endgamePattern(req, {
+        explanation:
+          "Once the queens come off you move your king to the wrong square. That habit cost you the game more than once. The opposing king or rook then walks in and the position falls apart.",
+      });
+    const { result, requests } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [coloured(req)] }), (req) => answer({ patterns: [coloured(req)] })]);
+    assert.match(lastUserText(requests[4]!), /the explanation says "cost you the game", an outcome or intensity no tool result backs: state what a move cost only as its win-chance figure, or leave it out/);
+    assert.equal(
+      result.report!.patterns[0]!.explanation,
+      "Once the queens come off you move your king to the wrong square. The opposing king or rook then walks in and the position falls apart.",
+    );
+    assert.match(result.report!.trimmed[0]!.reasons[0]!, /cost you the game/);
+  });
+
+  it("a repair that drops the phrase is kept whole", async () => {
+    const coloured = (req: ModelRequest) => endgamePattern(req, { drill: "Set up the evidence positions and avoid the catastrophic king move by finding the opposition first." });
+    const { result } = await run([...INVESTIGATE, DONE, (req) => answer({ patterns: [coloured(req)] }), (req) => answer({ patterns: [endgamePattern(req)] })]);
+    assert.equal(result.report!.patterns.length, 1);
+    assert.deepEqual(result.report!.trimmed, []);
+  });
+});
+
+describe("out of prepaid credit (HTTP 402)", () => {
+  const broke = () => new ModelError("out_of_credit", "Gemini 402 FAILED_PRECONDITION: Your prepayment credits are depleted", { status: 402 });
+
+  it("ONE request: no retry, no wait, and the fallback is never tried", async () => {
+    const c = clock();
+    const { result, requests, fallbackRequests } = await run([broke()], {
+      c,
+      fallback: [...INVESTIGATE, DONE, (req) => answer({ patterns: [endgamePattern(req)] })],
+    });
+    assert.deepEqual(result.error, {
+      code: "model_error",
+      message: "Gemini 402 FAILED_PRECONDITION: Your prepayment credits are depleted",
+      modelErrorKind: "out_of_credit",
+      phase: "investigate",
+    });
+    assert.equal(requests.length, 1);
+    assert.equal(fallbackRequests.length, 0);
+    assert.equal(result.usage.calls, 1);
+    assert.equal(c.slept(), 0);
+    assert.deepEqual(result.trace.filter((s) => s.kind === "retry" || s.kind === "switch"), []);
+    assert.equal(friendlyFromAgent(result.error).code, "ai_out_of_credit");
+  });
+
+  it("mid-run, on the answer call: the run ends there, with what it used so far", async () => {
+    const { result, requests } = await run([...INVESTIGATE, DONE, broke()]);
+    assert.equal(result.error!.modelErrorKind, "out_of_credit");
+    assert.equal(result.error!.phase, "answer");
+    assert.equal(requests.length, 4);
+  });
+});
+
+describe("thinking levels and thought tokens", () => {
+  const thinkingRun = async (turns: Turn[], opts: { fallback?: Turn[]; thinking?: { investigate?: "low" | "medium" | "high"; answer?: "low" | "medium" | "high" } } = {}) => {
+    const c = clock();
+    const { model, requests } = scriptedModel(turns);
+    const second = opts.fallback ? scriptedModel(opts.fallback, "fallback-model") : undefined;
+    const result = await runAgent({
+      ctx,
+      model,
+      ...(second ? { fallback: second.model } : {}),
+      pacer: createPacer({ rpm: 15, tpm: 250_000, now: c.now, sleep: c.sleep }),
+      limits: LIMITS,
+      ...(opts.thinking ? { thinking: opts.thinking } : {}),
+      now: c.now,
+      sleep: c.sleep,
+      random: () => 0.5,
+    });
+    return { result, requests, fallbackRequests: second?.requests ?? [] };
+  };
+  const bad = (req: ModelRequest) => endgamePattern(req, { explanation: "You blunder 99 times in the endgame. You lose control once the queens come off. Your king then wanders into checks from the enemy rook." });
+
+  it("investigation calls get the investigate level, the answer its own, the repair the investigate level again", async () => {
+    const { result, requests } = await thinkingRun([...INVESTIGATE, DONE, (req) => answer({ patterns: [bad(req)] }), (req) => answer({ patterns: [endgamePattern(req)] })], {
+      thinking: { investigate: "low", answer: "medium" },
+    });
+    assert.equal(result.status, "done", JSON.stringify(result.error));
+    assert.deepEqual(requests.map((r) => r.thinking), ["low", "low", "low", "medium", "low"]);
+    assert.equal(requests[3]!.tools, undefined, "the 4th request is the answer");
+  });
+
+  it("no levels configured: the field is never sent", async () => {
+    const { requests } = await thinkingRun([...INVESTIGATE, DONE, (req) => answer({ patterns: [endgamePattern(req)] })]);
+    assert.ok(requests.every((r) => !("thinking" in r)));
+  });
+
+  it("only one level configured: the other phase sends nothing", async () => {
+    const { requests } = await thinkingRun([...INVESTIGATE, DONE, (req) => answer({ patterns: [endgamePattern(req)] })], { thinking: { answer: "medium" } });
+    assert.deepEqual(requests.map((r) => r.thinking), [undefined, undefined, undefined, "medium"]);
+  });
+
+  it("never sent to the fallback model", async () => {
+    const overloaded = () => new ModelError("overloaded", "Gemini 503 UNAVAILABLE", { status: 503 });
+    const { result, requests, fallbackRequests } = await thinkingRun([overloaded(), overloaded()], {
+      fallback: [...INVESTIGATE, DONE, (req) => answer({ patterns: [endgamePattern(req)] })],
+      thinking: { investigate: "low", answer: "medium" },
+    });
+    assert.equal(result.status, "done", JSON.stringify(result.error));
+    assert.deepEqual(requests.map((r) => r.thinking), ["low", "low"]);
+    assert.equal(fallbackRequests.length, 4);
+    assert.ok(fallbackRequests.every((r) => !("thinking" in r)));
+  });
+
+  it("thought tokens are added up on their own, next to input and output", async () => {
+    const withThought = (turn: Turn, thought: number): Turn => async (req, i) => {
+      const res = typeof turn === "function" ? await turn(req, i) : turn;
+      if (res instanceof Error) return res;
+      return { ...res, usage: { ...res.usage, thought, total: res.usage.total + thought } };
+    };
+    const turns: Turn[] = [...INVESTIGATE, DONE, (req) => answer({ patterns: [endgamePattern(req)] })];
+    const { result } = await thinkingRun(turns.map((t, i) => withThought(t, i === 3 ? 700 : 100)));
+    assert.equal(result.usage.thoughtTokens, 1_000);
+    assert.equal(result.usage.totalTokens, result.usage.inputTokens + result.usage.outputTokens + 1_000);
+    // A model that reports none (the scripted ones) counts as 0.
+    assert.equal((await thinkingRun(turns)).result.usage.thoughtTokens, 0);
   });
 });

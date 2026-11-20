@@ -18,7 +18,10 @@ import type { VerificationIssue } from "./verifier.js";
 //     clock left).
 // v6: moves named in the text must be played or better moves of the pattern's own evidence;
 //     the evidence step must use EXACTLY the candidate's exampleFilter; minimum text lengths.
-export const PROMPT_VERSION = 6;
+// v7 (Stage 8 chunk H): no outcome or intensity claims ("cost you the game", "dearly",
+//     "massive swings"): what a move cost is said only as its win-chance figure. Checked by code
+//     (agent/colour.ts): an issue in the repair round, then the sentence is removed.
+export const PROMPT_VERSION = 7;
 
 // The system prompt, with the same rules the candidate scan uses (env COACH_MIN_BASELINE_GAP,
 // COACH_MIN_CANDIDATE_GAMES, COACH_MIN_CANDIDATE_MOVES).
@@ -57,6 +60,7 @@ MOVES IN THE TEXT
 ONLY WHAT THE DATA SHOWS
 - Each example carries its facts: speed, phase, clockBucket (null = no clock), clockLeftSeconds and opening. Describe only situations those facts show for this pattern's evidence: don't say "bullet", "time pressure" or "with plenty of time" unless the evidence's speed or clockBucket says so, and name an opening only if it is in the evidence or the candidate.
 - Never claim results, strengths or trends the tools didn't return ("your otherwise strong results", "you usually win these", "more and more often").
+- WHAT A MOVE COST: say it only as its winPctLost figure, or not at all. The tools never say a game was lost BECAUSE of one move, so never write an outcome ("cost you the game", "costing you games", "lost you a point", "threw away the win", "game-losing") and never an intensity nothing measured ("dearly", "massive swings", "catastrophic", "disastrous", "devastating", "fatal"). Sentences with such words are removed.
 
 STYLE
 - Speak to the player as "you". Explanation: 2-4 concrete sentences about what happens in the evidence positions: the kind of move played (the piece, a capture, a pawn push, a king move), what the better move did instead, the phase and the clock situation.
@@ -87,6 +91,6 @@ export function repairPrompt(issues: VerificationIssue[]): string {
     "Your report failed verification against the data:",
     ...lines,
     "",
-    "Fix ONLY these problems, using the tool results above (no more tools are available). Every candidateId must be copied exactly from the get_weakness_candidates result, and no two patterns may use candidates where one is inside the other; every evidence item must be one of the examples in the find_example_mistakes result its evidenceStep points to (called with exactly that candidate's exampleFilter), and no position may be used by two patterns; numbers in the text must be digits from the candidate or its examples and moves only the played or better moves of the pattern's own evidence, otherwise remove them; keep the explanation at least 2 sentences and the drill a full instruction. Remove any pattern you can't back up. Then return the complete corrected JSON report.",
+    "Fix ONLY these problems, using the tool results above (no more tools are available). Every candidateId must be copied exactly from the get_weakness_candidates result, and no two patterns may use candidates where one is inside the other; every evidence item must be one of the examples in the find_example_mistakes result its evidenceStep points to (called with exactly that candidate's exampleFilter), and no position may be used by two patterns; numbers in the text must be digits from the candidate or its examples and moves only the played or better moves of the pattern's own evidence, otherwise remove them; never claim an outcome or an intensity (such as cost you the game, dearly, massive swings, catastrophic): what a move cost is only its win % lost figure; keep the explanation at least 2 sentences and the drill a full instruction. Remove any pattern you can't back up. Then return the complete corrected JSON report.",
   ].join("\n");
 }

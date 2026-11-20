@@ -8,7 +8,8 @@ import { startTestServer } from "../../scripts/testServer.js";
 import { analysedBasis } from "../agent/basis.js";
 import { pacificDay } from "../agent/budget.js";
 import { createCoachRuntime, type CoachRuntime } from "../agent/coach.js";
-import type { Model } from "../agent/model.js";
+import { createCreditGate, OUT_OF_CREDIT_HOLD_MS, type CreditGate } from "../agent/credit.js";
+import { ModelError, type Model } from "../agent/model.js";
 import { PROMPT_VERSION } from "../agent/prompts.js";
 import { createScriptedModel } from "../agent/scriptedModel.js";
 import { createApp } from "../app.js";
@@ -21,6 +22,7 @@ import { Usage } from "../db/models/usage.js";
 import { createReportHandler, type ReportHandlerOptions } from "../jobs/handlers/report.js";
 import { saveReport } from "../agent/reportStore.js";
 import { syncRunExpiry } from "../agent/runExpiry.js";
+import { refundRunQuota } from "../agent/runs.js";
 import { createQueue } from "../jobs/queue.js";
 import { startWorker, type Worker } from "../jobs/worker.js";
 import { testGuards } from "../../scripts/testGuards.js";
@@ -100,8 +102,12 @@ async function setup({
   handler,
   fallback,
   guards,
-}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; handler?: ReportHandlerOptions; fallback?: Model; guards?: Guards } = {}): Promise<Setup> {
-  const coach = createCoachRuntime({ ...ENV, ...env }, { model: model ?? createScriptedModel({ delayMs: 20 }), ...(fallback ? { fallback } : {}) });
+  credit,
+}: { env?: Partial<typeof ENV>; model?: Model; worker?: boolean; handler?: ReportHandlerOptions; fallback?: Model; guards?: Guards; credit?: CreditGate } = {}): Promise<Setup> {
+  const coach = createCoachRuntime(
+    { ...ENV, ...env },
+    { model: model ?? createScriptedModel({ delayMs: 20 }), ...(fallback ? { fallback } : {}), ...(credit ? { credit } : {}) },
+  );
   const queue = createQueue();
   const server = await startTestServer(
     createApp({ corsOrigins: [], trustProxyHops: 0, getDbStatus: () => true, queue, version: "test", coach, sseHeartbeatMs: 1_000, guards }),
@@ -184,7 +190,7 @@ describe("the coach chain", () => {
       newGames: 0,
       eligibility: { analysed: 10, needed: 10, ok: true },
       activeRun: null,
-      ai: { enabled: true, budgetLeft: 400, canStart: true },
+      ai: { enabled: true, budgetLeft: 400, canStart: true, outOfCredit: false },
       ask: { suggestions: SUGGESTED_QUESTIONS.map((question) => ({ question, answered: false })) },
     });
 
@@ -318,7 +324,7 @@ describe("the guards and errors", () => {
     assert.equal(res.status, 503);
     assert.equal((await res.json() as any).code, "ai_disabled");
     const get = await (await fetch(reportUrl(s))).json() as any;
-    assert.deepEqual(get.ai, { enabled: false, budgetLeft: 0, canStart: false });
+    assert.deepEqual(get.ai, { enabled: false, budgetLeft: 0, canStart: false, outOfCredit: false });
 
     const { hash } = await analysedBasis(aliceId);
     await Report.create({ playerId: aliceId, analysedGamesHash: hash, promptVersion: PROMPT_VERSION, model: s.coach.modelName, runId: new Types.ObjectId(), outcome: "none", analysedGames: 10 });
@@ -695,5 +701,110 @@ describe("GET /api/runs/:id/stream", () => {
     const missing = await fetch(`${s.base}/runs/0123456789abcdef01234567/stream`);
     assert.equal(missing.status, 404);
     assert.deepEqual(await missing.json() as any, { error: "That coach run has expired or doesn't exist.", code: "run_not_found" });
+  });
+});
+
+describe("out of AI credit (HTTP 402, agent/credit.ts)", () => {
+  const WORDING = "The coach is resting: its AI allowance has run out. Reports already written are still shown.";
+  const broke = () =>
+    createScriptedModel({ delayMs: 5, failFirst: Infinity, failWith: () => new ModelError("out_of_credit", "Gemini 402: Your prepayment credits are depleted.", { status: 402 }) });
+  const reportCounters = async () => (await Usage.find({ _id: /\|reports\|/ }).lean()).map((d) => d.count);
+  const failedWith = (events: SseMessage[]) => (events.at(-1)!.data as { error: { code: string; message: string } }).error;
+
+  it("one request, no fallback; the run fails with ai_out_of_credit; the visitor's report is refunded; new runs are refused for 15 minutes, then one is let through", async () => {
+    let t = Date.now();
+    const credit = createCreditGate({ now: () => t });
+    const main = counting(broke());
+    const fb = counting(createScriptedModel({ name: "fallback", delayMs: 5 }));
+    const s = await setup({ model: main.model, fallback: fb.model, credit, guards: testGuards({ reportsPerDay: 2 }) });
+
+    const first = await post(reportUrl(s));
+    assert.equal(first.status, 202);
+    const { runId } = (await first.json()) as { runId: string };
+    const events = await streamAll(s, runId);
+    assert.equal(events.at(-1)!.event, "failed");
+    assert.deepEqual(failedWith(events), { code: "ai_out_of_credit", message: WORDING });
+    assert.equal(main.counter.calls, 1, "one request, no retry");
+    assert.equal(fb.counter.calls, 0, "the fallback is paid from the same account: never tried");
+
+    // Our fault, not the visitor's: their count is back, and the ids are gone from the run (so it
+    // can't be refunded twice). Nothing about it reaches the browser.
+    assert.deepEqual(await reportCounters(), [0]);
+    assert.equal((await AgentRun.findById(runId).lean())!.refundIds, undefined);
+    assert.equal(JSON.stringify(events).includes("refundIds"), false);
+
+    // Refused up front while the hold is on: no run, no request, no count.
+    const refused = await post(reportUrl(s));
+    assert.equal(refused.status, 503);
+    assert.equal(refused.headers.get("retry-after"), null, "no time is promised");
+    assert.deepEqual(await refused.json(), { code: "ai_out_of_credit", error: WORDING });
+    assert.equal(await AgentRun.countDocuments(), 1);
+    assert.equal(main.counter.calls, 1);
+    assert.deepEqual(await reportCounters(), [0]);
+    const get = (await (await fetch(reportUrl(s))).json()) as { ai: Record<string, unknown> };
+    assert.deepEqual(get.ai, { enabled: true, budgetLeft: 399, canStart: false, outOfCredit: true });
+
+    // 15 minutes later one run is let through to find out. Still no credit: one more request,
+    // the hold starts again, and that visitor is refunded too.
+    t += OUT_OF_CREDIT_HOLD_MS + 1;
+    assert.equal(((await (await fetch(reportUrl(s))).json()) as { ai: { outOfCredit: boolean; canStart: boolean } }).ai.outOfCredit, false);
+    const again = await post(reportUrl(s));
+    assert.equal(again.status, 202);
+    const second = await streamAll(s, ((await again.json()) as { runId: string }).runId);
+    assert.equal(failedWith(second).code, "ai_out_of_credit");
+    assert.equal(main.counter.calls, 2);
+    assert.equal(credit.out(), true);
+    assert.deepEqual(await reportCounters(), [0]);
+
+    // A report already written is still served while the coach is out of credit.
+    const { hash } = await analysedBasis(aliceId);
+    await Report.create({ playerId: aliceId, analysedGamesHash: hash, promptVersion: PROMPT_VERSION, model: s.coach.modelName, runId: new Types.ObjectId(), outcome: "none", analysedGames: 10 });
+    const cached = await post(reportUrl(s));
+    assert.equal(cached.status, 200);
+    assert.equal(((await cached.json()) as { cached: boolean }).cached, true);
+  });
+
+  it("a run already queued when the credit ran out fails without sending anything: no request, nothing from the daily budget, and the count refunded", async () => {
+    const credit = createCreditGate();
+    const main = counting(createScriptedModel({ delayMs: 5 }));
+    const s = await setup({ model: main.model, credit, worker: false, guards: testGuards({ reportsPerDay: 2 }) });
+    const res = await post(reportUrl(s));
+    assert.equal(res.status, 202);
+    const { runId } = (await res.json()) as { runId: string };
+    assert.deepEqual(await reportCounters(), [1]);
+    assert.equal((await AgentRun.findById(runId).lean())!.refundIds!.length, 1);
+
+    credit.mark(); // another run just got the 402
+    s.startLane();
+    const events = await streamAll(s, runId);
+    assert.equal(failedWith(events).code, "ai_out_of_credit");
+    assert.equal(main.counter.calls, 0);
+    assert.equal((await Usage.findById(today()).lean())?.count ?? 0, 0);
+    assert.deepEqual(await reportCounters(), [0]);
+  });
+
+  it("any other failure keeps the visitor's count (only out-of-credit is refunded)", async () => {
+    const failing = createScriptedModel({ delayMs: 5, failFirst: Infinity, failWith: () => new ModelError("bad_request", "Gemini 400", { status: 400 }) });
+    const s = await setup({ model: failing, guards: testGuards({ reportsPerDay: 2 }) });
+    const res = await post(reportUrl(s));
+    const events = await streamAll(s, ((await res.json()) as { runId: string }).runId);
+    assert.equal(failedWith(events).code, "coach_config");
+    assert.deepEqual(await reportCounters(), [1]);
+    assert.equal(s.coach.credit.out(), false);
+  });
+
+  it("a finished run keeps its usage with thoughtTokens, and a second refund does nothing", async () => {
+    const s = await setup({ guards: testGuards({ reportsPerDay: 2 }) });
+    const res = await post(reportUrl(s));
+    const { runId } = (await res.json()) as { runId: string };
+    await streamAll(s, runId);
+    const run = (await AgentRun.findById(runId).lean())!;
+    assert.equal(run.usage!.thoughtTokens, 0);
+    assert.equal((await Report.findOne({ playerId: aliceId }).lean())!.usage!.thoughtTokens, 0);
+    // A successful run isn't refunded by itself; refunding by hand works once only.
+    assert.deepEqual(await reportCounters(), [1]);
+    assert.equal(await refundRunQuota(run._id), 1);
+    assert.equal(await refundRunQuota(run._id), 0);
+    assert.deepEqual(await reportCounters(), [0]);
   });
 });

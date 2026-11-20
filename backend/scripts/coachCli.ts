@@ -40,6 +40,11 @@ const result = await runAgent({
   model: createGeminiModel({ apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL, timeoutMs: env.COACH_CALL_TIMEOUT_MS }),
   pacer: createPacer({ rpm: env.GEMINI_RPM, tpm: env.GEMINI_TPM }),
   limits,
+  // The same thinking levels the API would use (GEMINI_THINKING_*; unset = the model's default).
+  thinking: {
+    ...(env.GEMINI_THINKING_INVESTIGATE ? { investigate: env.GEMINI_THINKING_INVESTIGATE } : {}),
+    ...(env.GEMINI_THINKING_ANSWER ? { answer: env.GEMINI_THINKING_ANSWER } : {}),
+  },
   onStep: (s) => {
     const at = ((Date.now() - started) / 1000).toFixed(1).padStart(5);
     const tokens = s.tokens !== undefined ? `  ${s.tokens} tok` : "";
@@ -49,7 +54,7 @@ const result = await runAgent({
 
 console.log(`\nstatus: ${result.status}${result.error ? `  error: ${result.error.code}: ${result.error.message}` : ""}`);
 console.log(
-  `calls: ${result.usage.calls}  tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out / ${result.usage.totalTokens} total  time: ${(result.durationMs / 1000).toFixed(1)} s`,
+  `calls: ${result.usage.calls}  tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out / ${result.usage.thoughtTokens} thinking / ${result.usage.totalTokens} total  time: ${(result.durationMs / 1000).toFixed(1)} s`,
 );
 if (result.report) {
   console.log(`patterns kept: ${result.report.patterns.length}  dropped: ${result.report.dropped.length}  trimmed: ${result.report.trimmed.length}`);

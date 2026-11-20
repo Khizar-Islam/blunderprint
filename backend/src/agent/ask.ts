@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { colourIn, COLOUR_RULE } from "./colour.js";
 import type { AgentContext } from "./context.js";
 import type { AgentTask } from "./loop.js";
 import type { ModelRequest } from "./model.js";
@@ -52,7 +53,10 @@ import {
 //     Code now also removes a repeated unit tail ("{{a}} errors per 100 moves", a = "6.2 errors
 //     per 100 moves") and a repeated word before a slot ("on move {{e}}", e = "move 59"), and
 //     cites the example positions an answer talks about when it cites none (autoCite).
-export const ASK_PROMPT_VERSION = 6;
+// v7 (Stage 8 chunk H): no outcome or intensity claims ("cost you the game", "cost you
+//     dearly": both in a live answer of 12 Nov 2026): what a move cost is said only as its
+//     winPctLost slot. Checked by code (agent/colour.ts): a repair issue, then the sentence goes.
+export const ASK_PROMPT_VERSION = 7;
 export const MAX_QUESTION_CHARS = 300;
 export const MAX_ANSWER_SENTENCES = 5;
 export const MAX_ANSWER_EVIDENCE = 3;
@@ -210,6 +214,7 @@ THE ANSWER
 - MOVES: name a move (Bd3, exd5, O-O) only if it is the played or betterMove of one of your evidence positions, copied exactly, as plain text in the sentence. A move is never a slot (no slot path ending in .played or .betterMove).
 - Plain sentences only: no lists, markdown, links, headings or emoji. Never mention tools, steps, slots, ids or JSON in the text.
 - Only what the data shows: never claim results, trends or reasons no tool returned.
+- WHAT A MOVE COST: say it only as that position's winPctLost slot ("Ke3 on {{c}} lost {{d}}"), or not at all. The tools never say a game was lost BECAUSE of one move, so never write an outcome ("cost you the game", "costing you games", "lost you a point", "threw away the win", "game-losing") and never an intensity nothing measured ("dearly", "massive swings", "catastrophic", "disastrous", "devastating", "fatal"). Sentences with such words are removed.
 - kind "cannot_answer" with a reason, and no sentences, when:
   - "no_data": ONLY when a tool returned zero games for it (e.g. get_opening_breakdown with name shows matching games 0);
   - "too_few_games": the whole sample the question is about is a handful of games, too few to say anything reliable (a small category inside a big sample is answered with shares instead);
@@ -232,7 +237,7 @@ export function askRepairPrompt(issues: string[]): string {
     "Your answer failed verification against the data:",
     ...issues.map((i) => `- ${i}`),
     "",
-    "Fix ONLY these problems, using the tool results above (no more tools are available). Every figure must be a {{name}} placeholder whose slot points at an allowed numeric field of a tool result (never a number in the text, in digits or words); name moves only from your evidence positions; evidence only from the find_example_mistakes result evidenceStep names; plain sentences, no markdown or links. Remove any sentence you can't back up. Then return the complete corrected JSON answer.",
+    "Fix ONLY these problems, using the tool results above (no more tools are available). Every figure must be a {{name}} placeholder whose slot points at an allowed numeric field of a tool result (never a number in the text, in digits or words); name moves only from your evidence positions; never claim an outcome or an intensity (such as cost you the game, dearly, massive swings): what a move cost is only its winPctLost slot; evidence only from the find_example_mistakes result evidenceStep names; plain sentences, no markdown or links. Remove any sentence you can't back up. Then return the complete corrected JSON answer.",
   ].join("\n");
 }
 
@@ -454,6 +459,7 @@ export async function verifyAnswer(ctx: AgentContext, draft: AskDraft, log: Tool
           : `sentence ${n} names the move ${move}, which isn't a played or better move of the evidence`,
       );
     }
+    for (const phrase of colourIn(prose)) problems.push(`sentence ${n} says "${phrase}", ${COLOUR_RULE}`);
     if (URL_LIKE.test(prose)) problems.push(`sentence ${n} contains a link: plain sentences only`);
     if (MARKDOWN.test(sentence)) problems.push(`sentence ${n} uses markdown or a list: plain sentences only`);
     return problems;

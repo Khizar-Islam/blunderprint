@@ -52,6 +52,7 @@ try {
     ...(coach.fallback ? { fallback: coach.fallback } : {}),
     pacer: coach.pacer,
     limits: l,
+    thinking: coach.thinking,
     onStep: (s) => {
       const at = ((Date.now() - started) / 1000).toFixed(1).padStart(5);
       const tokens = s.tokens !== undefined ? `  ${s.tokens} tok` : "";
@@ -90,7 +91,7 @@ try {
     }
   }
   console.log(
-    `\nmodel calls: ${modelCalls}  requests: ${result.usage.calls} (budget ${before} → ${after})  tokens: ${result.usage.totalTokens}  wall time: ${wallS} s${result.answerModel && result.answerModel !== coach.modelName ? "  (answered by the fallback)" : ""}`,
+    `\nmodel calls: ${modelCalls}  requests: ${result.usage.calls} (budget ${before} → ${after})  tokens: ${result.usage.totalTokens} (${result.usage.thoughtTokens} thinking)  wall time: ${wallS} s${result.answerModel && result.answerModel !== coach.modelName ? "  (answered by the fallback)" : ""}`,
   );
 } finally {
   await mongoose.disconnect();

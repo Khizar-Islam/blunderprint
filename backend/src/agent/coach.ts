@@ -1,8 +1,9 @@
 import type { Env } from "../config/env.js";
 import { createAiBudget, guardedModel, type AiBudget } from "./budget.js";
 import { DEFAULT_RULES, type WeaknessRules } from "./context.js";
+import { createCreditGate, creditGuarded, type CreditGate } from "./credit.js";
 import { createGeminiModel } from "./gemini.js";
-import type { AgentLimits } from "./loop.js";
+import type { AgentLimits, ThinkingLevels } from "./loop.js";
 import type { Model } from "./model.js";
 import { createPacer, type Pacer } from "./pacer.js";
 import { scriptedPair } from "./scriptedModel.js";
@@ -19,6 +20,10 @@ export interface CoachRuntime {
   // AI_ENABLED and a usable model (the real one needs GEMINI_API_KEY).
   available: boolean;
   budget: AiBudget;
+  // Out of prepaid credit (HTTP 402): new runs are held back for a while (agent/credit.ts).
+  credit: CreditGate;
+  // Thinking levels for the main model (GEMINI_THINKING_*); empty = the model's default.
+  thinking: ThinkingLevels;
   pacer: Pacer;
   limits: AgentLimits;
   rules: WeaknessRules;
@@ -53,12 +58,20 @@ type CoachEnv = Pick<
   | "COACH_MIN_CANDIDATE_MOVES"
   | "COACH_MIN_ANALYSED_GAMES"
 > &
-  Partial<Pick<Env, "ASK_MAX_MODEL_CALLS" | "ASK_MAX_REPAIR_CALLS" | "ASK_MAX_REQUESTS" | "ASK_RUN_TIMEOUT_MS">>;
+  Partial<
+    Pick<Env, "ASK_MAX_MODEL_CALLS" | "ASK_MAX_REPAIR_CALLS" | "ASK_MAX_REQUESTS" | "ASK_RUN_TIMEOUT_MS" | "GEMINI_THINKING_INVESTIGATE" | "GEMINI_THINKING_ANSWER">
+  >;
 
 // The model can be passed in (tests); otherwise it comes from COACH_MODEL.
 export function createCoachRuntime(
   env: CoachEnv,
-  { model: given, fallback: givenFallback, budget: givenBudget, pacer: givenPacer }: { model?: Model; fallback?: Model; budget?: AiBudget; pacer?: Pacer } = {},
+  {
+    model: given,
+    fallback: givenFallback,
+    budget: givenBudget,
+    pacer: givenPacer,
+    credit: givenCredit,
+  }: { model?: Model; fallback?: Model; budget?: AiBudget; pacer?: Pacer; credit?: CreditGate } = {},
 ): CoachRuntime {
   const scripted = env.COACH_MODEL === "scripted";
   const hasModel = !!given || scripted || !!env.GEMINI_API_KEY;
@@ -79,12 +92,20 @@ export function createCoachRuntime(
     (!given && !scripted && env.GEMINI_API_KEY && fallbackId && fallbackId !== "none" && fallbackId !== env.GEMINI_MODEL
       ? createGeminiModel({ apiKey: env.GEMINI_API_KEY, model: fallbackId, timeoutMs: env.COACH_CALL_TIMEOUT_MS })
       : undefined);
+  // One gate for both models: the same account pays for them. It sits OUTSIDE the budget guard,
+  // so a request held back for lack of credit doesn't use up the daily budget.
+  const credit = givenCredit ?? createCreditGate();
   return {
-    model: guardedModel(base, budget),
-    ...(fallback ? { fallback: guardedModel(fallback, budget) } : {}),
+    model: creditGuarded(guardedModel(base, budget), credit),
+    ...(fallback ? { fallback: creditGuarded(guardedModel(fallback, budget), credit) } : {}),
     modelName: base.name,
     available,
     budget,
+    credit,
+    thinking: {
+      ...(env.GEMINI_THINKING_INVESTIGATE ? { investigate: env.GEMINI_THINKING_INVESTIGATE } : {}),
+      ...(env.GEMINI_THINKING_ANSWER ? { answer: env.GEMINI_THINKING_ANSWER } : {}),
+    },
     pacer: givenPacer ?? createPacer({ rpm: env.GEMINI_RPM, tpm: env.GEMINI_TPM }),
     limits: {
       maxCalls: env.COACH_MAX_MODEL_CALLS,

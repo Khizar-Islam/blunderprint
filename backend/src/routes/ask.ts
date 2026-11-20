@@ -32,6 +32,7 @@ import { parsePlayerParams } from "./players.js";
 //   5. the same question is running right now              202 { runId, token } (joined: free, a
 //      token of the visitor's own; 503 busy once the run has MAX_RUN_TOKENS)
 //   6. AI switched off / no model                         503 ai_disabled
+//   6b. the AI account ran out of credit a moment ago     503 ai_out_of_credit (agent/credit.ts)
 //   7. budget under one worst-case question (ASK_MAX_REQUESTS) 429 ai_budget_exhausted
 //   8. COACH_QUEUE_MAX coach jobs already queued           503 busy (before 9, so a full queue
 //      doesn't use up the visitor's questions)
@@ -117,6 +118,7 @@ export function askRouter({ queue, coach, guards }: AskRouterOptions): Router {
     if (running) return join(running);
 
     if (!coach.available) return sendFriendly(res, 503, "ai_disabled");
+    if (coach.credit.out()) return sendFriendly(res, 503, "ai_out_of_credit");
     if ((await coach.budget.remaining()) < coach.askLimits.maxRequests) {
       const resetsInMs = coach.budget.resetsInMs();
       return sendFriendly(res, 429, "ai_budget_exhausted", { resetsInMs, retryAfterMs: resetsInMs });
@@ -139,7 +141,7 @@ export function askRouter({ queue, coach, guards }: AskRouterOptions): Router {
 
     let started: Awaited<ReturnType<typeof startAskRun>>;
     try {
-      started = await startAskRun(queue, player._id, coach.modelName, question);
+      started = await startAskRun(queue, player._id, coach.modelName, question, mine?.ok ? mine.taken.ids : undefined);
     } catch (err) {
       if (mine?.ok) await refund(mine.taken).catch(() => {});
       throw err;

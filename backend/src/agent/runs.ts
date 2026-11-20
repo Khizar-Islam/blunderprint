@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { QueryFilter, Types, UpdateQuery } from "mongoose";
 import { AgentRun, MAX_RUN_STEPS, type AgentRunDoc, type AgentRunFields, type RunStatus } from "../db/models/agentRun.js";
 import { errorMessage, logger } from "../lib/logger.js";
+import { refund } from "../lib/quota.js";
 import type { PublicAnswer } from "./answerStore.js";
 import type { FriendlyError } from "./friendly.js";
 import type { TraceStep } from "./loop.js";
@@ -42,7 +43,7 @@ export type RunEvent =
 
 type RunLike = AgentRunFields & { _id: unknown; createdAt?: Date };
 
-// Never includes tokenHashes.
+// Never includes tokenHashes or refundIds.
 export function toPublicRun(run: AgentRunDoc | RunLike, report?: PublicReport | null, answer?: PublicAnswer | null): PublicRun {
   const r = run as RunLike;
   return {
@@ -95,7 +96,7 @@ async function change(
   return run;
 }
 
-type Usage = { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
+type Usage = { calls: number; inputTokens: number; outputTokens: number; thoughtTokens: number; totalTokens: number };
 
 export const runStore = {
   // A new attempt starts: running, a clean trace (an earlier attempt's steps belong to a
@@ -155,6 +156,29 @@ export const runStore = {
     if (run) runEvents.emit(String(runId), { type: "step", rev: run.rev, step });
   },
 };
+
+// Gives the visitor who started the run their report/question count back (the run failed for a
+// reason that is ours: the AI account is out of credit). Taking the ids off the run and reading
+// them is ONE atomic update, so two callers can't both refund. Returns how many counters were
+// given back. Never throws: a failed refund is logged and the run's failure stands.
+export async function refundRunQuota(runId: Types.ObjectId): Promise<number> {
+  try {
+    // returnDocument "before": the run as it was, still holding the ids.
+    const before = await AgentRun.findOneAndUpdate(
+      { _id: runId, "refundIds.0": { $exists: true } },
+      { $unset: { refundIds: 1 } },
+      { returnDocument: "before", projection: { refundIds: 1 } },
+    ).lean();
+    const ids = before?.refundIds ?? [];
+    if (ids.length === 0) return 0;
+    await refund({ ids });
+    logger.info("run_quota_refunded", { runId: String(runId), counters: ids.length });
+    return ids.length;
+  } catch (err) {
+    logger.warn("run_quota_refund_failed", { runId: String(runId), error: errorMessage(err) });
+    return 0;
+  }
+}
 
 // The loop reports steps through a synchronous callback; the DB writes are chained so they land
 // in order, and flush() waits for the last one. A failed write is logged and skipped: losing a

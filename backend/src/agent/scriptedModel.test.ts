@@ -19,6 +19,14 @@ describe("scripted scenarios", () => {
     for (const m of [model, fallback!]) await assert.rejects(m.call(req()), (e: unknown) => e instanceof ModelError && e.kind === "overloaded");
   });
 
+  it("out-of-credit: the main model always answers 402 (the fallback would work, to show it's never tried)", async () => {
+    const { model, fallback } = scriptedPair("out-of-credit");
+    for (let i = 0; i < 2; i++) {
+      await assert.rejects(model.call(req()), (e: unknown) => e instanceof ModelError && e.kind === "out_of_credit" && e.details.status === 402);
+    }
+    assert.equal((await fallback!.call(req())).status, "requires_action");
+  });
+
   it("ok and slow have no fallback", () => {
     assert.equal(scriptedPair("ok").fallback, undefined);
     assert.equal(scriptedPair("slow").fallback, undefined);

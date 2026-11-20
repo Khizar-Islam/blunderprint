@@ -19,7 +19,7 @@ export interface SaveAnswerInput {
   answeredBy: string;
   runId: Types.ObjectId;
   answer: VerifiedAnswer;
-  usage: { calls: number; inputTokens: number; outputTokens: number; totalTokens: number };
+  usage: { calls: number; inputTokens: number; outputTokens: number; thoughtTokens: number; totalTokens: number };
   durationMs: number;
 }
 

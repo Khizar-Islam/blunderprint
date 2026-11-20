@@ -25,7 +25,7 @@ const answerSchema = new Schema(
     // StoredEvidence (agent/reportStore.ts): FEN, moves in SAN and UCI, colour, facts, ribbon.
     evidence: { type: [Schema.Types.Mixed], default: [] },
     analysedGames: { type: Number, required: true },
-    usage: { calls: Number, inputTokens: Number, outputTokens: Number, totalTokens: Number },
+    usage: { calls: Number, inputTokens: Number, outputTokens: Number, thoughtTokens: Number, totalTokens: Number },
     durationMs: Number,
     // What the verifier removed, and why. Logs only, never sent.
     removed: { type: [String], default: [] },

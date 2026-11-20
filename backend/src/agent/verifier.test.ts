@@ -255,7 +255,7 @@ describe("move names in the prose: only the pattern's own evidence moves", () =>
 });
 
 describe("enough text: a pattern must still say something after trimming", () => {
-  const explanation = "You rush king moves in the endgame. With little time left on your clock, the king walks into checks and forks that cost you the game.";
+  const explanation = "You rush king moves in the endgame. With little time left on your clock, the king walks into checks and forks that the better move would have avoided.";
   const drill = "Replay the evidence positions and name the safe king square before moving.";
 
   it("2 sentences and 120 characters for the explanation, 60 characters for the drill", () => {
@@ -264,7 +264,7 @@ describe("enough text: a pattern must still say something after trimming", () =>
   });
 
   it("one sentence is too short, however long", () => {
-    const one = "You rush king moves in the endgame when little time is left on your clock, and the king walks into checks and forks that cost you the game.";
+    const one = "You rush king moves in the endgame when little time is left on your clock, and the king walks into checks and forks that the better move would have avoided.";
     assert.ok(one.length >= MIN_EXPLANATION_CHARS);
     assert.match(textTooShort({ explanation: one, drill })[0]!, /explanation is too short \(1 sentence, \d+ characters\): it needs at least 2 sentences and 120 characters/);
   });
@@ -274,5 +274,28 @@ describe("enough text: a pattern must still say something after trimming", () =>
       "the explanation is too short (2 sentences, 25 characters): it needs at least 2 sentences and 120 characters",
       "the drill is too short (10 characters): it needs at least 60",
     ]);
+  });
+});
+
+describe("colour: outcome and intensity claims (agent/colour.ts)", () => {
+  const allowed = { numbers: [], moves: ["Ke3"] };
+  const drill = "Replay the evidence positions and name the safe king square before moving.";
+
+  it("checkProse reports the phrase, in the explanation and in the drill", () => {
+    assert.deepEqual(
+      checkProse({ explanation: "Playing Ke3 cost you the game. Your king then had no safe square left.", drill: "Practise these endings to avoid catastrophic king slips." }, allowed),
+      [
+        { field: "explanation", phrase: "cost you the game" },
+        { field: "drill", phrase: "catastrophic" },
+      ],
+    );
+    assert.deepEqual(checkProse({ explanation: "Playing Ke3 walked into a rook check. Your king then had no safe square left.", drill }, allowed), []);
+  });
+
+  it("withoutUnbackedSentences removes the sentence that carries it and keeps the rest", () => {
+    assert.equal(
+      withoutUnbackedSentences("You rush king moves in the endgame. Moves like Ke3 cost you dearly. The rook then checks from behind.", allowed),
+      "You rush king moves in the endgame. The rook then checks from behind.",
+    );
   });
 });

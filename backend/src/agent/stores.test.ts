@@ -41,7 +41,7 @@ beforeEach(async () => {
   bobGame = String(b!._id);
 });
 
-const USAGE = { calls: 4, inputTokens: 1000, outputTokens: 200, totalTokens: 1200 };
+const USAGE = { calls: 4, inputTokens: 1000, outputTokens: 200, thoughtTokens: 0, totalTokens: 1200 };
 
 const evidenceOf = (gameId: string, extra: Partial<VerifiedEvidence> = {}): VerifiedEvidence => ({
   gameId,

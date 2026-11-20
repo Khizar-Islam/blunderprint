@@ -172,7 +172,11 @@ export function EvidenceBoard({
             </>
           )}
         </p>
-        <p className="font-mono text-xs text-graphite/70">{caption.cost}</p>
+        {/* The move's own figure, on the teal rule every checked figure has; ink while its board is lit
+            (also by pointing at this number in the coach's sentence). */}
+        <p className="font-mono text-xs">
+          <span className={`figure-rule transition-colors ${active ? "text-ink" : "text-graphite"} ${shownPhase === "hidden" ? "" : "figure-in"}`}>{caption.cost}</span>
+        </p>
         {facts.length > 0 && <p className="text-xs leading-snug text-graphite">{facts.join(" · ")}</p>}
         <Link
           href={href}

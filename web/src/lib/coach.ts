@@ -122,13 +122,15 @@ export const ANNOTATION: Record<ErrorKind, string> = { inaccuracy: "?!", mistake
 
 // "Move 18" + "Rad8??" + "blunder" + "better Qc4" + "−40 pts win chance". winPctLost is the drop
 // in win chance in percentage POINTS (e.g. 85% → 45% is 40 points), so it must not read as "40%".
+// The cost keeps its decimal ("−49.4 pts"): the coach's sentence above the board quotes the same
+// figure ("cost 49.4 win-chance points"), and the two must be seen to be one number.
 export function moveCaption(e: CoachEvidence) {
   return {
     move: `Move ${e.moveNumber}${e.color === "black" ? "…" : "."}`,
     played: `${e.played}${ANNOTATION[e.kind]}`,
     kind: e.kind,
     better: e.betterMove,
-    cost: `−${Math.round(e.winPctLost)} pts win chance`,
+    cost: `−${Math.round(e.winPctLost * 10) / 10} pts win chance`,
   };
 }
 

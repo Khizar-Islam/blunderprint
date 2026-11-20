@@ -120,19 +120,18 @@ export function CoachPage({ platform, username }: { platform: Platform; username
 function ReportMeta({ report }: { report: CoachReport }) {
   const switched = report.answeredBy && report.answeredBy !== report.model;
   return (
-    <div className="flex flex-col gap-1">
-      <p className="font-mono text-sm text-graphite">
-        Based on {report.analysedGames} analysed games · {fullDate(report.generatedAt)}
+    <div className="flex flex-col gap-2">
+      {/* The claim that makes this report worth trusting, at reading size. */}
+      <p className="max-w-prose text-base leading-relaxed text-ink sm:text-lg">
+        Code computed every number here from your {report.analysedGames} analysed games. The coach chose the patterns and wrote the words,
+        and code checked each claim against the games.
       </p>
+      <p className="font-mono text-xs text-graphite">Written {fullDate(report.generatedAt)}</p>
       {switched && (
         <p className="text-xs text-graphite/70">
           Written by <span className="font-mono">{report.answeredBy}</span>: the main model ({report.model}) was overloaded during this run.
         </p>
       )}
-      <p className="max-w-prose text-xs leading-relaxed text-graphite/70">
-        Every number below was computed from your games by code; the coach chose the patterns and wrote the words, and a verifier
-        checked each claim against the data.
-      </p>
     </div>
   );
 }

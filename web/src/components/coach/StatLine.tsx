@@ -1,29 +1,43 @@
 "use client";
 
 import type { CoachStat } from "@/lib/api";
+import { statSources } from "@/lib/checked";
 import { statText } from "@/lib/coach";
 import { useReveal } from "@/lib/useReveal";
 import { AnimatedNumber } from "../patterns/charts/AnimatedNumber";
+import { Checked, type Shown } from "./Checked";
 
 // The pattern's number, big: "7.9 vs your 3.1", with the unit in words and the sample size.
 // Two thin bars put the two figures side by side on one scale (this situation in ink, the
 // player's usual in stone). All numbers come from code (the verifier copied them from the
 // candidate), never from the model.
+// Both figures are "checked" figures (Checked.tsx): pointing at one says what it was computed
+// from, in the card's source line.
 // The bars' length is scaleX in their style (bar-x): 0 until the stat scrolls into view, then a
 // CSS transition grows them, so they land on the right length even without animation frames.
-export function StatLine({ stat }: { stat: CoachStat }) {
+export function StatLine({ stat, onSource, describedBy }: { stat: CoachStat; onSource: (shown: Shown | null) => void; describedBy?: string }) {
   const { ref, shown } = useReveal<HTMLDivElement>(0.6);
   const t = statText(stat);
+  const sources = statSources(stat);
   const max = Math.max(stat.value, stat.baseline) || 1;
 
   return (
     <div ref={ref} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="font-mono text-5xl leading-none tracking-tight text-ink tabular-nums sm:text-6xl">
+        <Checked
+          text={t.value(stat.value)}
+          source={sources.value}
+          onSource={onSource}
+          animate={shown}
+          delayMs={200}
+          describedBy={describedBy}
+          className="pb-1 font-mono text-5xl leading-none tracking-tight sm:text-6xl"
+        >
           <AnimatedNumber value={stat.value} hold={!shown} format={t.value} />
-        </span>
+        </Checked>
         <span className="font-mono text-lg text-graphite tabular-nums">
-          vs your <span className="text-ink">{t.baseline}</span>
+          vs your{" "}
+          <Checked text={t.baseline} source={sources.baseline} onSource={onSource} animate={shown} delayMs={350} describedBy={describedBy} className="font-mono text-lg" />
         </span>
       </div>
       <p className="text-sm text-graphite">

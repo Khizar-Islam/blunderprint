@@ -160,7 +160,8 @@ blunderprint/
 │  │                          ribbon.ts, timeline.ts replay + SAN, winPercent.ts graph + accuracy,
 │  │                          filters.ts URL ⇄ filters, useSummary.ts + refetch.ts, plyParam.ts,
 │  │                          securityHeaders.ts (Stage 8: the site's headers + CSP, used by next.config.ts),
-│  │                          coach.ts button state + stat/facts text, runStream.ts + useRunStream.ts,
+│  │                          coach.ts button state + stat/facts text, checked.ts (where each figure on a pattern
+│  │                          card comes from, §12), runStream.ts + useRunStream.ts,
 │  │                          useCoachInfo.ts; Stage 7: useReveal.ts + stagger.ts, useIndicator.ts,
 │  │                          dashboardStart.ts + summaryPrefetch.ts, mountQueue.ts + useMountWhenNear.ts,
 │  │                          printCarry.ts (the landing's print carried onto the demo dashboard, §12),
@@ -175,7 +176,8 @@ blunderprint/
 │  │                          HeatBoard + heat.ts, Plate + digest.ts (the plate), link.ts (print ⇄ board),
 │  │                          OpeningsTable, charts/ (StackedBars, AnimatedNumber, scale.ts, sample.ts);
 │  │                          coach/: CoachButton, CoachPage, AgentTrace, PatternCard, StatLine,
-│  │                          EvidenceBoard, FingerprintLens + lens.ts, AskCoach, AnswerCard, Figure;
+│  │                          EvidenceBoard, FingerprintLens + lens.ts, AskCoach, AnswerCard, Figure,
+│  │                          Checked (a figure that says its source);
 │  │                          landing/: Dive (the scroll-driven dive, canvas + board) + diveTimeline.ts,
 │  │                          heroTimeline.ts (the first screen's timing), demoData.ts,
 │  │                          PrintLink ("Open this Blunderprint": warms the summary, starts the carry))
@@ -684,6 +686,14 @@ Rules:
   - **Live trace** (`AgentTrace`): a scoresheet (numbered mono lines, time column), lines type in, retries muted, the `switch` step in amber; reattaches after a reload (activeRun → SSE snapshot). When finished (or failed) it folds into "Investigated in 47 s · 9 requests · 3 patterns verified"; an older report's trace opens on demand ("How this report was made", one request; expired after 14 days).
   - **Pattern card**: label, the **fingerprint lens** (the evidence games' Blunderprint ribbons, evidence moves ringed; hover links row ⇄ board), the big "16.2 vs your 11.9" with two comparison bars and the sample, the explanation, the drill as an "Exercise", and 2-4 **evidence boards**: fade in at the position before the mistake → the played piece slides along a muted rust arrow and holds ~0.6 s → slides back → a teal arrow draws the better move; the facts from code under each board and a link to `/game/[id]?ply=N`. Arrows are our own SVG overlay (react-chessboard's arrows can't animate).
   - Reduced motion: the final state at once (position + both arrows, full lens, final numbers, whole trace lines).
+  - **"Checked", made visible (UI pass step 5, 20 Nov 2026; `lib/checked.ts`, `coach/Checked.tsx`):**
+    - The page's opening line is one sentence at reading size: "Code computed every number here from your N analysed games. The coach chose the patterns and wrote the words, and code checked each claim against the games." (it was two lines of 12 px grey).
+    - **Every figure the page can place sits on a teal rule** (the answers' `figure-rule`), drawn once when its card is revealed: the big number, "vs your 3.0", each number in the coach's sentences and drill, and each board's cost.
+    - **Pointing at a figure (or focusing or tapping it) says where it comes from** in one line under the explanation ("✓ 49.4 is what 47. Nd4?? lost in win chance: the outlined position."; "✓ 5.5 is this group's own rate: 80 blunders in 1,457 of your moves, over 101 games.") and outlines the board and lens row it belongs to. The figures are real buttons (keyboard, `aria-describedby` the source line). The line's height is reserved (three lines on a phone, two from `sm`): measured CLS 0.0000 with the pointer passed over all 15 figures of the demo report.
+    - **How a number finds its source:** `checkedParts` ports the verifier's `proseNumbers` and `matchesValue` (a number matches a value it could be a rounding of) and looks through the fields the report carries: each cited position's win chance lost, move number and clock; the stat's value, baseline, gap and sample; the bounds in the positions' clock buckets and in the label code wrote. The words around the number choose which kind is tried first ("win-chance points" → a cost, "percent" → a bound, "move N" → a move number), an exact value beats a rounding, and two positions with the same figure are taken in the order they are mentioned.
+    - **A number the page can't place stays plain text.** The report doesn't carry everything the verifier saw (the group's filter, the example search's match counts), and the page never guesses. On the demo report all 9 prose numbers are placed.
+    - **A board's cost keeps its decimal** ("−49.4 pts win chance", was "−49"): the sentence above quotes 49.4, and the two must read as one number.
+    - Not on the answers: an answer's figures are slots, and the page gets a slot's text and kind, not its path.
 
 ### Design direction (no "AI slop")
 - **Avoid:** purple-to-blue gradients, glowing borders, glassmorphism, blurred orbs, icon-in-circle feature blocks. Also don't copy Chess.com's green or Lichess's brown boards.

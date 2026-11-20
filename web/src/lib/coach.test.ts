@@ -106,9 +106,10 @@ const evidence = (over: Partial<CoachEvidence> = {}): CoachEvidence => ({
 
 describe("an evidence position", () => {
   test("the caption", () => {
-    assert.deepEqual(moveCaption(evidence()), { move: "Move 18…", played: "Rad8??", kind: "blunder", better: "Qc4", cost: "−40 pts win chance" });
+    assert.deepEqual(moveCaption(evidence()), { move: "Move 18…", played: "Rad8??", kind: "blunder", better: "Qc4", cost: "−40.2 pts win chance" });
     // Points, not percent: 69.6 points rounds to 70, and the text never says "%".
-    assert.equal(moveCaption(evidence({ winPctLost: 69.6 })).cost, "−70 pts win chance");
+    assert.equal(moveCaption(evidence({ winPctLost: 69.6 })).cost, "−69.6 pts win chance");
+    assert.equal(moveCaption(evidence({ winPctLost: 10 })).cost, "−10 pts win chance");
     assert.ok(!moveCaption(evidence()).cost.includes("%"));
     assert.equal(moveCaption(evidence({ color: "white", kind: "inaccuracy", played: "Nf3" })).played, "Nf3?!");
   });

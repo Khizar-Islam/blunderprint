@@ -36,7 +36,7 @@ export default async function CoachRoute({ params }: Props) {
           ← {username}&apos;s dashboard
         </Link>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="font-display text-4xl tracking-tight text-ink sm:text-5xl">Coach report</h1>
+          <h1 className="font-display text-4xl tracking-tight text-ink sm:text-6xl">Coach report</h1>
           <span className="font-mono text-sm break-all text-graphite/70">
             {username} · {PLATFORM_NAMES[platform]}
           </span>

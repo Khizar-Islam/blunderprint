@@ -68,7 +68,7 @@ export function PatternsDashboard({
   return (
     <section className="flex flex-col gap-6" aria-labelledby="patterns-title">
       <div className="flex flex-col gap-3">
-        <h2 id="patterns-title" className="font-display text-3xl text-ink">
+        <h2 id="patterns-title" className="font-display text-2xl text-ink sm:text-4xl">
           Patterns
         </h2>
         <Filters value={filters} onChange={setFilters} />
@@ -89,7 +89,7 @@ export function PatternsDashboard({
       {/* The parts rise in one after another when the first summary arrives (CSS, on mount only;
           a filter change keeps them mounted, and the bars and numbers glide instead). */}
       {summary && (
-        <div className={`flex flex-col gap-10 transition-opacity duration-200 ${view.loading ? "opacity-60" : ""}`}>
+        <div className={`flex flex-col gap-12 transition-opacity duration-200 ${view.loading ? "opacity-60" : ""}`}>
           <div className="anim-rise">
             <Plate summary={summary} extracting={view.data!.extracting} />
           </div>
@@ -192,7 +192,7 @@ function PrintAndBoard({
       <figure className="flex min-w-0 flex-col gap-2">
         <figcaption className="flex flex-col gap-0.5">
           <span className="font-display text-xl text-ink">The Blunderprint</span>
-          <span className="text-xs text-graphite/70">
+          <span className="text-sm text-graphite">
             One row per analysed game, newest at the top; one mark per error, at its move number, so a column is
             the same move in every game. Point at a game to see every move of it.
           </span>

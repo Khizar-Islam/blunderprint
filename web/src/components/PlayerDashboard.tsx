@@ -181,7 +181,7 @@ function Dashboard({ platform, username }: Props) {
   const noGames = finished && games.length === 0 && gamesState === "idle";
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-12">
       <div className="flex flex-col gap-2">
         {importing ? (
           <ImportProgress platform={platform} job={job} connection={stream.connection} lastEventAt={lastEventAt} />

@@ -99,8 +99,8 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
   return (
     <section aria-labelledby="ask-heading" className="flex flex-col gap-6 border-t-2 border-ink pt-5">
       <header className="flex flex-col gap-1">
-        <p className="font-mono text-xs tracking-wide text-graphite/70 uppercase">Ask the coach</p>
-        <h2 id="ask-heading" className="font-display text-2xl leading-tight text-ink sm:text-3xl">
+        <p className="font-mono text-xs text-graphite/70">Ask the coach</p>
+        <h2 id="ask-heading" className="font-display text-2xl leading-tight text-ink">
           A question about your own games
         </h2>
         <p className="max-w-prose text-sm leading-relaxed text-graphite">
@@ -110,7 +110,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
       </header>
 
       <form onSubmit={submit} className="flex flex-col gap-2">
-        <label htmlFor="ask-question" className="font-mono text-xs tracking-wide text-graphite/70 uppercase">
+        <label htmlFor="ask-question" className="font-mono text-xs text-graphite/70">
           Your question
         </label>
         <textarea
@@ -144,7 +144,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
 
       {suggestions.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="font-mono text-xs tracking-wide text-graphite/70 uppercase" id="ask-suggested">
+          <p className="font-mono text-xs text-graphite/70" id="ask-suggested">
             Or try one of these
           </p>
           <div role="group" aria-labelledby="ask-suggested" className="flex flex-wrap gap-2">
@@ -159,7 +159,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
               >
                 <span>{s.question}</span>
                 {s.answered && (
-                  <span className="font-mono text-[11px] text-best-text" title="Answered already: no wait">
+                  <span className="font-mono text-xs text-best-text" title="Answered already: no wait">
                     <span className="sr-only">(answer ready)</span>
                     <span aria-hidden="true">✓</span>
                   </span>
@@ -176,7 +176,7 @@ export function AskCoach({ platform, username, info }: { platform: Platform; use
         </p>
       )}
 
-      <p id="ask-privacy" className="max-w-prose text-xs leading-relaxed text-graphite/70">
+      <p id="ask-privacy" className="max-w-prose text-sm leading-relaxed text-graphite">
         Questions are sent to Google&apos;s Gemini on its free tier, where Google may use them to improve its models, so don&apos;t include
         personal details. Visitors are counted by a hashed address, never a stored IP.
       </p>

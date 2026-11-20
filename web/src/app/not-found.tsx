@@ -16,7 +16,7 @@ export default function NotFound() {
         <Link href="/" className="self-start rounded text-sm text-graphite/70 transition-colors hover:text-ink active:opacity-70">
           ← Blunderprint
         </Link>
-        <h1 className="font-display text-4xl tracking-tight text-ink sm:text-5xl">Nothing on this square.</h1>
+        <h1 className="font-display text-4xl tracking-tight text-ink sm:text-6xl">Nothing on this square.</h1>
       </header>
       <Notice title="This page doesn't exist" link={{ href: "/", label: "Search for a player" }}>
         The address may be mistyped, or the page may have moved. A player&apos;s page looks like /p/lichess/a-username or

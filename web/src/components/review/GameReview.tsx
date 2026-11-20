@@ -337,7 +337,7 @@ function Header({ game, platform, username }: { game: GameDetail; platform: Plat
       >
         ← {username} · {PLATFORM_NAMES[platform]}
       </Link>
-      <h1 className="font-display text-3xl tracking-tight text-ink sm:text-4xl">
+      <h1 className="font-display text-2xl tracking-tight text-ink sm:text-4xl">
         {RESULT[game.result]} vs {game.opponentName ?? "Unknown"}
         {game.opponentRating != null && (
           <span className="ml-2 font-mono text-base text-graphite/70 tabular-nums">{game.opponentRating}</span>

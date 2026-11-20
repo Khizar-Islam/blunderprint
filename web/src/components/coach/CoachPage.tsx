@@ -78,7 +78,7 @@ export function CoachPage({ platform, username }: { platform: Platform; username
   const loaded = info as CoachInfo;
 
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-12">
       {report && <ReportMeta report={report} />}
 
       {report && !fresh && loaded.stale && !live && (
@@ -128,7 +128,7 @@ function ReportMeta({ report }: { report: CoachReport }) {
       </p>
       <p className="font-mono text-xs text-graphite">Written {fullDate(report.generatedAt)}</p>
       {switched && (
-        <p className="text-xs text-graphite/70">
+        <p className="text-sm text-graphite">
           Written by <span className="font-mono">{report.answeredBy}</span>: the main model ({report.model}) was overloaded during this run.
         </p>
       )}

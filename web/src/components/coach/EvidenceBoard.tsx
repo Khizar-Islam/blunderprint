@@ -162,7 +162,7 @@ export function EvidenceBoard({
         </svg>
       </div>
       <figcaption className="flex flex-col gap-1">
-        <p className="font-mono text-[13px] leading-snug text-ink">
+        <p className="font-mono text-sm leading-snug text-ink">
           <span className="text-graphite/70">{caption.move}</span> <span className={`${KIND_TEXT[caption.kind]} font-semibold`}>{caption.played}</span>{" "}
           <span className="text-graphite/70">{caption.kind}</span>
           {caption.better && (

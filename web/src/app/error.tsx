@@ -21,7 +21,7 @@ export default function PageError({ error, retry }: { error: unknown; retry: () 
         <Link href="/" className="self-start rounded text-sm text-graphite/70 transition-colors hover:text-ink active:opacity-70">
           ← Blunderprint
         </Link>
-        <h1 className="font-display text-4xl tracking-tight text-ink sm:text-5xl">That was a blunder. Ours.</h1>
+        <h1 className="font-display text-4xl tracking-tight text-ink sm:text-6xl">That was a blunder. Ours.</h1>
       </header>
       <Notice title="This page hit an error" action={{ label: "Try again", onClick: () => retry() }} link={{ href: "/", label: "Back to the start" }}>
         Something went wrong while showing this page. Your games and reports are not affected. Try again, or start over from the

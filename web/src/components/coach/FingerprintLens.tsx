@@ -38,9 +38,8 @@ export function FingerprintLens({
 
   return (
     <figure className="flex flex-col gap-1.5">
-      <figcaption className="flex items-baseline justify-between font-mono text-[11px] tracking-wide text-graphite/70 uppercase">
-        <span>Where it happens in your games</span>
-        <span className="hidden normal-case sm:inline">one row per game · ringed: the move below</span>
+      <figcaption className="text-sm text-graphite">
+        Where it happens in your games<span className="hidden sm:inline">: one row per game, with the move shown below ringed</span>.
       </figcaption>
       <svg
         ref={ref}

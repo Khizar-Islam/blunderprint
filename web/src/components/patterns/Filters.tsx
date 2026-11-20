@@ -56,7 +56,7 @@ export function ChipGroup<K extends string>({
   const { container, pill } = useIndicator<HTMLDivElement, HTMLSpanElement>(chosen < 0 ? null : chosen);
   return (
     <div ref={container} className="group relative flex items-center gap-1.5" role="radiogroup" aria-label={label}>
-      {showLabel && <span className="mr-1 font-mono text-[11px] tracking-wide text-graphite/70 uppercase">{label}</span>}
+      {showLabel && <span className="mr-1 font-mono text-xs text-graphite/70">{label}</span>}
       <span ref={pill} className="seg-indicator rounded-full bg-ink opacity-0" aria-hidden="true" />
       {options.map((o) => {
         const on = o.key === current;

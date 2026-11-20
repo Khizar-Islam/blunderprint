@@ -58,7 +58,7 @@ export function StackedBars({
     <figure className="flex flex-col gap-3">
       <figcaption className="flex flex-col gap-0.5">
         <span className="font-display text-xl text-ink">{title}</span>
-        {caption && <span className="text-xs text-graphite/70">{caption}</span>}
+        {caption && <span className="text-sm text-graphite">{caption}</span>}
       </figcaption>
       <ul className="flex flex-col gap-2.5">
         {rows.map((row) => {
@@ -84,7 +84,7 @@ export function StackedBars({
                   {row.sub && <span className="shrink-0 font-mono text-xs text-graphite/70">{row.sub}</span>}
                 </span>
                 {/* Its own line, so it never squeezes the label in the narrow label column. */}
-                {few && <span className="font-mono text-[11px] leading-tight text-graphite/70 italic">few games</span>}
+                {few && <span className="font-mono text-xs leading-tight text-graphite/70 italic">few games</span>}
               </span>
               <svg
                 className="col-span-2 row-start-2 h-3 w-full sm:col-span-1 sm:row-start-auto"
@@ -124,7 +124,7 @@ export function StackedBars({
           );
         })}
       </ul>
-      <p className="font-mono text-[11px] text-graphite/70">
+      <p className="font-mono text-xs text-graphite/70">
         scale 0–{format(max)}
       </p>
     </figure>

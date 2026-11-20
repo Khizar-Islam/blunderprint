@@ -74,7 +74,7 @@ export function TraceLine({ step, animate, cursor = false }: { step: TraceStep; 
   const muted = step.kind === "retry";
   return (
     <li
-      className={`grid grid-cols-[2rem_1rem_1fr_auto] items-baseline gap-x-2 border-l-2 py-1 pr-1 pl-2 font-mono text-[13px] leading-snug ${
+      className={`grid grid-cols-[2rem_1rem_1fr_auto] items-baseline gap-x-2 border-l-2 py-1 pr-1 pl-2 font-mono text-xs sm:text-sm leading-snug ${
         isSwitch ? "border-inaccuracy bg-inaccuracy/10" : "border-transparent"
       } ${muted ? "text-graphite/70" : "text-ink"}`}
     >
@@ -135,7 +135,7 @@ export function AgentTrace({
 
   return (
     <section aria-label="The coach's working" className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-ink/15 pb-1 font-mono text-xs tracking-wide text-graphite/70 uppercase">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-ink/15 pb-1 font-mono text-xs text-graphite/70">
         <span>
           {live
             ? connection === "reconnecting" || connection === "lost"
@@ -159,7 +159,7 @@ export function AgentTrace({
           <TraceLine key={step.n} step={step} animate={live && !reduced} cursor={working && i === steps.length - 1} />
         ))}
         {working && steps.length === 0 && (
-          <li className="py-1 pl-12 font-mono text-[13px]" aria-hidden="true">
+          <li className="py-1 pl-12 font-mono text-xs sm:text-sm" aria-hidden="true">
             <Cursor />
           </li>
         )}

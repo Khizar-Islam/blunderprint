@@ -56,7 +56,7 @@ export function AnswerCard({
       data-answer={entry.status === "done" ? entry.answer?.outcome : undefined}
     >
       <p className="flex items-baseline gap-3 text-base text-ink">
-        <span className="font-mono text-xs tracking-wide text-graphite/70 uppercase" aria-hidden="true">
+        <span className="font-mono text-xs text-graphite/70" aria-hidden="true">
           Q.
         </span>
         <span className="font-medium">{entry.question}</span>
@@ -187,7 +187,7 @@ function AnswerBody({
           {cached ? " · answered earlier" : ""}
         </p>
         {switched && (
-          <p className="text-xs text-graphite/70">
+          <p className="text-sm text-graphite">
             Written by <span className="font-mono">{answer.answeredBy}</span>: the main model ({answer.model}) was overloaded.
           </p>
         )}

@@ -463,7 +463,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
       <p data-el="gameCap" className={`${layer} w-full bg-bone py-1 font-mono text-xs text-graphite`} style={{ opacity: 0, visibility: "hidden" }}>
         Game {ROW + 1} of {ROWS.length} · {utcDay(GAME.playedAt)} · {GAME.speed} · {resultWords(GAME.result, GAME.color)} · {Math.ceil(GAME.classes.length / 2)} moves
       </p>
-      <div data-el="steps" className={`${layer} w-full text-center font-display text-2xl text-ink sm:text-3xl`}>
+      <div data-el="steps" className={`${layer} w-full text-center font-display text-2xl text-ink`}>
         {/* Each caption has its own clean band of bone: the other games' rows run behind it. */}
         <p data-el="stepA" className="absolute inset-x-0 top-0 bg-bone px-2 py-3 text-balance" style={{ opacity: 0, visibility: "hidden" }}>
           Every row is one game. This is one of them.
@@ -543,9 +543,9 @@ function Stage({ at, className }: { at?: number; className: string }) {
         </p>
         <h2 className="font-display text-2xl leading-tight text-balance text-ink sm:text-4xl">{note.title}</h2>
         <p className="font-mono text-ink tabular-nums">
-          <span className="text-3xl sm:text-5xl">{STAT.value(note.stat.value)}</span> <span className="text-graphite">vs your {STAT.baseline}</span>
+          <span className="text-4xl sm:text-6xl">{STAT.value(note.stat.value)}</span> <span className="text-graphite">vs your {STAT.baseline}</span>
         </p>
-        <p className="max-w-[34rem] font-display text-lg leading-relaxed text-ink sm:text-[1.35rem]">
+        <p className="max-w-[34rem] font-display text-lg leading-relaxed text-ink sm:text-xl">
           {BEFORE}
           {FIGURE && (
             // The rule is drawn by the scroll (background-size), like an answer's figure (globals: figure-rule).

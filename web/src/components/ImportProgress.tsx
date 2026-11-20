@@ -55,7 +55,7 @@ export function ImportProgress({
   return (
     <section aria-label="Import progress" className="flex flex-col gap-3">
       <div className="flex items-baseline gap-2 font-mono">
-        <span className="text-3xl text-ink tabular-nums">
+        <span className="text-4xl text-ink tabular-nums">
           <AnimatedNumber value={done} format={whole} />
         </span>
         <span className="text-sm text-graphite/70">{total ? `of ${total} games` : "games"}</span>

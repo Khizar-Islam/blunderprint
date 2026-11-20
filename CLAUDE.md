@@ -707,6 +707,13 @@ Rules:
     - The darker tones are for bone and stone tints only: on ink they are ~2.6:1.
     - **Check: `node scripts/ui-contrast.mjs [base] [--shots <folder>] [page names…]`** measures every visible piece of text on the pages at 1280 and 390 px from the real computed colours. It can't see hover and focus states, text on a canvas, or a state the demo pages don't show (an error message, the trace's amber "switch" row). A lone ■ (a legend's colour sample) and disabled controls are listed, not counted.
 - **Type:** Newsreader (display serif, the "chess book" feel), Geist (UI), Geist Mono (notation, numbers, the agent trace).
+- **One scale (UI pass step 6, the rhythm pass, 20 Nov 2026). Use these sizes and no others:**
+  - **Display (Newsreader): 60 / 36 / 24 / 20** (`text-6xl` / `4xl` / `2xl` / `xl`). A page's title is 36 on a phone and 60 from `sm` (the landing's headline, the player's name, "Coach report", the 404 and error pages); the game review's title and a section heading ("Patterns") are 24 → 36; a card's or block's title (a pattern, "Ask the coach", "Errors by", the dive's captions) is 24; a small block's title is 20.
+  - **Text (Geist): 18 / 16 / 14.** A sentence is never 12 px. A caption that explains a chart is 14 px graphite (`text-sm text-graphite`), not 12 px at 70%.
+  - **Mono (Geist Mono): 14 / 12.** No 10, 11 or 13 px. Big numbers are on the display sizes (a pattern's statistic 60; the plate's three numbers 24 → 36).
+  - **The one exception, on purpose:** 12 px Geist stays inside controls and dense rows: the filter chips, the quiet buttons, the games list's second line, the facts line under an evidence board, and the heat board's held readout slot. At 14 px the filter row wraps at 1280 px, and the rows and the readout would outgrow the heights reserved for them (layout shift).
+  - **No tracked capitals.** A small label over a block ("Pattern 1 of 3", "Exercise", "Coach", "Colour") is mono 12 in sentence case.
+  - **Spacing between blocks: 32 / 48 / 64** (`gap-8` / `gap-12` / `gap-16`): 32 inside a section, 48 between a page's sections, 64 between the report's pattern cards. Every page's frame is `gap-8 px-4 py-10 sm:px-6 sm:py-16`.
 - **Signature visual: the Blunderprint.**
   - Every analysed game is a thin horizontal **move ribbon**, one tick per move, coloured by classification. Only the imported player's moves are coloured; opponent ticks are faint stone.
   - Stacked, the ribbons form a fingerprint-like texture of the player's habits.

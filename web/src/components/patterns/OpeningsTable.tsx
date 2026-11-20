@@ -21,11 +21,11 @@ export function OpeningsTable({ openings }: { openings: Summary["openings"] }) {
     <figure className="flex flex-col gap-3">
       <figcaption className="flex flex-col gap-0.5">
         <span className="font-display text-xl text-ink">Openings</span>
-        <span className="text-xs text-graphite/70">Most played first. Score: a win counts 1, a draw ½. Errors per analysed game.</span>
+        <span className="text-sm text-graphite">Most played first. Score: a win counts 1, a draw ½. Errors per analysed game.</span>
       </figcaption>
       <table className="w-full table-fixed border-collapse text-sm">
         <thead>
-          <tr className="border-b border-ink/15 text-left font-mono text-[11px] font-normal text-graphite/70">
+          <tr className="border-b border-ink/15 text-left font-mono text-xs font-normal text-graphite/70">
             <th className="pb-1.5 pl-1 font-normal">Opening</th>
             <th className="w-12 pb-1.5 text-right font-normal">Games</th>
             <th className="w-[30%] pb-1.5 pl-3 font-normal sm:w-40">Score</th>
@@ -41,7 +41,7 @@ export function OpeningsTable({ openings }: { openings: Summary["openings"] }) {
                 <td className="py-1.5 pr-2 pl-1">
                   <span className="mr-2 font-mono text-xs text-graphite/70">{o.eco ?? "—"}</span>
                   <span className={few ? "" : "text-ink"}>{o.name ?? "Unknown opening"}</span>
-                  {few && <span className="ml-2 font-mono text-[11px] whitespace-nowrap italic">few games</span>}
+                  {few && <span className="ml-2 font-mono text-xs whitespace-nowrap italic">few games</span>}
                 </td>
                 <td className="py-1.5 text-right font-mono tabular-nums">{o.games}</td>
                 <td className="py-1.5 pl-3">

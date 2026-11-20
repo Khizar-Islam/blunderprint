@@ -45,7 +45,7 @@ export function CoachButton({ info, platform, username }: { info: CoachInfo | nu
     <section aria-label="Coach" className={FRAME}>
       <div key={state.kind} className="anim-fade flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
-          <p className="font-mono text-xs tracking-wide text-graphite/70 uppercase">Coach</p>
+          <p className="font-mono text-xs text-graphite/70">Coach</p>
           {state.kind === "locked" && (
             <>
               <p className="font-display text-xl text-ink">The coach unlocks at {state.needed} analysed games</p>

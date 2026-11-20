@@ -51,7 +51,7 @@ export function Plate({ summary, extracting }: { summary: Summary; extracting: b
               </span>
             ))}
           </div>
-          <div className="relative h-4 font-mono text-[11px] text-graphite/80" aria-hidden="true">
+          <div className="relative h-4 font-mono text-xs text-graphite/80" aria-hidden="true">
             {LABELS.map((n) => (
               <span key={n} className="absolute" style={{ left: `${((n - 1) / DIGEST_MOVES) * 100}%` }}>
                 {n === 1 ? "move 1" : n}
@@ -105,8 +105,8 @@ function Stat({ value, format, label }: { value: number | null; format: (n: numb
   }, []);
   return (
     <div className="flex flex-col-reverse justify-end gap-1">
-      <dt className="max-w-[8rem] text-xs leading-snug text-graphite">{label}</dt>
-      <dd className="font-mono text-3xl text-ink tabular-nums sm:text-4xl">
+      <dt className="max-w-[9rem] text-sm leading-snug text-graphite">{label}</dt>
+      <dd className="font-mono text-2xl text-ink tabular-nums sm:text-4xl">
         <AnimatedNumber value={value} format={format} hold={held} />
       </dd>
     </div>

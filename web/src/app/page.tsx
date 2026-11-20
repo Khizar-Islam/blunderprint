@@ -38,7 +38,7 @@ export default function Home() {
             <span className="font-display text-xl text-ink">Blunderprint</span>
             <span className="font-mono text-xs text-graphite">an AI chess coach</span>
           </header>
-          <h1 className="font-display text-[2.6rem] leading-[1.02] tracking-tight text-ink sm:text-6xl">
+          <h1 className="font-display text-4xl leading-[1.05] tracking-tight text-ink sm:text-6xl">
             Your mistakes <br />
             leave a print.
           </h1>

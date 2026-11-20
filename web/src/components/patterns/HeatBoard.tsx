@@ -96,7 +96,7 @@ export function HeatBoard({
     <figure className="flex w-full max-w-[22rem] flex-col gap-2 self-start lg:sticky lg:top-6">
       <figcaption className="flex flex-col gap-0.5">
         <span className="font-display text-xl text-ink">Where it goes wrong</span>
-        <span className="text-xs text-graphite/70">
+        <span className="text-sm text-graphite">
           {mode === "both"
             ? "The square each error landed on, from your side: Black's games are mirrored, so rank 1 is always your back rank."
             : `Your games as ${mode === "white" ? "White" : "Black"}: the square each error landed on, from your side.`}
@@ -146,12 +146,12 @@ export function HeatBoard({
                 aria-hidden="true"
               />
               {n % 8 === 0 && (
-                <span className="absolute top-px left-0.5 font-mono text-[10px] leading-none text-ink" aria-hidden="true">
+                <span className="absolute top-px left-0.5 font-mono text-xs leading-none text-ink" aria-hidden="true">
                   {nameOf(i)[1]}
                 </span>
               )}
               {n >= 56 && (
-                <span className="absolute right-0.5 bottom-px font-mono text-[10px] leading-none text-ink" aria-hidden="true">
+                <span className="absolute right-0.5 bottom-px font-mono text-xs leading-none text-ink" aria-hidden="true">
                   {nameOf(i)[0]}
                 </span>
               )}
@@ -159,8 +159,8 @@ export function HeatBoard({
           );
         })}
       </div>
-      <p className="flex items-start gap-1.5 text-xs text-graphite/80">
-        <span className="mt-[3px] inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-blunder" aria-hidden="true" />
+      <p className="flex items-start gap-1.5 text-sm text-graphite">
+        <span className="mt-[5px] inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-blunder" aria-hidden="true" />
         The bigger the mark, the more win chances were lost on that square, compared with an ordinary one.
       </p>
 

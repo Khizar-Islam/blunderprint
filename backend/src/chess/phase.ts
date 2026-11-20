@@ -5,6 +5,9 @@
 // - scalachess core/src/main/scala/Divider.scala
 //   https://github.com/lichess-org/scalachess/blob/b73baa55d67b4a3013c8114d5646b6c0d233f42b/core/src/main/scala/Divider.scala
 //
+// scalachess is MIT licensed, Copyright (c) 2012-2014 Thibault Duplessis (the full notice is in
+// THIRD_PARTY_NOTICES.md at the repo root).
+//
 // The rules, on the position after each ply:
 // - The middlegame starts at the first position with ≤ 10 majors + minors (queens, rooks,
 //   bishops, knights of both sides), OR a sparse back rank (fewer than 4 of White's pieces on

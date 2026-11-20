@@ -5,7 +5,8 @@ import { Chessboard } from "react-chessboard";
 import type { MoveClass } from "@/lib/api";
 import { isError } from "./classes";
 
-// A view-only board (react-chessboard, MIT). Stone squares from our palette, not Chess.com's
+// A view-only board (react-chessboard, MIT; its default pieces are Colin M.L. Burnett's set,
+// used under the BSD licence: THIRD_PARTY_NOTICES.md at the repo root). Stone squares from our palette, not Chess.com's
 // green or Lichess's brown, and coordinates in our palette too (react-chessboard's default
 // labels are Lichess-style browns, #B58863 / #F0D9B5): graphite on the light squares and ink on
 // the dark ones, in Geist Mono. Dark labels on both because the dark stone (#8C8675) is a

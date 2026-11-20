@@ -50,7 +50,7 @@ writeFileSync(
     "  Stockfish (the engine): https://github.com/official-stockfish/Stockfish",
     "",
     "Blunderprint talks to the engine only through UCI text messages to a Web Worker.",
-    "Blunderprint's own source: https://github.com/Khizar-Islam/blunderprint",
+    "Blunderprint's own source (GNU AGPL v3 or later): https://github.com/Khizar-Islam/blunderprint",
     "",
   ].join("\n"),
 );

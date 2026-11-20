@@ -23,7 +23,8 @@ The API runs on a free tier that sleeps after 15 minutes, so the first request c
 - [Tests and checks](#tests-and-checks)
 - [Roadmap](#roadmap)
 - [Privacy](#privacy)
-- [Credits and licences](#credits-and-licences)
+- [Licence](#licence)
+- [Credits](#credits)
 
 ## What it does
 
@@ -324,7 +325,7 @@ All passing on 18 Nov 2026. Line coverage of the source files the tests load (te
 ## Roadmap
 
 - **Your move against millions of games.** A position-statistics collection built offline from the Lichess game database (CC0): for a position from your game, what players in your rating band play there and how it scores, shown in the game review and available to the coach as a tool. The plan and the storage budget (300 MB of the 512) are written; the import is waiting on disk space on my laptop. With it, openings will be named by position instead of by ECO code, and a storage guard will evict the least recently viewed players.
-- **Hardening:** a rule against unverifiable colour in answers (the model can still write "cost you the game"), a paid Gemini tier with a spending cap, and the repository's own licence.
+- **Hardening:** a rule against unverifiable colour in answers (the model can still write "cost you the game"), and a paid Gemini tier with a spending cap.
 - **Later ideas, deliberately not in this version:** accounts, saved favourites, puzzles generated from your own mistakes, more languages.
 
 ## Privacy
@@ -333,12 +334,23 @@ All passing on 18 Nov 2026. Line coverage of the source files the tests load (te
 - Questions typed into "Ask the coach" are sent to Google's Gemini on its free tier, where Google may use them to improve its models. The page says so next to the box.
 - Visitors are counted for the limits by a salted hash of their IP address. The address itself is never stored or logged, and neither are the questions' secret tokens.
 
-## Credits and licences
+## Licence
+
+Blunderprint is free software under the **GNU Affero General Public License, version 3 or later** (AGPL-3.0-or-later). The full text is in [LICENSE](LICENSE).
+
+- **What that means:** you may run, study, change and share it. If you run a changed version as a website for other people, you have to offer them your source code under the same licence. Every page's footer links to this repository for that reason.
+- **Why this one:** the site ships the Stockfish engine (GPL-3.0) and the move classification is a port of Lichess code (AGPL-3.0-or-later), so a licence from the same family keeps everything compatible.
+- **Other people's work** in the app, each with its licence and notice: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Copyright © 2026 Khizar Islam.
+
+## Credits
 
 - **Stockfish.** Blunderprint ships [Stockfish](https://github.com/official-stockfish/Stockfish) through [stockfish.js](https://github.com/nmrugg/stockfish.js) (v19.0.1, unmodified), licensed under the **GNU GPL v3**. The engine files are copied from the npm package at build time and served from `/engine/`, together with the licence text (`/engine/Copying.txt`) and a note on where their source code is (`/engine/SOURCE.txt`).
-- **Lichess.** The move classification and the game-phase divider are ports of [lila](https://github.com/lichess-org/lila) and [scalachess](https://github.com/lichess-org/scalachess) code, with the sources cited in `backend/src/chess/`.
+- **Lichess.** The move classification and the game-phase divider are ports of [lila](https://github.com/lichess-org/lila) (AGPL-3.0-or-later) and [scalachess](https://github.com/lichess-org/scalachess) (MIT) code, with the sources cited in `backend/src/chess/`.
+- **Board and pieces.** [react-chessboard](https://github.com/Clariity/react-chessboard) (MIT) draws the board, with the chess pieces by Colin M.L. Burnett from [Wikimedia Commons](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces) (used under the BSD licence). Chess rules: [chess.js](https://github.com/jhlywa/chess.js) (BSD-2-Clause).
+- **Fonts.** Newsreader, Geist and Geist Mono, all under the SIL Open Font License 1.1.
 - **Game data** comes from the [Chess.com Published-Data API](https://www.chess.com/news/view/published-data-api) and the [Lichess API](https://lichess.org/api). Blunderprint is not affiliated with either site, or with the demo player.
-- **This repository's own licence** has not been chosen yet.
 
 ## Author
 

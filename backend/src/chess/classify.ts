@@ -10,6 +10,11 @@
 //   and modules/tree/src/main/eval.scala (legacyInitial)
 // - Accuracy per move: lila modules/analyse/src/main/AccuracyPercent.scala (fromWinPercents)
 //
+// Licences of the sources (THIRD_PARTY_NOTICES.md at the repo root has the full notices):
+// - scalachess: MIT, Copyright (c) 2012-2014 Thibault Duplessis.
+// - lila: GNU AGPL, version 3 or later. This file is a modified version of that code (rewritten
+//   in TypeScript, 31 Oct 2026) and is under the AGPL too, like the rest of this repository.
+//
 // Pure maths, no chess.js: it runs on Render's slow CPU in microseconds per game.
 
 import type { Classification } from "../db/models/game.js";

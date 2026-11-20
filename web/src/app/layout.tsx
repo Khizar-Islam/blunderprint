@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Newsreader } from "next/font/google";
 import { MotionProvider } from "@/components/MotionProvider";
 import { PerfProbeLoader } from "@/components/PerfProbeLoader";
+import { SiteFooter } from "@/components/SiteFooter";
 import "./globals.css";
 
 // next/font downloads these at build time and serves them from our own domain (no runtime Google request).
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="flex min-h-full flex-col font-sans">
         <MotionProvider>{children}</MotionProvider>
+        <SiteFooter />
         {/* Off unless the URL has ?perf=1 (then a small measuring box appears, bottom right). */}
         <PerfProbeLoader />
       </body>

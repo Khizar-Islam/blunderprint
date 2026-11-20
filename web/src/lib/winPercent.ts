@@ -2,6 +2,8 @@
 // backend/src/chess/classify.ts (scalachess's WinPercent, sources cited there): one small pure
 // function isn't worth a shared package. winPercent.test.ts checks the same values as the
 // backend's tests, so the two copies can't drift apart unnoticed.
+// scalachess is MIT licensed, Copyright (c) 2012-2014 Thibault Duplessis; the start eval is from
+// lila (GNU AGPL, version 3 or later). Notices: THIRD_PARTY_NOTICES.md at the repo root.
 
 export type Eval = { cp?: number; mate?: number }; // White's view; mate 0 = the side to move is mated
 

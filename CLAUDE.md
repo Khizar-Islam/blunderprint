@@ -666,6 +666,7 @@ Rules:
   - Beside it sits an 8×8 **heat board** of where mistakes happen.
   - Clicking a tick opens that exact position.
   - **As built (Stage 3):**
+    - **Redrawn in the UI pass (20 Nov 2026, `geometry.ts` `drawRows`): a quiet line per game, a mark per error.** Each game is one pale line (`RIDGE` `#cfc8b9`) as long as the game; each of the player's errors is a coloured mark at its ply, 2 columns wide (`MARK_COLS`: its own ply and the reply's), never thinner than 2.5 px. Before, every ply was its own tick (the player's moves dark, the opponent's faint), and that alternation was the loudest thing in the picture: at 1280 px the landing's print read as grey noise. Single moves are still shown wherever ONE game is opened: the loupe, the coach's lens (`TICK_COLOR`). Anywhere on a mark is that error (`markAt`), for hover and click. The games list's per-game ribbons (`lib/ribbon.ts`) are unchanged.
     - One **canvas** (200 games × ~80 plies is ~16,000 ticks; as DOM nodes that would be slow). Rows 3 px + 1 px gap (2 + 1 on narrow screens), newest at the top. x is the ply on one scale for all rows, so a column is the same move in every game.
     - Rows are cut at **120 plies** so one long game doesn't squash the rest. A cut row gets an end marker tinted by the worst of the player's errors past the cap. The hover/tap **loupe** draws the game's full row, and its ticks can be clicked too.
     - Keyboard: ↑/↓ choose a game, ←/→ step through its errors (past the cap too), Enter opens.

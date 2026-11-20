@@ -1,9 +1,15 @@
 import type { ErrorKind } from "@/lib/api";
 
 // The Blunderprint's geometry and colours, kept out of the canvas component so they can be
-// tested. One row per analysed game (newest first), one tick per ply. x is the ply number on
-// ONE scale for every row, so a column is the same move in every game, and "you go wrong
-// around move 25" shows up as a vertical band.
+// tested. One row per analysed game (newest first): a quiet line as long as the game, and one
+// coloured MARK per error of the player's, at its ply. x is the ply number on ONE scale for
+// every row, so a column is the same move in every game, and "you go wrong around move 25"
+// shows up as a vertical band.
+//
+// (Until the UI pass of Nov 2026 every ply was its own tick: the player's moves dark, the
+// opponent's faint. That alternation was the loudest thing in the picture, and the errors read
+// as specks in grey noise. Single moves are still shown where ONE game is opened up: the loupe,
+// the coach's lens, the landing's dive. TICK_COLOR is for those.)
 //
 // Plies are 1-based here (ply 1 = White's first move), like the game review's ?ply=N.
 
@@ -26,6 +32,13 @@ export const TICK_COLOR: Record<Tick, string> = {
   blunder: "#b3362b",
 };
 export const NEUTRAL_MARKER = "#2b2b28"; // graphite: a cut row with no hidden errors
+// A game's quiet line in the print: between the two stone tones, clearly there on bone but far
+// behind the three error colours.
+export const RIDGE = "#cfc8b9";
+// An error's mark covers its own ply and the reply's (2 columns), and is never thinner than
+// MARK_MIN_W px, so a single error is visible in a 200-game print on a phone.
+export const MARK_COLS = 2;
+export const MARK_MIN_W = 2.5;
 
 const LETTER_KIND: Record<string, ErrorKind | undefined> = { i: "inaccuracy", m: "mistake", x: "blunder" };
 const SEVERITY: Record<ErrorKind, number> = { inaccuracy: 1, mistake: 2, blunder: 3 };
@@ -52,6 +65,13 @@ export function errorPlies(classes: string, color: Color): number[] {
   const out: number[] = [];
   for (let ply = 1; ply <= classes.length; ply++) if (errorKindAt(classes, ply, color)) out.push(ply);
   return out;
+}
+
+// The error whose mark covers `ply`: the ply itself, or the one before it (a mark is MARK_COLS
+// wide). Null where the row is only its quiet line.
+export function markAt(classes: string, color: Color, ply: number): number | null {
+  for (let p = ply; p > ply - MARK_COLS && p >= 1; p--) if (errorKindAt(classes, p, color)) return p;
+  return null;
 }
 
 // The next (dir 1) or previous (dir −1) error from `from` (exclusive; null = from the edge).
@@ -112,10 +132,10 @@ export function loupePly(width: number, plies: number, x: number): number | null
   return Math.min(plies, Math.floor((x / width) * plies) + 1);
 }
 
-// Draws the rows. `alpha(row)` fades rows in (reveal and newly arrived games).
-// `colouredUpTo`: plies after it are drawn as faint stone, as if not analysed yet (the landing
-// hero's engine pass colours the print column by column). End markers appear once every
-// column is coloured.
+// Draws the rows: each game's quiet line, then its error marks on top. `alpha(row)` fades rows
+// in (reveal and newly arrived games). `colouredUpTo`: errors after that ply aren't marked yet,
+// as if not analysed (the landing's engine pass colours the print column by column). End markers
+// appear once every column is coloured.
 export function drawRows(
   ctx: CanvasRenderingContext2D,
   l: Layout,
@@ -123,23 +143,23 @@ export function drawRows(
   alpha: (row: number) => number,
   colouredUpTo = Infinity,
 ): void {
-  const tick = (r: { classes: string; color: Color }, ply: number): Tick => (ply <= colouredUpTo ? tickAt(r.classes, ply, r.color) : "opponent");
   ctx.clearRect(0, 0, l.width, l.height);
+  const edge = l.columns * l.tickW; // marks stop at the cap: the margin past it is the end marker's
   rows.forEach((r, row) => {
     const a = alpha(row);
     if (a <= 0) return;
     ctx.globalAlpha = a;
     const y = row * l.pitch;
     const shown = Math.min(r.classes.length, l.columns);
-    // Runs of one colour are one rectangle: fewer draw calls, and no hairline seams between ticks.
-    let start = 1;
-    for (let ply = 2; ply <= shown + 1; ply++) {
-      const prev = tick(r, ply - 1);
-      if (ply === shown + 1 || tick(r, ply) !== prev) {
-        ctx.fillStyle = TICK_COLOR[prev];
-        ctx.fillRect((start - 1) * l.tickW, y, (ply - start) * l.tickW, l.rowH);
-        start = ply;
-      }
+    ctx.fillStyle = RIDGE;
+    ctx.fillRect(0, y, shown * l.tickW, l.rowH);
+    const upTo = Math.min(shown, colouredUpTo);
+    for (let ply = 1; ply <= upTo; ply++) {
+      const kind = errorKindAt(r.classes, ply, r.color);
+      if (!kind) continue;
+      const x = (ply - 1) * l.tickW;
+      ctx.fillStyle = TICK_COLOR[kind];
+      ctx.fillRect(x, y, Math.min(Math.max(MARK_MIN_W, MARK_COLS * l.tickW), edge - x), l.rowH);
     }
     const t = truncation(r.classes, r.color, l.columns);
     if (t.cut && colouredUpTo > l.columns) {

@@ -107,8 +107,8 @@ export function PatternsDashboard({
                   <figcaption className="flex flex-col gap-0.5">
                     <span className="font-display text-xl text-ink">The Blunderprint</span>
                     <span className="text-xs text-graphite/70">
-                      One row per analysed game, newest at the top; one tick per move, so each column is the same move
-                      in every game. Your errors in colour, your other moves dark, your opponent&apos;s faint.
+                      One row per analysed game, newest at the top; one mark per error, at its move number, so a
+                      column is the same move in every game. Point at a game to see every move of it.
                     </span>
                   </figcaption>
                   <Blunderprint ribbons={summary.ribbons} gameHref={gameHref} />

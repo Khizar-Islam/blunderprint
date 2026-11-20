@@ -12,6 +12,8 @@ import {
   hitTest,
   layout,
   loupePly,
+  MARK_COLS,
+  markAt,
   moveName,
   stepError,
   tickAt,
@@ -19,8 +21,8 @@ import {
   truncation,
 } from "./geometry";
 
-// The signature visual: every analysed game as one thin row, one tick per ply, newest at the
-// top. Drawn on ONE canvas: 200 games × ~80 plies is ~16,000 ticks, which as SVG or divs would
+// The signature visual: every analysed game as one thin row (a quiet line with a coloured mark
+// per error, geometry.ts), newest at the top. Drawn on ONE canvas: 200 games × ~80 plies is ~16,000 ticks, which as SVG or divs would
 // be 16,000 DOM nodes to lay out and animate; the canvas draws them in a couple of
 // milliseconds. Interaction is plain maths on the pointer position (blunderprint.ts hitTest).
 //
@@ -127,7 +129,11 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
   // ---- Pointer -----------------------------------------------------------------------------------
   const pointAt = (e: React.PointerEvent | React.MouseEvent) => {
     const rect = canvas.current!.getBoundingClientRect();
-    return hitTest(l, lengths, e.clientX - rect.left, e.clientY - rect.top);
+    const hit = hitTest(l, lengths, e.clientX - rect.left, e.clientY - rect.top);
+    if (!hit || hit.ply === null) return hit;
+    // Anywhere on an error's mark (two columns wide) is that error.
+    const g = ribbons[hit.row]!;
+    return { row: hit.row, ply: markAt(g.classes, g.color, hit.ply) ?? hit.ply };
   };
   const onPointerMove = (e: React.PointerEvent) => {
     pointerType.current = e.pointerType;
@@ -194,7 +200,7 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
           ref={canvas}
           tabIndex={0}
           role="img"
-          aria-label={`Blunderprint: ${ribbons.length} analysed games, newest at the top, one tick per move. Use the arrow keys to explore and Enter to open a game.`}
+          aria-label={`Blunderprint: ${ribbons.length} analysed games, newest at the top, one mark per error. Use the arrow keys to explore and Enter to open a game.`}
           aria-describedby="blunderprint-status"
           // A pointer over a move (a click opens the game there); the plain arrow between moves.
           className={`block touch-manipulation rounded-[1px] outline-1 outline-offset-4 outline-transparent transition-[outline-color] duration-150 hover:outline-ink/25 focus-visible:outline-offset-4 active:outline-ink/50 ${current?.source === "pointer" && current.ply ? "cursor-pointer" : "cursor-default"}`}
@@ -223,7 +229,7 @@ export function Blunderprint({ ribbons, gameHref }: { ribbons: Ribbon[]; gameHre
                 style={{
                   transform: `translate(${(current.ply - 1) * l.tickW - 1}px, ${current.row * l.pitch - 3}px)`,
                   height: l.rowH + 6,
-                  width: Math.max(3, l.tickW + 2),
+                  width: Math.max(3, (errorKindAt(game.classes, current.ply, game.color) ? MARK_COLS : 1) * l.tickW + 2),
                 }}
               />
             )}

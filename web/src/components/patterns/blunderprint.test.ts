@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { drawRows, errorPlies, hitTest, isPlayersPly, layout, loupePly, MARKER_W, moveName, NEUTRAL_MARKER, PLY_CAP, stepError, TICK_COLOR, tickAt, truncation, type Color } from "./geometry";
+import { drawRows, errorPlies, hitTest, isPlayersPly, layout, loupePly, MARK_COLS, MARK_MIN_W, markAt, MARKER_W, moveName, NEUTRAL_MARKER, PLY_CAP, RIDGE, stepError, TICK_COLOR, tickAt, truncation, type Color } from "./geometry";
 
 // Tests for the Blunderprint's geometry (geometry.ts, drawn by Blunderprint.tsx).
 // classes: one letter per ply, b best, g good, i inaccuracy, m mistake, x blunder.
@@ -37,6 +37,20 @@ describe("errors and keyboard stepping", () => {
     assert.equal(stepError(classes, "black", 4, -1), 2);
     assert.equal(stepError(classes, "black", 2, -1), null);
     assert.equal(stepError(classes, "black", 3, 1), 4, "from a non-error ply too");
+  });
+});
+
+describe("markAt: the error whose mark is under a ply", () => {
+  test("the error's own ply and the reply's ply are both its mark; elsewhere there is none", () => {
+    // White's blunder on ply 3: its mark covers plies 3 and 4.
+    assert.equal(markAt("ggxggg", "white", 3), 3);
+    assert.equal(markAt("ggxggg", "white", 4), 3);
+    assert.equal(markAt("ggxggg", "white", 5), null);
+    assert.equal(markAt("ggxggg", "white", 2), null);
+    // The opponent's blunder on ply 4 is no mark of the player's.
+    assert.equal(markAt("gggxgg", "white", 4), null);
+    assert.equal(markAt("gggxgg", "white", 5), null);
+    assert.equal(markAt("xggggg", "white", 1), 1);
   });
 });
 
@@ -147,63 +161,63 @@ describe("drawRows", () => {
   // 10 px per ply: the width is the plies shown × 10 plus the marker margin.
   const widthFor = (columns: number) => columns * 10 + MARKER_W;
 
-  test("one tick per ply at x = (ply − 1) × tick width: the player's errors coloured, the opponent's moves faint", () => {
+  test("a game is one quiet line as long as the game, with a mark two columns wide at each of the player's errors", () => {
     // White: ply 1 good, ply 3 a blunder, ply 5 an inaccuracy. Black's ply 4 is a blunder too, but it's the opponent's.
-    const rows = [row("ggxxig")];
-    const l = layout(widthFor(6), [6], false);
+    const rows = [row("ggxxigg")];
+    const l = layout(widthFor(7), [7], false);
     const c = fakeCanvas();
     drawRows(c.ctx, l, rows, full);
     assert.deepEqual(c.cleared, [[0, 0, l.width, l.height]]);
     assert.deepEqual(
       c.rects.map((r) => [r.x, r.w, r.fill]),
       [
-        [0, 10, TICK_COLOR.own],
-        [10, 10, TICK_COLOR.opponent],
-        [20, 10, TICK_COLOR.blunder],
-        [30, 10, TICK_COLOR.opponent],
-        [40, 10, TICK_COLOR.inaccuracy],
-        [50, 10, TICK_COLOR.opponent],
+        [0, 70, RIDGE],
+        [20, MARK_COLS * 10, TICK_COLOR.blunder],
+        [40, MARK_COLS * 10, TICK_COLOR.inaccuracy],
       ],
     );
     assert.ok(c.rects.every((r) => r.y === 0 && r.h === l.rowH && r.alpha === 1));
   });
 
-  test("the same game seen as Black colours the other plies", () => {
-    const l = layout(widthFor(4), [4], false);
+  test("the same game seen as Black marks the other plies", () => {
+    const l = layout(widthFor(6), [6], false);
     const c = fakeCanvas();
-    drawRows(c.ctx, l, [row("xmxm", "black")], full);
-    assert.deepEqual(c.rects.map((r) => r.fill), [TICK_COLOR.opponent, TICK_COLOR.mistake, TICK_COLOR.opponent, TICK_COLOR.mistake]);
+    drawRows(c.ctx, l, [row("xmxmgg", "black")], full);
+    assert.deepEqual(c.rects.map((r) => [r.x, r.fill]), [[0, RIDGE], [10, TICK_COLOR.mistake], [30, TICK_COLOR.mistake]]);
   });
 
-  test("each row sits at row × pitch, and a shorter game simply ends earlier", () => {
+  test("each row sits at row × pitch, and a shorter game's line simply ends earlier", () => {
     const rows = [row("gggg"), row("gg")];
     const l = layout(widthFor(4), [4, 2], false);
     const c = fakeCanvas();
     drawRows(c.ctx, l, rows, full);
-    const second = c.rects.filter((r) => r.y === l.pitch);
-    assert.equal(c.rects.filter((r) => r.y === 0).length, 4);
-    assert.deepEqual(second.map((r) => [r.x, r.w]), [[0, 10], [10, 10]]);
+    assert.deepEqual(c.rects.map((r) => [r.x, r.y, r.w]), [[0, 0, 40], [0, l.pitch, 20]]);
   });
 
-  test("before the engine pass reaches a ply it is faint stone, and a run of one colour is ONE rectangle", () => {
-    const rows = [row("gxgxgxgx")];
+  test("a mark is never thinner than MARK_MIN_W, and never runs past the cap into the end marker's margin", () => {
+    // 400 columns in 406 px: 1 px a ply, so two columns would be 2 px.
+    const thin = layout(406, [400], false, 400);
+    const a = fakeCanvas();
+    drawRows(a.ctx, thin, [row("x" + "g".repeat(399))], full);
+    assert.equal(a.rects[1]!.w, MARK_MIN_W);
+    // An error on the last column before the cap: its mark is cut at the cap.
+    const l = layout(widthFor(4), [4], false, 4);
+    const b = fakeCanvas();
+    drawRows(b.ctx, l, [row("gggx", "black")], full);
+    assert.deepEqual(b.rects.map((r) => [r.x, r.w, r.fill]), [[0, 40, RIDGE], [30, 10, TICK_COLOR.blunder]]);
+  });
+
+  test("before the engine pass reaches a ply its error is not marked yet: only the quiet line", () => {
+    const rows = [row("xgxgxgxg")];
     const l = layout(widthFor(8), [8], false);
     const none = fakeCanvas();
     drawRows(none.ctx, l, rows, full, 0);
-    assert.deepEqual(none.rects.map((r) => [r.x, r.w, r.fill]), [[0, 80, TICK_COLOR.opponent]]);
+    assert.deepEqual(none.rects.map((r) => [r.x, r.w, r.fill]), [[0, 80, RIDGE]]);
 
-    // Coloured up to ply 3: three ticks, then the other five plies as one faint run.
+    // Marked up to ply 3: the errors on plies 1 and 3, not those on 5 and 7.
     const some = fakeCanvas();
-    drawRows(some.ctx, l, [row("xgxgxgxg")], full, 3);
-    assert.deepEqual(
-      some.rects.map((r) => [r.x, r.w, r.fill]),
-      [
-        [0, 10, TICK_COLOR.blunder],
-        [10, 10, TICK_COLOR.opponent],
-        [20, 10, TICK_COLOR.blunder],
-        [30, 50, TICK_COLOR.opponent],
-      ],
-    );
+    drawRows(some.ctx, l, rows, full, 3);
+    assert.deepEqual(some.rects.map((r) => [r.x, r.fill]), [[0, RIDGE], [0, TICK_COLOR.blunder], [20, TICK_COLOR.blunder]]);
   });
 
   test("a row cut at the cap gets an end marker in the colour of its worst hidden error, or neutral", () => {

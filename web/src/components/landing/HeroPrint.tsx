@@ -212,7 +212,7 @@ export function HeroPrint({ demo }: { demo: DemoSnapshot }) {
         <canvas
           ref={canvas}
           role="img"
-          aria-label={`A Blunderprint: ${ribbons.length} games of the Lichess account ${demo.username}, one row per game, one tick per move, coloured where the player went wrong. The coach's three notes are listed beside it.`}
+          aria-label={`A Blunderprint: ${ribbons.length} games of the Lichess account ${demo.username}, one row per game, one coloured mark per error. The coach's three notes are listed beside it.`}
           className={`block ${thin ? "" : "cursor-pointer"}`}
           style={{ width: l.width, height: l.height }}
           onPointerMove={(e) => {

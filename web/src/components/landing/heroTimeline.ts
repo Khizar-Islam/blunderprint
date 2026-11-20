@@ -1,4 +1,4 @@
-import { layout, type Layout } from "../patterns/geometry";
+import { layout, MARK_COLS, type Layout } from "../patterns/geometry";
 
 // The landing hero, "the print develops", as pure functions of the time since it started, so
 // the phases and the final state can be tested without a browser.
@@ -71,9 +71,9 @@ export function heroLayout(width: number, lengths: number[], compact: boolean): 
   return { ...base, rowH, pitch, height: lengths.length * pitch };
 }
 
-// The centre of a ply's tick: where a margin note's ring goes.
+// The centre of an error's mark (MARK_COLS columns wide from its ply): where a margin note's ring goes.
 export const tickCentre = (l: Layout, row: number, ply: number) => ({
-  x: (ply - 0.5) * l.tickW,
+  x: (ply - 1 + MARK_COLS / 2) * l.tickW,
   y: row * l.pitch + l.rowH / 2,
 });
 

@@ -2,7 +2,7 @@ import type { CoachEvidence } from "@/lib/api";
 import { TICK_COLOR, tickAt, type Color } from "../patterns/geometry";
 
 // The "fingerprint lens": a pattern card's strip of its evidence games' move ribbons, in the
-// Blunderprint's own language (one tick per ply, only the player's errors coloured, opponent
+// Blunderprint's opened-up language (one tick per ply, only the player's errors coloured, opponent
 // moves faint), with the evidence move ringed. Its maths lives here so it can be tested.
 //
 // Unlike the Blunderprint, the strip isn't cut at 120 plies: it has only 2-4 rows, so every row

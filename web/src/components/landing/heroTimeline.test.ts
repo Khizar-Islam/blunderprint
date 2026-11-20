@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { PLY_CAP } from "../patterns/geometry";
 import { demo } from "./demoData";
-import { ARRIVE_MS, clockText, DEVELOPED_MS, heroFrame, KIND_MS, TARGET_MS } from "./heroTimeline";
+import { ARRIVE_MS, clockText, DEVELOPED_MS, heroFrame, KIND_MS, RECEDE_MS, recedeAt, TARGET_MS } from "./heroTimeline";
 
 // The landing's first screen (heroTimeline.ts) and the committed demo snapshot it draws.
 
@@ -52,6 +52,16 @@ describe("heroFrame: the phases", () => {
     assert.deepEqual({ ...heroFrame(1300, 200), rowAlpha: null }, { ...heroFrame(1300, 200), rowAlpha: null });
     assert.equal(heroFrame(4100, 200).target, 1);
   });
+});
+
+test("recedeAt: the marks outside the finding's band recede once the print is whole", () => {
+  assert.equal(recedeAt(DEVELOPED_MS), 0, "not before the print is whole");
+  assert.equal(recedeAt(RECEDE_MS[0]), 0);
+  const mid = recedeAt((RECEDE_MS[0] + RECEDE_MS[1]) / 2);
+  assert.ok(mid > 0.4 && mid < 0.6, `mid ${mid}`);
+  assert.equal(recedeAt(RECEDE_MS[1]), 1);
+  assert.equal(recedeAt(Infinity), 1, "the final state (reduced motion, no frames)");
+  assert.ok(RECEDE_MS[1] - RECEDE_MS[0] === 600 && RECEDE_MS[1] <= 3_500);
 });
 
 test("clockText", () => {

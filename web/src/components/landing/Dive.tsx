@@ -20,7 +20,7 @@ import type { ErrorKind } from "@/lib/api";
 import { ANNOTATION, statText } from "@/lib/coach";
 import { demo } from "./demoData";
 import { DIVE_COLS, divePhases, diveRows, ease, lerp, resultWords, seg, splitFigure, stageBox, utcDay, xlerp } from "./diveTimeline";
-import { clockText, DEVELOPED_MS, heroFrame } from "./heroTimeline";
+import { clockText, DEVELOPED_MS, heroFrame, RECEDED_STRENGTH, recedeAt } from "./heroTimeline";
 import { PrintLink } from "./PrintLink";
 
 const RUST = "#D9772B"; // hex, not CSS variables: SVG attributes and canvas fills
@@ -30,6 +30,7 @@ const QUIET = "#5c5b55"; // graphite at 70% on bone: the strip's move numbers
 const KIND_TEXT: Record<ErrorKind, string> = { blunder: "#ad3026", mistake: "#944902", inaccuracy: INK };
 
 const STALL_MS = 400; // no animation frame by then: the browser isn't giving any
+const HOVER_MS = 200; // pointing at the print: the receded marks come back
 const PLAY_MS = 11_000; // "Play the dive": the whole scroll, played by the page
 
 // ---- The one move the dive follows (chosen by scripts/snapshot-demo.mjs) -------------------------
@@ -103,6 +104,12 @@ function Stage({ at, className }: { at?: number; className: string }) {
     let frame = 0;
     let sawFrame = false;
     let noFrames = false;
+    // Pointing at the print brings every mark back to full strength, to read a game (0 → 1).
+    let hoverTo = 0;
+    let hoverFrom = 0;
+    let hoverStart = -1e9;
+    const hoverK = () =>
+      noFrames || reduced.matches ? hoverTo : lerp(hoverFrom, hoverTo, Math.min(1, (performance.now() - hoverStart) / HOVER_MS));
     // Reduced motion is read when it is needed, not kept in React state: the pinned stage then
     // stands still at the first screen's final picture (the CSS un-pins it, motion-reduce:).
     const reduced = window.matchMedia(REDUCED);
@@ -209,6 +216,16 @@ function Stage({ at, className }: { at?: number; className: string }) {
       // A mark bleeds in from the paper's own line colour to its full colour.
       const developed = (kind: ErrorKind, k: number) => (k >= 1 ? TICK_COLOR[kind] : mix(RIDGE, TICK_COLOR[kind], ease(k)));
       const TINT: Record<ErrorKind, string> = { inaccuracy: developed("inaccuracy", f.kind.inaccuracy), mistake: developed("mistake", f.kind.mistake), blunder: developed("blunder", f.kind.blunder) };
+      // The print shows the finding: once it is whole, the marks BEFORE the stretch the finding
+      // is about recede toward the paper, so that stretch stands as a lit band. A scroll (the
+      // dive needs the whole print) or the pointer over the print brings them back.
+      const BAND = BRACKET_PLY ?? 0;
+      const recede = BRACKET_PLY === null ? 0 : recedeAt(devT) * (1 - hoverK()) * (1 - seg(p, 0.01, 0.05));
+      const kept = 1 - (1 - RECEDED_STRENGTH) * recede;
+      const DIM: Record<ErrorKind, string> =
+        recede > 0.001
+          ? { inaccuracy: mix(RIDGE, TICK_COLOR.inaccuracy, kept), mistake: mix(RIDGE, TICK_COLOR.mistake, kept), blunder: mix(RIDGE, TICK_COLOR.blunder, kept) }
+          : TINT;
 
       // The other 199 games: a quiet line each, a mark per error.
       if (otherA > 0.01) {
@@ -224,7 +241,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
           ctx.fillRect(X, y, Math.min(row.len, DIVE_COLS) * cw, otherH);
           for (const er of row.errs) {
             if (er.ply > DIVE_COLS || f.kind[er.kind] <= 0) continue;
-            ctx.fillStyle = TINT[er.kind];
+            ctx.fillStyle = er.ply < BAND ? DIM[er.kind] : TINT[er.kind];
             ctx.fillRect(X + (er.ply - 1) * cw, y, Math.max(2.5, cw * 2), otherH);
           }
         }
@@ -248,7 +265,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
             const kind = dev > 0 ? k0 : null;
             if ((pass === 1) !== !!kind) continue;
             if (ply === PLY && c > 0) continue; // on its way to the board (the DOM square below)
-            ctx.fillStyle = kind ? (ply === PLY ? developed(kind, dev) : TINT[kind]) : mix(RIDGE, isPlayersPly(ply, row.color) ? TICK_COLOR.own : TICK_COLOR.opponent, a);
+            ctx.fillStyle = kind ? (ply === PLY ? developed(kind, dev) : ply < BAND ? DIM[kind] : TINT[kind]) : mix(RIDGE, isPlayersPly(ply, row.color) ? TICK_COLOR.own : TICK_COLOR.opponent, a);
             const w = kind ? Math.max(2.5 * (1 - a), cw * lerp(2, 1, a) - gap) : cw - gap;
             ctx.fillRect(x + gap / 2, yT, Math.max(0.5, w), rowHT);
           }
@@ -328,9 +345,11 @@ function Stage({ at, className }: { at?: number; className: string }) {
       // second line; under the words (phones) it goes below the print, above the caption.
       const under = hy + ROWS.length * pitch0 + 12;
       put("counterBox", hx, wide ? hy - 34 : under, 1 - seg(p, 0.02, 0.1));
-      put("finding", hx, hy - 56, devT >= DEVELOPED_MS + 300 ? 1 - seg(p, 0.01, 0.05) : 0);
+      put("finding", hx, hy - (wide ? 108 : 84), devT >= DEVELOPED_MS + 300 ? 1 - seg(p, 0.01, 0.05) : 0);
       const noteOn = devT >= DEVELOPED_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
-      put("note", Math.max(0, Math.min(W - 262, xT0 + 14)), hy + ROW * pitch0 + 16, noteOn);
+      // The note sits LEFT of the ringed move, over the receded part: the lit band stays clear,
+      // and the move reads as one instance of the finding above it.
+      put("note", Math.max(0, xT0 - 14 - 262), hy + ROW * pitch0 - 7, noteOn);
       const cueOn = (devT >= DEVELOPED_MS + 900 ? 1 : 0) * (1 - seg(p, 0, 0.04));
       // Right under the print, in the print's own column. It used to sit at the bottom of the
       // whole stage: on a short laptop screen that put it across the words, between the demo's
@@ -377,7 +396,8 @@ function Stage({ at, className }: { at?: number; className: string }) {
       style("checked", { opacity: seg(ph.check, 0.6, 1).toFixed(3) });
       show("ctas", ph.ctas);
 
-      if (devT !== Infinity && devT < DEVELOPED_MS + 1200) frame = requestAnimationFrame(fromFrame);
+      const hoverMoving = !noFrames && performance.now() - hoverStart < HOVER_MS;
+      if ((devT !== Infinity && devT < DEVELOPED_MS + 1200) || hoverMoving) frame = requestAnimationFrame(fromFrame);
     };
     const fromFrame = () => {
       sawFrame = true;
@@ -396,6 +416,27 @@ function Stage({ at, className }: { at?: number; className: string }) {
     };
 
     if (size()) render();
+    const setHover = (on: boolean) => {
+      const to = on ? 1 : 0;
+      if (to === hoverTo) return;
+      hoverFrom = hoverK();
+      hoverTo = to;
+      hoverStart = performance.now();
+      ask();
+    };
+    // A mouse only: a finger on the print is a scroll.
+    const onPointer = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      const r = st.getBoundingClientRect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+      setHover(x >= box.hx && y >= box.hy - 4 && y <= box.hy + ROWS.length * box.pitch0 + 4);
+    };
+    const offPointer = () => setHover(false);
+    if (at === undefined) {
+      st.addEventListener("pointermove", onPointer);
+      st.addEventListener("pointerleave", offPointer);
+    }
     window.addEventListener("resize", onResize);
     if (at === undefined) window.addEventListener("scroll", ask, { passive: true });
     reduced.addEventListener("change", onResize);
@@ -414,6 +455,8 @@ function Stage({ at, className }: { at?: number; className: string }) {
     return () => {
       cancelAnimationFrame(frame);
       timers.forEach((id) => window.clearTimeout(id));
+      st.removeEventListener("pointermove", onPointer);
+      st.removeEventListener("pointerleave", offPointer);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", ask);
       reduced.removeEventListener("change", onResize);
@@ -461,23 +504,22 @@ function Stage({ at, className }: { at?: number; className: string }) {
 {" "}
         · {demo.username}
       </p>
-      {/* The coach's finding, on the print it is about: code's label and code's two numbers. */}
+      {/* The coach's finding, over the lit band of the print it is about: code's two numbers in
+          the coach page's figure style, code's label under them. */}
       <p
         data-el="finding"
         className={`${layer} flex flex-col items-end text-right font-mono transition-opacity duration-500 motion-reduce:transition-none`}
         style={{ opacity: 0, visibility: "hidden" }}
       >
-        <span className="text-sm font-medium text-ink">
-          <span className="hidden font-normal text-graphite sm:inline">The coach found: </span>
-          {note.title}
+        <span className="leading-none whitespace-nowrap text-ink">
+          <span className="text-4xl leading-none tracking-tight xl:text-6xl">{STAT.value(note.stat.value)}</span>{" "}
+          <span className="text-sm text-graphite">vs your {STAT.baseline}</span>
         </span>
-        <span className="text-xs whitespace-nowrap text-graphite">
-          <span className="text-ink">{STAT.value(note.stat.value)}</span> against your <span className="text-ink">{STAT.baseline}</span> overall
-        </span>
+        <span className="pt-1 text-xs whitespace-nowrap text-ink xl:text-sm">{note.title}</span>
       </p>
       <div
         data-el="note"
-        className={`${layer} flex w-[262px] flex-col gap-0.5 border-l border-ink bg-bone/95 py-1 pl-3 transition-opacity duration-500 motion-reduce:transition-none`}
+        className={`${layer} flex w-[262px] flex-col items-end gap-0.5 border-r border-ink bg-bone/95 py-1 pr-3 text-right transition-opacity duration-500 motion-reduce:transition-none`}
         style={{ opacity: 0, visibility: "hidden" }}
       >
         <span className="font-mono text-xs text-graphite tabular-nums">

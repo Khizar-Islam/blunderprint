@@ -116,8 +116,9 @@ export interface StageBox {
 // under it; the stage is one screen tall, so the board shrinks to that once the words come.
 export function stageBox(W: number, H: number, wide: boolean, rows: number, fit = Infinity): StageBox {
   const hx = wide ? Math.round(W * 0.38) : 0;
-  // Above the print: the coach's finding (two lines) and the bracket it hangs from.
-  const hy = wide ? 132 : 60;
+  // Above the print: the coach's finding (its figure in large type, its label) and the bracket
+  // it hangs from.
+  const hy = wide ? 132 : 88;
   // Beside the words the print is as tall as the screen allows: rows 2 to 4 px apart (200 games
   // at 3 px need 600 px, so a short laptop screen gets 2). Under the words (phones) always 2.
   const pitch0 = wide ? Math.max(2, Math.min(4, Math.floor((H - hy - 64) / rows))) : 2;

@@ -1,5 +1,6 @@
 import { Types, type PipelineStage } from "mongoose";
 import { FEATURES_VERSION } from "../chess/features.js";
+import { sanFrom } from "../chess/sanFrom.js";
 import { Game, type Classification, type Color, type Speed } from "../db/models/game.js";
 import { Player } from "../db/models/player.js";
 
@@ -13,7 +14,10 @@ import { Player } from "../db/models/player.js";
 // Bump SUMMARY_VERSION when the response shape changes: a cached summary with another version
 // is ignored and rebuilt.
 // v2: squares split by the colour the player had (the heat board mirrors Black's ranks).
-export const SUMMARY_VERSION = 2;
+// v3 (UI pass, 20 Nov 2026): the dashboard links the print and the heat board. Each ribbon
+// carries its errors' squares, moves and costs (marks), each square its costliest move (worst),
+// and totals the average accuracy.
+export const SUMMARY_VERSION = 3;
 
 export interface SummaryFilters {
   color?: Color;
@@ -47,7 +51,25 @@ export interface Rate extends KindCounts {
   per100: number | null;
 }
 
-export type SquareCount = { square: string; total: number } & KindCounts;
+// The costliest error that landed on a square: enough to draw its position with the move
+// played and the better one. playedUci is null when the start square isn't certain from the
+// SAN alone (chess/sanFrom.ts); betterUci when the engine's better move isn't known.
+export interface WorstMove {
+  gameId: string;
+  ply: number;
+  kind: keyof KindCounts;
+  san: string;
+  winDrop: number;
+  fen: string; // before the move
+  playedUci: string | null;
+  betterUci: string | null;
+}
+
+// cost: the win-chance points lost on this square, all its errors added up.
+export type SquareCount = { square: string; total: number; cost: number; worst?: WorstMove } & KindCounts;
+
+// One error of a ribbon's game: [ply, destination square, the move (SAN), win-chance points lost].
+export type RibbonMark = [number, string, string, number];
 
 export interface Summary {
   version: number;
@@ -58,6 +80,7 @@ export interface Summary {
     analysed: number; // games with features (the base of every rate below)
     moves: number; // the player's moves in those games
     mistakes: KindCounts & { total: number };
+    accuracy: number | null; // average move accuracy over the analysed games, 0–100
     firstPlayedAt: string | null;
     lastPlayedAt: string | null;
   };
@@ -83,7 +106,8 @@ export interface Summary {
   // One per analysed game, newest first. classes: one letter per ply, both sides
   // (b best, g good, i inaccuracy, m mistake, x blunder); the client knows which plies are the
   // player's from color.
-  ribbons: { gameId: string; playedAt: string; color: Color; result: string; speed: Speed; classes: string }[];
+  // marks: the game's errors in ply order ([] until its features are extracted).
+  ribbons: { gameId: string; playedAt: string; color: Color; result: string; speed: Speed; classes: string; marks: RibbonMark[] }[];
 }
 
 // Also used for the evidence games' ribbons in coach reports (agent/reportStore.ts).
@@ -172,6 +196,7 @@ export function summaryPipeline(playerId: Types.ObjectId, filters: SummaryFilter
         opening: 1,
         "analysis.status": 1,
         "analysis.classifications": 1,
+        "analysis.accuracy": 1,
         features: 1,
       },
     },
@@ -185,6 +210,8 @@ export function summaryPipeline(playerId: Types.ObjectId, filters: SummaryFilter
               _id: null,
               games: { $sum: 1 },
               analysed: { $sum: { $cond: [HAS_FEATURES_EXPR, 1, 0] } },
+              // $avg skips the nulls, so only analysed games count.
+              accuracy: { $avg: { $cond: [HAS_FEATURES_EXPR, "$analysis.accuracy", null] } },
               firstPlayedAt: { $min: "$playedAt" },
               lastPlayedAt: { $max: "$playedAt" },
             },
@@ -293,6 +320,25 @@ export function summaryPipeline(playerId: Types.ObjectId, filters: SummaryFilter
         // dashboard can show White's games, Black's, or both with Black's ranks mirrored.
         squares: [...unwindMistakes, ...countKinds({ square: "$m.square", color: "$color" })],
 
+        // Per square and colour: the points lost there in total, and the one costliest error
+        // ($top keeps the first document in the sortBy order: biggest drop, then newest game,
+        // then earliest ply, so a tie always gives the same answer).
+        squareWorst: [
+          ...unwindMistakes,
+          {
+            $group: {
+              _id: { square: "$m.square", color: "$color" },
+              cost: { $sum: "$m.winDrop" },
+              worst: {
+                $top: {
+                  sortBy: { "m.winDrop": -1, playedAt: -1, _id: -1, "m.ply": 1 },
+                  output: { gameId: "$_id", ply: "$m.ply", kind: "$m.kind", san: "$m.san", winDrop: "$m.winDrop", fen: "$m.fen", best: "$m.best" },
+                },
+              },
+            },
+          },
+        ],
+
         // One ribbon per analysed game (ours or Lichess's), in the newest-first order of stage 2.
         // Classifications become a one-letter-per-ply string: ~80 bytes a game instead of an
         // array of words.
@@ -304,6 +350,14 @@ export function summaryPipeline(playerId: Types.ObjectId, filters: SummaryFilter
               color: 1,
               result: 1,
               speed: 1,
+              // The game's errors as small arrays (the field names 4 × per error would double it).
+              marks: {
+                $cond: [
+                  HAS_FEATURES_EXPR,
+                  { $map: { input: "$features.mistakes", as: "m", in: ["$$m.ply", "$$m.square", "$$m.san", "$$m.winDrop"] } },
+                  [],
+                ],
+              },
               classes: {
                 $reduce: {
                   input: "$analysis.classifications",
@@ -333,7 +387,7 @@ export function summaryPipeline(playerId: Types.ObjectId, filters: SummaryFilter
 }
 
 interface FacetResult {
-  totals: { games: number; analysed: number; firstPlayedAt: Date | null; lastPlayedAt: Date | null }[];
+  totals: { games: number; analysed: number; accuracy: number | null; firstPlayedAt: Date | null; lastPlayedAt: Date | null }[];
   openings: { _id: string | null; name: string | null; games: number; wins: number; draws: number; analysed: number; mistakes: number }[];
   moves: ({ _id: Speed; games: number; opening: number; middlegame: number; endgame: number } & Record<string, number>)[];
   byPhase: { _id: string; counts: Partial<KindCounts> }[];
@@ -341,7 +395,12 @@ interface FacetResult {
   byClock: { _id: string; counts: Partial<KindCounts> }[];
   byMoveNumber: { _id: string; counts: Partial<KindCounts> }[];
   squares: { _id: { square: string; color: Color }; counts: Partial<KindCounts> }[];
-  ribbons: { _id: Types.ObjectId; playedAt: Date; color: Color; result: string; speed: Speed; classes: string }[];
+  squareWorst: {
+    _id: { square: string; color: Color };
+    cost: number;
+    worst: { gameId: Types.ObjectId; ply: number; kind: keyof KindCounts; san: string; winDrop: number; fen: string; best?: string | null };
+  }[];
+  ribbons: { _id: Types.ObjectId; playedAt: Date; color: Color; result: string; speed: Speed; classes: string; marks: RibbonMark[] }[];
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -398,11 +457,36 @@ export function shapeSummary(raw: FacetResult, filters: SummaryFilters, readAt: 
   const byMoveNumber = MOVE_BUCKETS.map((b, i) => ({ bucket: b.label, ...rate(moveRows.get(b.label)?.counts, sum(`move_${i}`), analysed) }));
 
   const squareRows = new Map(raw.squares.map((r) => [`${r._id.color}:${r._id.square}`, r.counts]));
+  const worstRows = new Map(raw.squareWorst.map((r) => [`${r._id.color}:${r._id.square}`, r]));
   const squaresFor = (color: Color): SquareCount[] =>
     Array.from({ length: 64 }, (_, i) => {
       const square = `${FILES[i % 8]}${Math.floor(i / 8) + 1}`;
       const k = kindsOf(squareRows.get(`${color}:${square}`));
-      return { square, ...k, total: k.inaccuracy + k.mistake + k.blunder };
+      const w = worstRows.get(`${color}:${square}`);
+      // The move played as UCI: its start square from the position and the SAN (no replay),
+      // its end square is this square. Null when that isn't certain; the page then marks the
+      // square instead of drawing an arrow.
+      const from = w ? sanFrom(w.worst.fen, w.worst.san) : null;
+      return {
+        square,
+        ...k,
+        total: k.inaccuracy + k.mistake + k.blunder,
+        cost: round1(w?.cost ?? 0),
+        ...(w
+          ? {
+              worst: {
+                gameId: String(w.worst.gameId),
+                ply: w.worst.ply,
+                kind: w.worst.kind,
+                san: w.worst.san,
+                winDrop: round1(w.worst.winDrop),
+                fen: w.worst.fen,
+                playedUci: from ? `${from}${square}` : null,
+                betterUci: w.worst.best ?? null,
+              },
+            }
+          : {}),
+      };
     });
   const squares = { white: squaresFor("white"), black: squaresFor("black") };
 
@@ -420,6 +504,7 @@ export function shapeSummary(raw: FacetResult, filters: SummaryFilters, readAt: 
       analysed,
       moves,
       mistakes: { ...allKinds, total: allKinds.inaccuracy + allKinds.mistake + allKinds.blunder },
+      accuracy: typeof t?.accuracy === "number" ? round1(t.accuracy) : null,
       firstPlayedAt: t?.firstPlayedAt ? t.firstPlayedAt.toISOString() : null,
       lastPlayedAt: t?.lastPlayedAt ? t.lastPlayedAt.toISOString() : null,
     },
@@ -446,6 +531,7 @@ export function shapeSummary(raw: FacetResult, filters: SummaryFilters, readAt: 
       result: r.result,
       speed: r.speed,
       classes: r.classes,
+      marks: (r.marks ?? []).map(([ply, square, san, winDrop]) => [ply, square, san, round1(winDrop)] as RibbonMark),
     })),
   };
 }

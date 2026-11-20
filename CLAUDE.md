@@ -121,7 +121,7 @@ blunderprint/
 │  │  ├─ jobs/               (queue.ts, worker.ts, events.ts in-process job event bus,
 │  │  │                       errors.ts, setup.ts, handlers/ import.ts + extract.ts + report.ts + ask.ts)
 │  │  ├─ importers/          (chesscom.ts, lichess.ts, politeFetch.ts, normalize.ts)
-│  │  ├─ chess/              (fen.ts normalize, classify.ts win%, phase.ts Lichess Divider port,
+│  │  ├─ chess/              (fen.ts normalize, classify.ts win%, phase.ts Lichess Divider port, sanFrom.ts a move's start square from FEN + SAN,
 │  │  │                       features.ts per-game features; openings.ts in Stage 4)
 │  │  ├─ stats/summary.ts    (the dashboard's one $facet pipeline + response shape, SUMMARY_VERSION)
 │  │  ├─ agent/              (tools/*.ts incl. candidates.ts, loop.ts, verifier.ts, prompts.ts, schema.ts,
@@ -403,7 +403,14 @@ answers: { playerId, questionKey, question, analysedGamesHash, promptVersion, mo
   - Openings: grouped by the platform's ECO code for now; matching positions against `openings.epd` comes with Stage 4.
   - **Measured on Render** (EricRosen, 145 games in 28 s): ~302 ms a game for the first (cold) batch, then **135–220 ms a game** warm, including the Atlas write.
 - **Per player** (`stats/summary.ts`): ONE pipeline. `$match` (player + filters) → `$sort` in the index order → `$project` (no PGN or evals) → `$facet` with totals, openings by ECO, the move-count denominators, errors by phase, speed, clock bucket (a `$switch` so the edges match `clockBucket()` exactly) and move number, errors per square split by colour, and one ribbon per analysed game (classifications as one letter per ply).
-  - **Unfiltered**, it's cached in `players.summary` (with `SUMMARY_VERSION`, now 2). A rebuild only writes if no newer summary is stored, and `generatedAt` is stamped **before** the read, so a slow rebuild of older data never wins.
+  - **v3 (UI pass, 20 Nov 2026), so the dashboard can link the print and the heat board:**
+    - each ribbon has `marks`: one `[ply, square, san, winDrop]` per error of that game (`[]` until its features are extracted);
+    - each square has `cost` (the win-chance points lost there, added up) and `worst`: its costliest error (`gameId, ply, kind, san, winDrop, fen, playedUci, betterUci`), picked with `$top` (biggest drop, then the newer game);
+    - `totals.accuracy`: the average move accuracy over the analysed games.
+    - **`playedUci` comes from `chess/sanFrom.ts`:** features store the move as SAN and only its destination square, so the start square is worked out from the position and the SAN by piece geometry (no chess.js at request time: Render's CPU). It doesn't check pins, so when two pieces of a kind could reach the square and SAN names neither, it answers null and the page marks the square instead of drawing an arrow. Tested against chess.js on every legal move of seeded random games. On the demo player all 120 worst moves got a start square.
+    - **Measured on the demo player (200 games, 990 errors):** 58.4 KB of JSON → 105.3 KB; with Brotli at quality 4 (the setting that reproduces Render's sizes) 8.8 KB → 22.8 KB. Filtered (White + bullet): 33.5 → 56.0 KB, 4.8 → 11.4 KB. The marks are ~8 KB of that on the wire and the worst moves ~5.6 KB; it is real information (990 moves, 120 positions), and the tightest encoding tried (marks as one string per game, the worst move as an array pointing at its row) only got to 19.9 KB, so the readable shape stayed.
+    - No `FEATURES_VERSION` bump: everything is read from features already stored (a bump would change `analysedGamesHash` and make every report stale).
+  - **Unfiltered**, it's cached in `players.summary` (with `SUMMARY_VERSION`, now 3). A rebuild only writes if no newer summary is stored, and `generatedAt` is stamped **before** the read, so a slow rebuild of older data never wins.
   - **Filtered** (colour, speed, from/to), it runs live per request: at most 200 games.
   - `.explain()` (saved in `docs/explain/`): both use an IXSCAN on `{ playerId, playedAt, _id }`, with no COLLSCAN and no in-memory SORT (unfiltered 200 keys / 200 docs; filtered 91 / 91).
 - Explain each pipeline stage in comments. These pipelines are prime interview material.

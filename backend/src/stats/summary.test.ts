@@ -24,6 +24,7 @@ after(async () => {
 let alice: Types.ObjectId;
 let ids: Record<"g1" | "g2" | "g3" | "g4", string>;
 
+const F7_FEN = "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq -";
 const G1_CLASSES = ["good", "good", "good", "good", "inaccuracy", "good", "good", "good", "blunder", "good"];
 
 async function seed() {
@@ -31,7 +32,7 @@ async function seed() {
   alice = (await Player.create({ platform: "lichess", username: "Alice", usernameLower: "alice" }))._id;
   const bob = (await Player.create({ platform: "lichess", username: "Bob", usernameLower: "bob" }))._id;
   const base = { platform: "lichess", pgn: "1. e4 *", termination: "mate" };
-  const mistake = (ply: number, kind: string, phase: string, square: string, clockLeft: number) => ({
+  const mistake = (ply: number, kind: string, phase: string, square: string, clockLeft: number, more: object = {}) => ({
     ply,
     kind,
     phase,
@@ -41,6 +42,7 @@ async function seed() {
     timeTrouble: false,
     square,
     fen: "8/8/8/8/8/8/8/8 w - -",
+    ...more,
   });
   const [g1, g2, g3, g4] = await Game.insertMany([
     {
@@ -54,13 +56,14 @@ async function seed() {
       timeControl: "180+0",
       plies: 10, // White's moves 1–5
       opening: { eco: "C50", name: "Italian Game" },
-      analysis: { status: "done", classifications: G1_CLASSES },
+      analysis: { status: "done", classifications: G1_CLASSES, accuracy: 90 },
       features: {
         version: FEATURES_VERSION,
         division: { middle: 6 },
         mistakes: [
           mistake(5, "inaccuracy", "opening", "e4", 100), // 100/180 = 56%: over50
-          mistake(9, "blunder", "middlegame", "f7", 18), // exactly 10%: from10to25, not yet trouble
+          // exactly 10%: from10to25, not yet trouble. A real position, move and better move.
+          mistake(9, "blunder", "middlegame", "f7", 18, { san: "Bxf7+", winDrop: 45.26, best: "h5f7", fen: F7_FEN }),
         ],
         moveCounts: { opening: 3, middlegame: 2, endgame: 0, clock: { over50: 4, from25to50: 1, from10to25: 0, under10: 0 } },
       },
@@ -76,7 +79,7 @@ async function seed() {
       timeControl: "60+0",
       plies: 30, // Black's moves 1–15
       opening: { eco: "C50", name: "Italian Game: Two Knights" },
-      analysis: { status: "done", classifications: Array(30).fill("good") },
+      analysis: { status: "done", classifications: Array(30).fill("good"), accuracy: 80.5 },
       features: {
         version: FEATURES_VERSION,
         division: { middle: 10, end: 20 },
@@ -111,7 +114,7 @@ async function seed() {
       timeControl: "180+0",
       plies: 6,
       opening: { eco: "C50", name: "Italian Game" },
-      analysis: { status: "imported", classifications: ["best", "good", "inaccuracy", "good", "mistake", "blunder"] },
+      analysis: { status: "imported", classifications: ["best", "good", "inaccuracy", "good", "mistake", "blunder"], accuracy: 99 },
       features: { version: FEATURES_VERSION, error: "replay_failed" },
     },
     {
@@ -125,7 +128,7 @@ async function seed() {
       timeControl: "180+0",
       plies: 10,
       opening: { eco: "C50", name: "Italian Game" },
-      analysis: { status: "done", classifications: G1_CLASSES },
+      analysis: { status: "done", classifications: G1_CLASSES, accuracy: 90 },
       features: { version: FEATURES_VERSION, mistakes: [mistake(10, "blunder", "opening", "h8", 50)], moveCounts: { opening: 5, middlegame: 0, endgame: 0 } },
     },
   ]);
@@ -145,6 +148,7 @@ describe("computeSummary: every breakdown on known games", () => {
       analysed: 2,
       moves: 20,
       mistakes: { inaccuracy: 1, mistake: 1, blunder: 2, total: 4 },
+      accuracy: 85.3, // G1 90 and G2 80.5; G4's 99 has a replay error and doesn't count
       firstPlayedAt: "2026-09-01T00:00:00.000Z",
       lastPlayedAt: "2026-10-20T00:00:00.000Z",
     });
@@ -212,16 +216,70 @@ describe("computeSummary: every breakdown on known games", () => {
     assert.equal(white.length, 64);
     assert.equal(black.length, 64);
     // G1 (white): e4 inaccuracy, f7 blunder. G2 (black): e4 mistake, a1 blunder.
-    assert.deepEqual(white[28], { square: "e4", inaccuracy: 1, mistake: 0, blunder: 0, total: 1 });
-    assert.deepEqual(white[53], { square: "f7", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
-    assert.deepEqual(white[0], { square: "a1", inaccuracy: 0, mistake: 0, blunder: 0, total: 0 });
-    assert.deepEqual(black[0], { square: "a1", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
-    assert.deepEqual(black[28], { square: "e4", inaccuracy: 0, mistake: 1, blunder: 0, total: 1 });
+    const counts = ({ square, inaccuracy, mistake, blunder, total }: (typeof white)[number]) => ({ square, inaccuracy, mistake, blunder, total });
+    assert.deepEqual(counts(white[28]!), { square: "e4", inaccuracy: 1, mistake: 0, blunder: 0, total: 1 });
+    assert.deepEqual(counts(white[53]!), { square: "f7", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
+    assert.deepEqual(white[0], { square: "a1", inaccuracy: 0, mistake: 0, blunder: 0, total: 0, cost: 0 });
+    assert.deepEqual(counts(black[0]!), { square: "a1", inaccuracy: 0, mistake: 0, blunder: 1, total: 1 });
+    assert.deepEqual(counts(black[28]!), { square: "e4", inaccuracy: 0, mistake: 1, blunder: 0, total: 1 });
     assert.equal(black[63]!.square, "h8");
     assert.equal(black[63]!.total, 0, "bob's h8 blunder isn't alice's");
     const sum = (rows: typeof white) => rows.reduce((n, sq) => n + sq.total, 0);
     assert.equal(sum(white), 2);
     assert.equal(sum(black), 2);
+  });
+
+  it("squares: the points lost there and the costliest move, with the move played as UCI when it's certain", () => {
+    const { white, black } = s.squares;
+    assert.equal(white[53]!.cost, 45.3);
+    assert.deepEqual(white[53]!.worst, {
+      gameId: ids.g1,
+      ply: 9,
+      kind: "blunder",
+      san: "Bxf7+",
+      winDrop: 45.3,
+      fen: F7_FEN,
+      playedUci: "c4f7", // the bishop's square, read from the position
+      betterUci: "h5f7",
+    });
+    // The seed's empty board has no pawn to play "e4": no start square, and no better move stored.
+    assert.equal(white[28]!.cost, 20);
+    assert.deepEqual(white[28]!.worst, { gameId: ids.g1, ply: 5, kind: "inaccuracy", san: "e4", winDrop: 20, fen: "8/8/8/8/8/8/8/8 w - -", playedUci: null, betterUci: null });
+    assert.equal(black[28]!.worst!.gameId, ids.g2, "per colour: Black's e4 is G2's");
+    assert.equal(white[0]!.worst, undefined, "a square with no error has none");
+  });
+
+  it("the costliest move on a square: the biggest drop, a tie goes to the newer game", async () => {
+    const game = (sourceId: string, playedAt: string, winDrop: number) => ({
+      platform: "lichess",
+      pgn: "1. e4 *",
+      termination: "mate",
+      playerId: alice,
+      sourceId,
+      playedAt: new Date(playedAt),
+      color: "white",
+      result: "loss",
+      speed: "rapid",
+      timeControl: "600+0",
+      plies: 20,
+      analysis: { status: "done", classifications: ["good"] },
+      features: {
+        version: FEATURES_VERSION,
+        mistakes: [{ ply: 3, kind: "mistake", phase: "opening", san: "Nc3", winDrop, square: "c3", fen: "8/8/8/8/8/8/8/1N6 w - -" }],
+        moveCounts: { opening: 10, middlegame: 0, endgame: 0 },
+      },
+    });
+    const [older, newer, smaller] = await Game.insertMany([game("t1", "2026-08-01T00:00:00Z", 30), game("t2", "2026-08-02T00:00:00Z", 30), game("t3", "2026-08-03T00:00:00Z", 12.5)]);
+    try {
+      const c3 = (await computeSummary(alice)).squares.white[18]!;
+      assert.equal(c3.square, "c3");
+      assert.equal(c3.total, 3);
+      assert.equal(c3.cost, 72.5);
+      assert.equal(c3.worst!.gameId, String(newer!._id));
+      assert.equal(c3.worst!.playedUci, "b1c3");
+    } finally {
+      await Game.deleteMany({ _id: { $in: [older!._id, newer!._id, smaller!._id] } });
+    }
   });
 
   it("ribbons: every game with classifications (ours or imported), newest first, one letter per ply", () => {
@@ -231,6 +289,12 @@ describe("computeSummary: every breakdown on known games", () => {
     );
     assert.equal(s.ribbons[1]!.classes, "ggggigggxg"); // G1: inaccuracy on ply 5, blunder on ply 9
     assert.equal(s.ribbons[2]!.classes, "bgigmx");
+    // marks: each error's ply, square, move and points lost (rounded to one decimal).
+    assert.deepEqual(s.ribbons[1]!.marks, [
+      [5, "e4", "e4", 20],
+      [9, "f7", "Bxf7+", 45.3],
+    ]);
+    assert.deepEqual(s.ribbons[2]!.marks, [], "G4's features have a replay error: no marks");
     assert.deepEqual(
       { color: s.ribbons[0]!.color, result: s.ribbons[0]!.result, speed: s.ribbons[0]!.speed, playedAt: s.ribbons[0]!.playedAt },
       { color: "black", result: "loss", speed: "bullet", playedAt: "2026-10-10T00:00:00.000Z" },

@@ -58,6 +58,7 @@ test("the worker runs a job to done and saves its progress", async () => {
 test("a retryable error goes back to the queue; a fatal one fails and calls onFailed", async () => {
   const queue = createQueue({ backoffBaseMs: 60_000 });
   const failedKeys: string[] = [];
+  const onFailedRan = deferred();
   const handler: JobHandler = {
     async run({ job }) {
       if ((job.payload as { username: string }).username === "alice") throw new RetryableError("try later");
@@ -65,6 +66,7 @@ test("a retryable error goes back to the queue; a fatal one fails and calls onFa
     },
     async onFailed(job) {
       failedKeys.push(job.key);
+      onFailedRan.resolve();
     },
   };
   const retry = await queue.enqueue(input);
@@ -74,6 +76,12 @@ test("a retryable error goes back to the queue; a fatal one fails and calls onFa
   const requeued = await waitForJob(retry.job._id, (j) => j.status === "queued" && j.attempts === 1);
   assert.ok(requeued.runAfter.getTime() > Date.now());
   await waitForJob(fatal.job._id, (j) => j.status === "failed");
+  // The worker marks the job failed BEFORE it calls onFailed, so "failed" in the database doesn't
+  // mean onFailed has run yet (this read lost that race once, 20 Nov 2026). Wait for the call.
+  await Promise.race([
+    onFailedRan.promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("onFailed was never called")), 3_000).unref()),
+  ]);
   assert.deepEqual(failedKeys, ["import:lichess:nobody"]);
 });
 

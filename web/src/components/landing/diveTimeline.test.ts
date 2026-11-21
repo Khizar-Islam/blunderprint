@@ -129,6 +129,26 @@ describe("stageBox", () => {
     assert.equal(stageBox(350, 900, false, 200, 400).small, 350, "room to spare: it doesn't shrink");
     assert.equal(stageBox(350, 660, false, 200, 40).small, 96, "never smaller than a readable board");
   });
+  test("each height step of --print-top (globals.css) fits the masthead, the figure, 200 rows and the caption", () => {
+    // [screen height, --print-top at that height, the rows' pitch it must give]
+    const steps = [
+      [593, 136, 2],
+      [699, 136, 2],
+      [700, 176, 2],
+      [796, 132, 3],
+      [860, 196, 3],
+      [942, 196, 3],
+      [1064, 200, 4],
+      [1080, 200, 4],
+    ] as const;
+    for (const [H, top, pitch] of steps) {
+      const b = stageBox(1088, H, true, 200, Infinity, top);
+      assert.equal(b.hy, top, String(H));
+      assert.equal(b.pitch0, pitch, String(H));
+      assert.ok(b.hy + 200 * b.pitch0 + 12 + 28 <= H, `${H}: the caption fits under the print`);
+    }
+    assert.equal(stageBox(390, 844, false, 200, Infinity, 196).hy, 88, "under the words the print's top is fixed");
+  });
   test("side by side the board never shrinks", () => {
     const b = stageBox(1088, 900, true, 200);
     assert.equal(b.small, b.board);

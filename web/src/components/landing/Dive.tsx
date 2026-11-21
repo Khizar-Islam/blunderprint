@@ -19,7 +19,7 @@ import { errorKindAt, INK, isPlayersPly, moveName, RIDGE, TICK_COLOR } from "@/c
 import type { ErrorKind } from "@/lib/api";
 import { ANNOTATION, statText } from "@/lib/coach";
 import { demo } from "./demoData";
-import { DIVE_COLS, divePhases, diveRows, ease, lerp, resultWords, seg, splitFigure, stageBox, utcDay, xlerp } from "./diveTimeline";
+import { DIVE_COLS, divePhases, diveRows, ease, lerp, PRINT_TOP, resultWords, seg, splitFigure, stageBox, utcDay, xlerp } from "./diveTimeline";
 import { clockText, DEVELOPED_MS, heroFrame, RECEDED_STRENGTH, recedeAt } from "./heroTimeline";
 import { PrintLink } from "./PrintLink";
 
@@ -101,6 +101,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
     let dpr = 0;
     let box = stageBox(1, 1, false, ROWS.length);
     let capH = 0;
+    let findH = 84;
     let frame = 0;
     let sawFrame = false;
     let noFrames = false;
@@ -148,7 +149,9 @@ function Stage({ at, className }: { at?: number; className: string }) {
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const wide = window.matchMedia("(min-width: 1280px)").matches;
-      box = stageBox(W, H, wide, ROWS.length);
+      // Where the print starts beside the words: the page's own value, which also places the headline.
+      const top = parseFloat(getComputedStyle(st).getPropertyValue("--print-top")) || PRINT_TOP;
+      box = stageBox(W, H, wide, ROWS.length, Infinity, top);
       const words = part("words");
       const cap = part("boardCap");
       if (wide) {
@@ -166,6 +169,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
       style("finding", { width: `${W - box.hx}px` });
       style("board", { width: `${box.board}px`, height: `${box.board}px` });
       capH = cap?.offsetHeight ?? 44;
+      findH = part("finding")?.offsetHeight || findH;
       return true;
     };
 
@@ -345,7 +349,8 @@ function Stage({ at, className }: { at?: number; className: string }) {
       // second line; under the words (phones) it goes below the print, above the caption.
       const under = hy + ROWS.length * pitch0 + 12;
       put("counterBox", hx, wide ? hy - 34 : under, 1 - seg(p, 0.02, 0.1));
-      put("finding", hx, hy - (wide ? 108 : 84), devT >= DEVELOPED_MS + 300 ? 1 - seg(p, 0.01, 0.05) : 0);
+      // The finding stands on its bracket (11 px above the print), whatever its figure's size.
+      put("finding", hx, hy - 24 - findH, devT >= DEVELOPED_MS + 300 ? 1 - seg(p, 0.01, 0.05) : 0);
       const noteOn = devT >= DEVELOPED_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
       // The note sits LEFT of the ringed move, over the receded part: the lit band stays clear,
       // and the move reads as one instance of the finding above it.
@@ -501,8 +506,6 @@ function Stage({ at, className }: { at?: number; className: string }) {
         <span data-el="counter" data-dive-counter={FINAL_COUNTER} className="inline-block" style={{ minWidth: `${FINAL_COUNTER.length}ch` }}>
           0 games · 0 errors found
         </span>
-{" "}
-        · {demo.username}
       </p>
       {/* The coach's finding, over the lit band of the print it is about: code's two numbers in
           the coach page's figure style, code's label under them. */}
@@ -512,7 +515,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
         style={{ opacity: 0, visibility: "hidden" }}
       >
         <span className="leading-none whitespace-nowrap text-ink">
-          <span className="text-4xl leading-none tracking-tight xl:text-6xl">{STAT.value(note.stat.value)}</span>{" "}
+          <span className="text-4xl leading-none tracking-tight xl:text-[length:var(--print-figure)]">{STAT.value(note.stat.value)}</span>{" "}
           <span className="text-sm text-graphite">vs your {STAT.baseline}</span>
         </span>
         <span className="pt-1 text-xs whitespace-nowrap text-ink xl:text-sm">{note.title}</span>

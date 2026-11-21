@@ -28,7 +28,7 @@ export const KIND_MS: Record<ErrorKind, readonly [number, number]> = {
 export const TARGET_MS: readonly [number, number] = [2300, 2600];
 export const DEVELOPED_MS = TARGET_MS[1]; // the whole print is there
 export const RECEDE_MS: readonly [number, number] = [DEVELOPED_MS + 100, DEVELOPED_MS + 700];
-export const RECEDED_STRENGTH = 0.3; // how much colour a mark outside the finding's band keeps
+export const RECEDED_STRENGTH = 0.45; // how much colour a mark outside the finding's band keeps
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const span = (t: number, [from, to]: readonly [number, number]) => clamp01((t - from) / (to - from));

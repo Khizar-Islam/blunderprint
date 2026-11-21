@@ -20,7 +20,7 @@ import type { ErrorKind } from "@/lib/api";
 import { ANNOTATION, statText } from "@/lib/coach";
 import { demo } from "./demoData";
 import { DIVE_COLS, divePhases, diveRows, ease, lerp, PRINT_TOP, resultWords, seg, splitFigure, stageBox, utcDay, xlerp } from "./diveTimeline";
-import { clockText, DEVELOPED_MS, heroFrame, RECEDED_STRENGTH, recedeAt } from "./heroTimeline";
+import { clockText, DEVELOPED_MS, heroFrame, RECEDE_MS, RECEDED_STRENGTH, recedeAt } from "./heroTimeline";
 import { PrintLink } from "./PrintLink";
 
 const RUST = "#D9772B"; // hex, not CSS variables: SVG attributes and canvas fills
@@ -351,8 +351,13 @@ function Stage({ at, className }: { at?: number; className: string }) {
       const under = hy + ROWS.length * pitch0 + 12;
       put("counterBox", hx, wide ? hy - 44 : under, 1 - seg(p, 0.02, 0.1));
       // The finding stands on its bracket (11 px above the print), whatever its figure's size.
-      // It is there from the start (its entrance is CSS, hero-in); the print lights its band later.
-      put("finding", hx, hy - 24 - findH, 1 - seg(p, 0.01, 0.05));
+      // It arrives WITH its evidence: when the band starts to light and the bracket to draw, so
+      // the number lands as the payoff, not before the print has shown anything. Its rise is CSS
+      // (finding-in, globals.css), started here; a first screen that is simply final (reduced
+      // motion, no frames, a scrolled page) has it at once, with no rise.
+      const findingOn = devT >= RECEDE_MS[0];
+      if (findingOn && devT !== Infinity) part("finding")?.setAttribute("data-arrived", "");
+      put("finding", hx, hy - 24 - findH, findingOn ? 1 - seg(p, 0.01, 0.05) : 0);
       const noteOn = devT >= DEVELOPED_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
       // The note sits LEFT of the ringed move, over the receded part: the lit band stays clear,
       // and the move reads as one instance of the finding above it.
@@ -524,11 +529,11 @@ function Stage({ at, className }: { at?: number; className: string }) {
         className={`${layer} flex flex-col items-end text-right font-mono transition-opacity duration-200 motion-reduce:transition-none`}
         style={{ opacity: 0, visibility: "hidden" }}
       >
-        <span className="hero-in leading-none whitespace-nowrap text-ink [--i:5]">
+        <span className="finding-in leading-none whitespace-nowrap text-ink">
           <span className="text-4xl leading-none tracking-tight xl:text-[length:var(--print-figure)]">{STAT.value(note.stat.value)}</span>{" "}
           <span className="text-sm text-graphite">vs your {STAT.baseline}</span>
         </span>
-        <span className="hero-in pt-1 text-xs whitespace-nowrap text-ink [--i:5] xl:text-sm">{note.title}</span>
+        <span className="finding-in pt-1 text-xs whitespace-nowrap text-ink xl:text-sm">{note.title}</span>
       </p>
       <div
         data-el="note"

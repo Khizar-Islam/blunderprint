@@ -254,6 +254,12 @@ body {
 :root[data-hero-seen] .hero-in {
   animation: none;
 }
+/* The coach's figure and its label are not part of that stagger: they arrive with their evidence,
+   when the print's band starts to light (Dive.tsx sets data-arrived then), with the same rise. */
+[data-arrived] > .finding-in {
+  --bp-rise: 10px;
+  animation: bp-rise 240ms var(--ease-out-quint) backwards;
+}
 /* Under 640 px the headline is 36 px and the paragraph under it is the larger text, so THERE the
    paragraph is the Largest Contentful Paint: it has no entrance either (measured: with one, a
    phone's LCP moved from the first paint to the end of the paragraph's fade). */
@@ -278,6 +284,7 @@ body {
   .anim-wipe,
   .figure-in,
   .hero-in,
+  .finding-in,
   .seg-indicator,
   .motion-slide {
     animation: none !important;

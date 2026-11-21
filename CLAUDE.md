@@ -149,7 +149,7 @@ blunderprint/
 │  │                          opsStatus (npm run ops:status))
 │  └─ .env.example
 ├─ docs/explain/             (saved .explain() output for the README)
-├─ docs/img/                 (the README's screenshots, from web/scripts/ui-readme-shots.mjs; demo.gif recorded by hand)
+├─ docs/img/                 (the README's screenshots, from web/scripts/ui-readme-shots.mjs; demo.gif, the 40 s walkthrough at the top of the README, from web/scripts/record-demo.mjs + ffmpeg, commands in its header)
 ├─ web/
 │  ├─ src/app/               (/, /p/[platform]/[username], /p/.../game/[id] (?ply=N), /p/.../coach;
 │  │                          not-found.tsx the 404 page, error.tsx the page shown when a page throws (Stage 8);
@@ -196,6 +196,8 @@ blunderprint/
 │  │                          ui-games-frame: the games list's render frame at 4× CPU (Stage 8 chunk D);
 │  │                          ui-csp: Content-Security-Policy violations on every page + one engine run (§13);
 │  │                          ui-contrast: the contrast of all visible text against WCAG AA (§12);
+│  │                          record-demo: the README's demo GIF, a scripted walkthrough with a drawn cursor, takes the site URL,
+│  │                          safe on live: clicks only a chip the API says is answered, else it stops;
 │  │                          ui-readme-shots: the README's screenshots → docs/img/, takes the site URL,
 │  │                          safe on live: clicks only a pre-answered chip, never types a question)
 │  ├─ public/pieces/         (committed: our own copy of the 12 piece drawings, for the small view-only boards)

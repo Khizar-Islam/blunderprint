@@ -2,15 +2,13 @@
 
 [![CI](https://github.com/Khizar-Islam/blunderprint/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Khizar-Islam/blunderprint/actions/workflows/ci.yml)
 
+![A 40-second walk through Blunderprint: 200 games develop into a print and the coach's finding lights up on it; scrolling follows one blunder down to its position and the coach's checked sentence; the print is carried onto the dashboard, where pointing at a square of the heat board lights its errors in the print; then the coach report and an answered question](docs/img/demo.gif)
+
 **An AI chess coach that shows its work.** Type any Chess.com or Lichess username. Blunderprint imports the player's newest 200 games, finds the mistakes with a chess engine running in your browser, and then an AI coach agent investigates the data with tools and explains the mistakes that keep *recurring*, with positions from the player's own games. Code, not the AI, writes every number and checks every claim.
 
 **Live:** [blunderprint.vercel.app](https://blunderprint.vercel.app) · no sign-in · [open the demo dashboard](https://blunderprint.vercel.app/p/lichess/DrNykterstein) · [read the demo coach report](https://blunderprint.vercel.app/p/lichess/DrNykterstein/coach)
 
 The API runs on a free tier that sleeps after 15 minutes, so the first request can take up to a minute. The pages show a "Waking the server up…" counter while it starts.
-
-<!-- DEMO GIF: record it with the shot list (60 s), save it as docs/img/demo.gif, then replace the
-     landing screenshot below with:  ![The 60-second demo](docs/img/demo.gif) -->
-![The landing page: 200 games as a print, with one move marked; scrolling follows that move down to its position and the coach's sentence about it](docs/img/landing.png)
 
 ## Contents
 

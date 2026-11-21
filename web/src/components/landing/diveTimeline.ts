@@ -115,8 +115,8 @@ export interface StageBox {
 // `fit` (phones): the tallest board that still leaves room for the caption and the coach's words
 // under it; the stage is one screen tall, so the board shrinks to that once the words come.
 // `top` (beside the words): where the print starts, from the page's own --print-top
-// (globals.css), which also places the headline, so the two start on one line.
-export const PRINT_TOP = 136;
+// (globals.css), which the headline's place is worked out from too.
+export const PRINT_TOP = 140;
 export function stageBox(W: number, H: number, wide: boolean, rows: number, fit = Infinity, top = PRINT_TOP): StageBox {
   const hx = wide ? Math.round(W * 0.38) : 0;
   // Above the print: the coach's finding (its figure in large type, its label) and the bracket

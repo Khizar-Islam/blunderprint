@@ -10,8 +10,12 @@ import { PrintLink } from "./PrintLink";
 // - The masthead is one ruled line across the whole page, on the page's two columns: the name
 //   over the words, what it is over the print's left edge (38%, diveTimeline.ts stageBox), the
 //   source at the right edge.
-// - From 1280 px the headline's capitals start level with the print's top edge (--print-top,
-//   globals.css: the dive's canvas reads the same value).
+// - The headline, the paragraph and the rows are ONE block (24 px, then 32 px between them).
+//   From 1280 px its top (the headline's capitals) is level with the top of the right column's
+//   first line, the coach's figure (--hero-top, globals.css, worked out from the same values
+//   that place the print).
+// - The three rows are one style: serif 20 px in ink, one arrow on one right edge. The first
+//   leads by its place and its sub-line, not by its size.
 // - Two ways in, the demo first: most visitors have no chess account, so "See a real one" is
 //   the page's main action; a visitor's own games are one ruled line under it.
 
@@ -36,22 +40,22 @@ export function HeroWords() {
         </a>
       </header>
 
-      <h1 className="mt-7 font-display text-4xl leading-[1.05] tracking-tight text-ink sm:text-6xl xl:mt-[calc(var(--print-top)-44px-5px)]">
+      <h1 className="mt-8 font-display text-4xl leading-[1.05] tracking-tight text-ink sm:text-6xl xl:mt-[var(--hero-top)]">
         Your mistakes <br />
         leave a print.
       </h1>
-      <p className="mt-4 max-w-md font-display text-xl leading-[1.4] text-pretty text-graphite xl:mt-5 xl:max-w-none">
+      <p className="mt-6 max-w-md font-display text-xl leading-[1.4] text-pretty text-graphite xl:max-w-none">
         An engine in your browser finds your mistakes. A coach finds the ones you keep making, and shows you where.
       </p>
 
-      <div className="mt-6 flex max-w-md flex-col border-t border-ink xl:max-w-none">
+      <div className="mt-8 flex max-w-md flex-col border-t border-ink xl:max-w-none">
         {/* A click carries the print beside it onto the dashboard's (PrintLink.tsx). */}
         <PrintLink
           platform={demo.platform}
           username={demo.username}
-          className="group grid grid-cols-[1fr_auto] items-center gap-x-4 rounded-sm border-b border-ink/25 py-3 transition-colors hover:border-ink active:scale-[0.99]"
+          className="group grid grid-cols-[1fr_auto] items-center gap-x-4 rounded-sm border-b border-ink/25 py-2.5 transition-colors hover:border-ink active:scale-[0.99]"
         >
-          <span className="font-display text-2xl leading-tight text-ink">No account? See a real one</span>
+          <span className="font-display text-xl leading-tight text-ink">No account? See a real one</span>
           <Arrow className="row-span-2 text-ink" />
           <span className="font-mono text-xs text-graphite">
             {demo.username}&apos;s print · {GAMES} public games
@@ -59,10 +63,10 @@ export function HeroWords() {
         </PrintLink>
         <Link
           href={`${base}/coach`}
-          className="group flex min-h-11 items-center justify-between gap-x-4 rounded-sm border-b border-ink/25 text-base text-ink transition-colors hover:border-ink active:scale-[0.99]"
+          className="group flex min-h-12 items-center justify-between gap-x-4 rounded-sm border-b border-ink/25 font-display text-xl text-ink transition-colors hover:border-ink active:scale-[0.99]"
         >
           Read what the coach found in it
-          <Arrow className="text-graphite" />
+          <Arrow className="text-ink" />
         </Link>
         <PlayerSearch />
       </div>

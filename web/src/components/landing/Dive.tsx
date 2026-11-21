@@ -345,10 +345,11 @@ function Stage({ at, className }: { at?: number; className: string }) {
         const text = `${f.games} games · ${found.toLocaleString("en")} errors found`;
         if (counter.textContent !== text) counter.textContent = text;
       }
-      // Beside the words the counter sits over the print's left end, level with the finding's
-      // second line; under the words (phones) it goes below the print, above the caption.
+      // Beside the words the counter sits over the print's left end, on the finding's label's own
+      // line (same size, same 20 px line box, so one baseline); under the words (phones) it goes
+      // below the print, above the caption.
       const under = hy + ROWS.length * pitch0 + 12;
-      put("counterBox", hx, wide ? hy - 34 : under, 1 - seg(p, 0.02, 0.1));
+      put("counterBox", hx, wide ? hy - 44 : under, 1 - seg(p, 0.02, 0.1));
       // The finding stands on its bracket (11 px above the print), whatever its figure's size.
       put("finding", hx, hy - 24 - findH, devT >= DEVELOPED_MS + 300 ? 1 - seg(p, 0.01, 0.05) : 0);
       const noteOn = devT >= DEVELOPED_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
@@ -501,7 +502,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
       <canvas ref={canvas} className="absolute inset-0 h-full w-full" aria-hidden="true" />
 
       {/* The first screen's labels. */}
-      <p data-el="counterBox" className={`${layer} font-mono text-xs whitespace-nowrap text-graphite tabular-nums`}>
+      <p data-el="counterBox" className={`${layer} font-mono text-xs whitespace-nowrap text-graphite tabular-nums xl:text-sm`}>
         {/* As wide as its final text from the start (mono: one ch per character), so the name after it never moves. */}
         <span data-el="counter" data-dive-counter={FINAL_COUNTER} className="inline-block" style={{ minWidth: `${FINAL_COUNTER.length}ch` }}>
           0 games · 0 errors found

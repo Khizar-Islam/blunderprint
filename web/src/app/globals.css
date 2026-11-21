@@ -201,17 +201,22 @@ body {
 }
 
 /* The landing's first screen, beside the words (from 1280 px): where the print starts, and how
-   large the coach's figure over it is. ONE value places the headline (HeroWords.tsx) and the
-   print (the dive's canvas reads it, Dive.tsx), so their top edges are on one line. It steps
-   with the screen's height so that the masthead, the figure and 200 rows all fit:
-     under 700 px   rows 2 px apart (400 px), the figure at 36 px under the masthead
-     from 700 px    the same print, lower, with the figure at 60 px
-     from 796 px    rows 3 px apart (600 px) fit, with the figure at 36 px again
-     from 860 px    … and with the figure at 60 px
-     from 1064 px   rows 4 px apart (800 px) */
+   large the coach's figure over it is. The dive's canvas reads --print-top (Dive.tsx), and the
+   headline's top margin is worked out from the same two values (--hero-top), so the headline's
+   capitals start level with the top of the figure's digits: the two columns begin on one line.
+   Two settings, stepped with the screen's height so that the masthead, the figure and 200 rows
+   all fit:
+     under 700 px   compact: rows 2 px apart (400 px), the figure at 36 px
+     from 700 px    roomy: the same print, lower, with the figure at 60 px
+     from 800 px    compact again: rows 3 px apart (600 px) fit
+     from 840 px    roomy, rows 3 px apart; from 1040 px the rows are 4 px apart (stageBox)
+   --hero-top, measured in stills: the top of the figure's digits is 49.5 px + 0.825 of its size
+   above the print (its line, its label, the bracket); the masthead is 44 px, and the capitals'
+   tops are 2 px inside the headline's box. */
 [data-dive] {
-  --print-top: 136px;
+  --print-top: 140px;
   --print-figure: 2.25rem;
+  --hero-top: calc(var(--print-top) - var(--print-figure) * 0.825 - 95.3px);
 }
 @media (min-width: 1280px) and (min-height: 700px) {
   [data-dive] {
@@ -219,21 +224,16 @@ body {
     --print-figure: 3.75rem;
   }
 }
-@media (min-width: 1280px) and (min-height: 796px) {
+@media (min-width: 1280px) and (min-height: 800px) {
   [data-dive] {
-    --print-top: 132px;
+    --print-top: 136px;
     --print-figure: 2.25rem;
   }
 }
-@media (min-width: 1280px) and (min-height: 860px) {
+@media (min-width: 1280px) and (min-height: 840px) {
   [data-dive] {
-    --print-top: 196px;
+    --print-top: 176px;
     --print-figure: 3.75rem;
-  }
-}
-@media (min-width: 1280px) and (min-height: 1064px) {
-  [data-dive] {
-    --print-top: 200px;
   }
 }
 

@@ -132,14 +132,17 @@ describe("stageBox", () => {
   test("each height step of --print-top (globals.css) fits the masthead, the figure, 200 rows and the caption", () => {
     // [screen height, --print-top at that height, the rows' pitch it must give]
     const steps = [
-      [593, 136, 2],
-      [699, 136, 2],
+      [593, 140, 2],
+      [699, 140, 2],
       [700, 176, 2],
-      [796, 132, 3],
-      [860, 196, 3],
-      [942, 196, 3],
-      [1064, 200, 4],
-      [1080, 200, 4],
+      [799, 176, 2],
+      [800, 136, 3],
+      [839, 136, 3],
+      [840, 176, 3],
+      [897, 176, 3],
+      [942, 176, 3],
+      [1040, 176, 4],
+      [1080, 176, 4],
     ] as const;
     for (const [H, top, pitch] of steps) {
       const b = stageBox(1088, H, true, 200, Infinity, top);

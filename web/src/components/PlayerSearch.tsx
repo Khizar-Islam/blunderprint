@@ -76,7 +76,7 @@ export function PlayerSearch() {
         spellCheck={false}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : undefined}
-        className="min-h-11 min-w-0 flex-1 rounded-none bg-transparent font-mono text-base text-ink placeholder:font-sans placeholder:text-graphite/70 placeholder:transition-colors hover:placeholder:text-ink"
+        className="min-h-12 min-w-0 flex-1 rounded-none bg-transparent font-display text-xl text-ink placeholder:text-graphite/70 placeholder:transition-colors hover:placeholder:text-ink"
       />
     </>
   );

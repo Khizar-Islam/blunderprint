@@ -44,8 +44,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
+    // suppressHydrationWarning: the landing's inline script may set data-hero-seen on this
+    // element before React starts (HeroWords.tsx); it covers this element's attributes only.
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${newsreader.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col font-sans">

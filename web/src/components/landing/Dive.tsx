@@ -351,7 +351,8 @@ function Stage({ at, className }: { at?: number; className: string }) {
       const under = hy + ROWS.length * pitch0 + 12;
       put("counterBox", hx, wide ? hy - 44 : under, 1 - seg(p, 0.02, 0.1));
       // The finding stands on its bracket (11 px above the print), whatever its figure's size.
-      put("finding", hx, hy - 24 - findH, devT >= DEVELOPED_MS + 300 ? 1 - seg(p, 0.01, 0.05) : 0);
+      // It is there from the start (its entrance is CSS, hero-in); the print lights its band later.
+      put("finding", hx, hy - 24 - findH, 1 - seg(p, 0.01, 0.05));
       const noteOn = devT >= DEVELOPED_MS + 600 ? 1 - seg(p, 0.03, 0.12) : 0;
       // The note sits LEFT of the ringed move, over the receded part: the lit band stays clear,
       // and the move reads as one instance of the finding above it.
@@ -458,7 +459,15 @@ function Stage({ at, className }: { at?: number; className: string }) {
     ];
     // The words' height is only right once the web fonts are in.
     void document.fonts?.ready.then(onResize);
+    // The entrance (hero-in, globals.css) plays once per visit: after it, <html> says so, and a
+    // return to this page inside the app shows the first screen at once.
+    const seen = () => {
+      if (at === undefined) document.documentElement.dataset.heroSeen = "1";
+    };
+    timers.push(window.setTimeout(seen, 1000));
     return () => {
+      // Left before the timer (not React's instant dev re-mount): it has still been seen.
+      if (performance.now() - t0 > 100) seen();
       cancelAnimationFrame(frame);
       timers.forEach((id) => window.clearTimeout(id));
       st.removeEventListener("pointermove", onPointer);
@@ -504,7 +513,7 @@ function Stage({ at, className }: { at?: number; className: string }) {
       {/* The first screen's labels. */}
       <p data-el="counterBox" className={`${layer} font-mono text-xs whitespace-nowrap text-graphite tabular-nums xl:text-sm`}>
         {/* As wide as its final text from the start (mono: one ch per character), so the name after it never moves. */}
-        <span data-el="counter" data-dive-counter={FINAL_COUNTER} className="inline-block" style={{ minWidth: `${FINAL_COUNTER.length}ch` }}>
+        <span data-el="counter" data-dive-counter={FINAL_COUNTER} className="hero-in inline-block [--i:6]" style={{ minWidth: `${FINAL_COUNTER.length}ch` }}>
           0 games · 0 errors found
         </span>
       </p>
@@ -512,14 +521,14 @@ function Stage({ at, className }: { at?: number; className: string }) {
           the coach page's figure style, code's label under them. */}
       <p
         data-el="finding"
-        className={`${layer} flex flex-col items-end text-right font-mono transition-opacity duration-500 motion-reduce:transition-none`}
+        className={`${layer} flex flex-col items-end text-right font-mono transition-opacity duration-200 motion-reduce:transition-none`}
         style={{ opacity: 0, visibility: "hidden" }}
       >
-        <span className="leading-none whitespace-nowrap text-ink">
+        <span className="hero-in leading-none whitespace-nowrap text-ink [--i:5]">
           <span className="text-4xl leading-none tracking-tight xl:text-[length:var(--print-figure)]">{STAT.value(note.stat.value)}</span>{" "}
           <span className="text-sm text-graphite">vs your {STAT.baseline}</span>
         </span>
-        <span className="pt-1 text-xs whitespace-nowrap text-ink xl:text-sm">{note.title}</span>
+        <span className="hero-in pt-1 text-xs whitespace-nowrap text-ink [--i:5] xl:text-sm">{note.title}</span>
       </p>
       <div
         data-el="note"

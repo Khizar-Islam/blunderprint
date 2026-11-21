@@ -19,22 +19,28 @@ import { PrintLink } from "./PrintLink";
 // - Two ways in, the demo first: most visitors have no chess account, so "See a real one" is
 //   the page's main action; a visitor's own games are one ruled line under it.
 
+// - The entrance (hero-in, globals.css): everything but the headline fades in and rises, in the
+//   order of --i. The script below runs before the first paint: a page reached with the back or
+//   forward button is shown as it was left, with no entrance.
+
 const REPO = "https://github.com/Khizar-Islam/blunderprint";
+const SEEN_ON_BACK = `try{if(performance.getEntriesByType("navigation")[0].type==="back_forward")document.documentElement.dataset.heroSeen="1"}catch(e){}`;
 const GAMES = demo.analysedGames;
 
 export function HeroWords() {
   const base = `/p/${demo.platform}/${encodeURIComponent(demo.username)}`;
   return (
     <div className="flex flex-col pb-10">
+      <script dangerouslySetInnerHTML={{ __html: SEEN_ON_BACK }} />
       {/* 294.12% = the whole page from a column that is 34% of it. */}
       <header className="flex h-11 items-end justify-between gap-4 border-b border-ink pb-2 xl:grid xl:w-[294.12%] xl:grid-cols-[38%_1fr_auto] xl:gap-0">
         <span className="font-display text-xl leading-none text-ink">Blunderprint</span>
-        <span className="font-mono text-xs text-graphite">
+        <span className="hero-in font-mono text-xs text-graphite [--i:4]">
           An AI chess coach<span className="hidden sm:inline"> for your own games</span>
         </span>
         <a
           href={REPO}
-          className="-my-3 hidden min-h-11 items-end rounded pb-3 font-mono text-xs text-graphite underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink active:scale-[0.97] xl:inline-flex"
+          className="hero-in -my-3 hidden min-h-11 [--i:4] items-end rounded pb-3 font-mono text-xs text-graphite underline decoration-transparent underline-offset-4 transition-colors hover:text-ink hover:decoration-ink active:scale-[0.97] xl:inline-flex"
         >
           Source
         </a>
@@ -44,7 +50,7 @@ export function HeroWords() {
         Your mistakes <br />
         leave a print.
       </h1>
-      <p className="mt-6 max-w-md font-display text-xl leading-[1.4] text-pretty text-graphite xl:max-w-none">
+      <p className="hero-in hero-in-from-sm mt-6 max-w-md font-display text-xl leading-[1.4] text-pretty text-graphite xl:max-w-none">
         An engine in your browser finds your mistakes. A coach finds the ones you keep making, and shows you where.
       </p>
 
@@ -53,7 +59,7 @@ export function HeroWords() {
         <PrintLink
           platform={demo.platform}
           username={demo.username}
-          className="group grid grid-cols-[1fr_auto] items-center gap-x-4 rounded-sm border-b border-ink/25 py-2.5 transition-colors hover:border-ink active:scale-[0.99]"
+          className="hero-in group grid grid-cols-[1fr_auto] [--i:1] items-center gap-x-4 rounded-sm border-b border-ink/25 py-2.5 transition-colors hover:border-ink active:scale-[0.99]"
         >
           <span className="font-display text-xl leading-tight text-ink">No account? See a real one</span>
           <Arrow className="row-span-2 text-ink" />
@@ -63,12 +69,14 @@ export function HeroWords() {
         </PrintLink>
         <Link
           href={`${base}/coach`}
-          className="group flex min-h-12 items-center justify-between gap-x-4 rounded-sm border-b border-ink/25 font-display text-xl text-ink transition-colors hover:border-ink active:scale-[0.99]"
+          className="hero-in group flex min-h-12 items-center justify-between [--i:2] gap-x-4 rounded-sm border-b border-ink/25 font-display text-xl text-ink transition-colors hover:border-ink active:scale-[0.99]"
         >
           Read what the coach found in it
           <Arrow className="text-ink" />
         </Link>
-        <PlayerSearch />
+        <div className="hero-in [--i:3]">
+          <PlayerSearch />
+        </div>
       </div>
     </div>
   );

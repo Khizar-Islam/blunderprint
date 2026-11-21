@@ -237,6 +237,32 @@ body {
   }
 }
 
+/* The landing's entrance: everything on the first screen except the headline fades in and rises
+   10 px, one after another (--i is the element's place in the order; 60 ms apart, 240 ms each,
+   so the last of seven ends at 600 ms, while the print is still developing).
+   - The headline has no entrance: it is the page's Largest Contentful Paint and must be painted
+     at full opacity in the first frame (on a phone that is the paragraph: see below).
+   - CSS only, and only a `from`: the final state is each element's normal style. An element at
+     opacity 0 can still be clicked, tabbed to and typed in, so the form works mid-entrance.
+   - Once per visit: the page sets data-hero-seen on <html> after the entrance (Dive.tsx: it
+     stays for in-app navigations) and before first paint on a back/forward load
+     (HeroWords.tsx's inline script), and then nothing animates. */
+@utility hero-in {
+  --bp-rise: 10px;
+  animation: bp-rise 240ms var(--ease-out-quint) calc(var(--i, 0) * 60ms) backwards;
+}
+:root[data-hero-seen] .hero-in {
+  animation: none;
+}
+/* Under 640 px the headline is 36 px and the paragraph under it is the larger text, so THERE the
+   paragraph is the Largest Contentful Paint: it has no entrance either (measured: with one, a
+   phone's LCP moved from the first paint to the end of the paragraph's fade). */
+@media not (min-width: 40rem) {
+  .hero-in-from-sm {
+    animation: none;
+  }
+}
+
 /* The landing page (the one with the dive, data-dive) skips the route fade of app/template.tsx.
    A text first painted at opacity 0 is never counted as the page's Largest Contentful Paint,
    and the landing's headline, which the server sends, must be it: with the fade, the "largest"
@@ -251,6 +277,7 @@ body {
   .anim-rise,
   .anim-wipe,
   .figure-in,
+  .hero-in,
   .seg-indicator,
   .motion-slide {
     animation: none !important;
